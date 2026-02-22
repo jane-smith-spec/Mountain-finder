@@ -30,15 +30,11 @@ export default function ARScreen() {
 
   const { heading, available: compassAvailable } = useCompass();
 
-  const {
-    peaks,
-    horizonProfile,
-    loading: terrainLoading,
-    error: terrainError,
-  } = useTerrainData(
+  const { peaks, horizonProfile, status: terrainStatus } = useTerrainData(
     location?.latitude ?? null,
     location?.longitude ?? null,
     location?.altitude ?? null,
+    location?.accuracy ?? null,
   );
 
   // Request camera permission on mount
@@ -87,22 +83,31 @@ export default function ARScreen() {
       {/* Layer 3 — Status badges */}
       <SafeAreaView style={StyleSheet.absoluteFill} pointerEvents="none">
 
-        {/* Loading indicator */}
-        {(locationLoading || terrainLoading) && (
+        {/* Loading indicator with progress */}
+        {(locationLoading || terrainStatus.loading) && (
           <View style={styles.loadingBadge}>
             <ActivityIndicator size="small" color="#00E5FF" />
             <Text style={styles.loadingText}>
-              {locationLoading ? 'Acquiring GPS…' : 'Loading terrain data…'}
+              {locationLoading
+                ? 'Acquiring GPS…'
+                : `Loading terrain… ${terrainStatus.progress}%`}
             </Text>
           </View>
         )}
 
         {/* Terrain fetch error */}
-        {terrainError ? (
+        {terrainStatus.error ? (
           <View style={[styles.badge, styles.errorBadge]}>
-            <Text style={styles.badgeText}>⚠ {terrainError}</Text>
+            <Text style={styles.badgeText}>⚠ {terrainStatus.error}</Text>
           </View>
         ) : null}
+
+        {/* Non-fatal warnings (poor GPS, partial data, etc.) */}
+        {!terrainStatus.loading && terrainStatus.warnings.map((w, i) => (
+          <View key={i} style={[styles.badge, styles.warningBadge]}>
+            <Text style={styles.badgeText}>{w}</Text>
+          </View>
+        ))}
 
         {/* No compass warning */}
         {!compassAvailable ? (

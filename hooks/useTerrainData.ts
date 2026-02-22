@@ -1,25 +1,23 @@
 /**
  * useTerrainData.ts
  *
- * Orchestrates all terrain/peak data fetching.  When the user's position
- * changes by more than REFETCH_THRESHOLD_KM the hook:
- *   1. Fetches observer elevation (falls back to GPS altitude).
- *   2. Fetches nearby peaks from OpenStreetMap (Overpass API).
- *   3. Fetches a 360° grid of elevation samples (OpenTopoData).
- *   4. Derives a horizon profile from those samples.
- *   5. Computes each peak's bearing, elevation angle, distance, and visibility.
+ * Orchestrates terrain and peak data fetching.
+ *
+ * Uses horizonCalculator.computeHorizon for the full terrain pipeline
+ * (elevation fetch → LoS sweep → refraction-corrected horizon profile)
+ * and peakService.fetchNearbyPeaks for OpenStreetMap peak data.
+ *
+ * Data is re-fetched only when the user moves more than REFETCH_THRESHOLD_KM.
+ * In-flight requests are aborted when a new fetch is triggered or the
+ * component unmounts, preventing stale updates.
  */
 
-import { useState, useEffect, useRef } from 'react';
-import {
-  fetchHorizonElevations,
-  fetchObserverElevation,
-} from '../services/elevationService';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { computeHorizon, HorizonError } from '../services/horizonCalculator';
 import { fetchNearbyPeaks, Peak } from '../services/peakService';
 import {
   Observer,
   HorizonPoint,
-  computeHorizonProfile,
   isPeakVisible,
   calculateBearing,
   elevationAngle,
@@ -30,14 +28,23 @@ import { CONFIG } from '../constants/config';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface PeakWithVisibility extends Peak {
-  /** Compass bearing from the observer (degrees) */
+  /** Compass bearing from the observer to this peak (degrees). */
   bearingDeg: number;
-  /** Elevation angle above/below the observer's horizon (degrees) */
+  /** Vertical angle from observer to peak summit (degrees above horizon). */
   elevationAngleDeg: number;
-  /** Straight-line surface distance from the observer (km) */
+  /** Surface distance from the observer (km). */
   distanceKm: number;
-  /** Whether the peak is not hidden behind terrain */
+  /** True if the peak is not occluded by closer terrain. */
   isVisible: boolean;
+}
+
+export interface TerrainStatus {
+  loading: boolean;
+  /** 0–100 while the horizon profile is being fetched. */
+  progress: number;
+  error: string | null;
+  /** Non-fatal informational messages (e.g. "poor GPS accuracy"). */
+  warnings: string[];
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -45,108 +52,134 @@ export interface PeakWithVisibility extends Peak {
 export function useTerrainData(
   latitude: number | null,
   longitude: number | null,
-  gpsAltitude: number | null,
+  gpsAltitudeM: number | null,
+  gpsAccuracyM: number | null,
 ) {
   const [observer, setObserver] = useState<Observer | null>(null);
   const [peaks, setPeaks] = useState<PeakWithVisibility[]>([]);
   const [horizonProfile, setHorizonProfile] = useState<HorizonPoint[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<TerrainStatus>({
+    loading: false,
+    progress: 0,
+    error: null,
+    warnings: [],
+  });
 
-  // Track the last position we fetched data for, to avoid redundant calls
   const lastFetchPos = useRef<{ lat: number; lng: number } | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const runFetch = useCallback(
+    async (lat: number, lng: number, alt: number | null, acc: number | null) => {
+      // Cancel any previous in-flight request before starting a new one
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      setStatus({ loading: true, progress: 0, error: null, warnings: [] });
+
+      try {
+        // Fetch horizon profile and nearby peaks concurrently.
+        // horizonCalculator handles its own batching, retries, and refraction.
+        const [horizonResult, rawPeaks] = await Promise.all([
+          computeHorizon({
+            latitude: lat,
+            longitude: lng,
+            gpsAltitudeM: alt ?? undefined,
+            gpsAccuracyM: acc ?? undefined,
+            signal: controller.signal,
+            onProgress: (pct) =>
+              setStatus((prev) => ({ ...prev, progress: pct })),
+          }),
+          fetchNearbyPeaks(lat, lng),
+        ]);
+
+        // Guard: ignore results if this fetch was superseded
+        if (controller.signal.aborted) return;
+
+        const obs: Observer = {
+          latitude: lat,
+          longitude: lng,
+          elevationM: horizonResult.observerElevationM + CONFIG.OBSERVER_EYE_HEIGHT_M,
+        };
+        setObserver(obs);
+        setHorizonProfile(horizonResult.profile);
+
+        const annotated: PeakWithVisibility[] = rawPeaks.map((peak) => ({
+          ...peak,
+          bearingDeg: calculateBearing(lat, lng, peak.latitude, peak.longitude),
+          elevationAngleDeg: elevationAngle(obs, peak.latitude, peak.longitude, peak.elevationM),
+          distanceKm: haversineDistance(lat, lng, peak.latitude, peak.longitude),
+          isVisible: isPeakVisible(
+            obs, peak.latitude, peak.longitude, peak.elevationM,
+            horizonResult.profile,
+          ),
+        }));
+
+        setPeaks(annotated);
+        setStatus({
+          loading: false,
+          progress: 100,
+          error: null,
+          warnings: horizonResult.warnings,
+        });
+
+      } catch (err: unknown) {
+        if (controller.signal.aborted) return; // cancelled — not an error
+
+        if (err instanceof HorizonError) {
+          // Render whatever partial profile was computed before failure
+          if (err.partial.length > 0) setHorizonProfile(err.partial);
+
+          const userMessage: Record<string, string> = {
+            NO_GPS:
+              'No GPS signal. Enable Location Services and move outdoors.',
+            POOR_GPS:
+              'GPS signal is weak — you may be indoors. Move to an open area.',
+            API_FAILURE:
+              'Could not load terrain data. Check your internet connection.',
+            API_TIMEOUT: '', // silent: happens on navigation changes
+            INVALID_BEARING: 'Internal error: compass bearing out of range.',
+            PARTIAL: 'Terrain data partially loaded — some peaks may be hidden.',
+          };
+
+          setStatus({
+            loading: false,
+            progress: 0,
+            error: userMessage[err.code] ?? err.message,
+            warnings: err.partial.length > 0 ? ['Showing partial terrain data.'] : [],
+          });
+        } else {
+          setStatus({
+            loading: false,
+            progress: 0,
+            error: err instanceof Error ? err.message : 'Unexpected error loading terrain.',
+            warnings: [],
+          });
+        }
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (latitude === null || longitude === null) return;
 
-    // Skip if the user hasn't moved far enough since the last fetch
+    // Skip if the user hasn't moved enough since the last completed fetch
     if (lastFetchPos.current) {
-      const moved = haversineDistance(
-        lastFetchPos.current.lat,
-        lastFetchPos.current.lng,
-        latitude,
-        longitude,
+      const movedKm = haversineDistance(
+        lastFetchPos.current.lat, lastFetchPos.current.lng,
+        latitude, longitude,
       );
-      if (moved < CONFIG.REFETCH_THRESHOLD_KM) return;
+      if (movedKm < CONFIG.REFETCH_THRESHOLD_KM) return;
     }
 
     lastFetchPos.current = { lat: latitude, lng: longitude };
-    setLoading(true);
-    setError(null);
+    runFetch(latitude, longitude, gpsAltitudeM, gpsAccuracyM);
 
-    (async () => {
-      try {
-        // Step 1: resolve observer elevation
-        //   Prefer GPS altitude when available; fall back to SRTM lookup.
-        const terrainElevM =
-          gpsAltitude != null && gpsAltitude > 0
-            ? gpsAltitude
-            : await fetchObserverElevation(latitude, longitude);
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, [latitude, longitude, gpsAltitudeM, gpsAccuracyM, runFetch]);
 
-        const obs: Observer = {
-          latitude,
-          longitude,
-          elevationM: terrainElevM + CONFIG.OBSERVER_EYE_HEIGHT_M,
-        };
-        setObserver(obs);
-
-        // Steps 2 & 3: fetch peaks and horizon samples concurrently
-        const [rawPeaks, elevationSamples] = await Promise.all([
-          fetchNearbyPeaks(latitude, longitude),
-          fetchHorizonElevations(latitude, longitude),
-        ]);
-
-        // Step 4: derive horizon profile
-        const profile = computeHorizonProfile(obs, elevationSamples);
-        setHorizonProfile(profile);
-
-        // Step 5: annotate each peak with visibility info
-        const annotated: PeakWithVisibility[] = rawPeaks.map((peak) => {
-          const bearing = calculateBearing(
-            latitude,
-            longitude,
-            peak.latitude,
-            peak.longitude,
-          );
-          const elev = elevationAngle(
-            obs,
-            peak.latitude,
-            peak.longitude,
-            peak.elevationM,
-          );
-          const dist = haversineDistance(
-            latitude,
-            longitude,
-            peak.latitude,
-            peak.longitude,
-          );
-          const visible = isPeakVisible(
-            obs,
-            peak.latitude,
-            peak.longitude,
-            peak.elevationM,
-            profile,
-          );
-
-          return {
-            ...peak,
-            bearingDeg: bearing,
-            elevationAngleDeg: elev,
-            distanceKm: dist,
-            isVisible: visible,
-          };
-        });
-
-        setPeaks(annotated);
-      } catch (err: unknown) {
-        const message =
-          err instanceof Error ? err.message : 'Failed to load terrain data';
-        setError(message);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [latitude, longitude, gpsAltitude]);
-
-  return { observer, peaks, horizonProfile, loading, error };
+  return { observer, peaks, horizonProfile, status };
 }
