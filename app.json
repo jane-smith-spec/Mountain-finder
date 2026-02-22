@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "Mountain Finder",
+    "slug": "mountain-finder",
+    "version": "1.0.0",
+    "orientation": "landscape",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.mountainfinder.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Mountain Finder needs your location to identify nearby peaks.",
+        "NSCameraUsageDescription": "Mountain Finder uses your camera to display an AR overlay of mountain peaks.",
+        "NSMotionUsageDescription": "Mountain Finder uses the compass and gyroscope to align the AR overlay."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0a0f1e"
+      },
+      "package": "com.mountainfinder.app",
+      "permissions": ["ACCESS_FINE_LOCATION", "CAMERA"]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Mountain Finder uses your camera to display an AR overlay of mountain peaks."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Mountain Finder needs your location to identify nearby peaks."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "scheme": "mountain-finder"
+  }
+}
