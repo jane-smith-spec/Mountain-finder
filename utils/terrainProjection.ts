@@ -9,6 +9,16 @@
  */
 
 export const EARTH_RADIUS_KM = 6371;
+
+/**
+ * Standard atmospheric refraction coefficient (k ≈ 0.13).
+ * Light bends downward through air of decreasing density, making terrain
+ * at long range appear slightly higher than a geometric model predicts.
+ * Effective Earth radius: R_eff = R / (1 − k) ≈ 7 314 km.
+ */
+export const REFRACTION_K = 0.13;
+export const EARTH_RADIUS_EFF_KM = EARTH_RADIUS_KM / (1 - REFRACTION_K);
+
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
 
@@ -142,6 +152,37 @@ export function elevationAngle(
   // Earth-curvature correction: at horizontal distance d, a flat surface
   // appears to drop by d² / (2R) metres (standard refraction ignored).
   const curvatureDropM = (distM * distM) / (2 * EARTH_RADIUS_KM * 1000);
+  const heightDiffM = targetElevM - observer.elevationM - curvatureDropM;
+
+  return Math.atan2(heightDiffM, distM) * RAD_TO_DEG;
+}
+
+/**
+ * Elevation angle with atmospheric refraction correction.
+ *
+ * Identical to elevationAngle() except it uses EARTH_RADIUS_EFF_KM in the
+ * curvature-drop formula, matching the model used by horizonCalculator.
+ *
+ * Always use this variant when comparing a peak's angle against a horizon
+ * profile built by horizonCalculator — mixing refracted and non-refracted
+ * angles produces incorrect visibility classifications at long range.
+ */
+export function elevationAngleRefracted(
+  observer: Observer,
+  targetLat: number,
+  targetLng: number,
+  targetElevM: number,
+): number {
+  const distKm = haversineDistance(
+    observer.latitude,
+    observer.longitude,
+    targetLat,
+    targetLng,
+  );
+  const distM = distKm * 1000;
+  if (distM < 1) return 90;
+
+  const curvatureDropM = (distM * distM) / (2 * EARTH_RADIUS_EFF_KM * 1000);
   const heightDiffM = targetElevM - observer.elevationM - curvatureDropM;
 
   return Math.atan2(heightDiffM, distM) * RAD_TO_DEG;

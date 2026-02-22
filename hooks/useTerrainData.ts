@@ -14,29 +14,19 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { computeHorizon, HorizonError } from '../services/horizonCalculator';
-import { fetchNearbyPeaks, Peak } from '../services/peakService';
 import {
-  Observer,
-  HorizonPoint,
-  isPeakVisible,
-  calculateBearing,
-  elevationAngle,
-  haversineDistance,
-} from '../utils/terrainProjection';
+  fetchAnnotatedPeaks,
+  filterVisiblePeaks,
+  AnnotatedPeak,
+  VisiblePeak,
+} from '../services/peakService';
+import { Observer, HorizonPoint, haversineDistance } from '../utils/terrainProjection';
 import { CONFIG } from '../constants/config';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Re-export types for consumers of this hook ───────────────────────────────
+export type { AnnotatedPeak, VisiblePeak };
 
-export interface PeakWithVisibility extends Peak {
-  /** Compass bearing from the observer to this peak (degrees). */
-  bearingDeg: number;
-  /** Vertical angle from observer to peak summit (degrees above horizon). */
-  elevationAngleDeg: number;
-  /** Surface distance from the observer (km). */
-  distanceKm: number;
-  /** True if the peak is not occluded by closer terrain. */
-  isVisible: boolean;
-}
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface TerrainStatus {
   loading: boolean;
@@ -56,7 +46,8 @@ export function useTerrainData(
   gpsAccuracyM: number | null,
 ) {
   const [observer, setObserver] = useState<Observer | null>(null);
-  const [peaks, setPeaks] = useState<PeakWithVisibility[]>([]);
+  const [allPeaks, setAllPeaks] = useState<AnnotatedPeak[]>([]);
+  const [visiblePeaks, setVisiblePeaks] = useState<VisiblePeak[]>([]);
   const [horizonProfile, setHorizonProfile] = useState<HorizonPoint[]>([]);
   const [status, setStatus] = useState<TerrainStatus>({
     loading: false,
@@ -78,9 +69,19 @@ export function useTerrainData(
       setStatus({ loading: true, progress: 0, error: null, warnings: [] });
 
       try {
-        // Fetch horizon profile and nearby peaks concurrently.
-        // horizonCalculator handles its own batching, retries, and refraction.
-        const [horizonResult, rawPeaks] = await Promise.all([
+        // Build the observer shell first with a placeholder elevation.
+        // computeHorizon will resolve the true elevation internally; we read
+        // it back from horizonResult.observerElevationM afterwards.
+        const obsPlaceholder: Observer = {
+          latitude: lat,
+          longitude: lng,
+          elevationM: (alt ?? 0) + CONFIG.OBSERVER_EYE_HEIGHT_M,
+        };
+
+        // Fetch horizon profile and peak list concurrently.
+        // fetchAnnotatedPeaks uses obsPlaceholder for geometry; we re-annotate
+        // below once the true elevation is known from the horizon result.
+        const [horizonResult, annotatedPeaks] = await Promise.all([
           computeHorizon({
             latitude: lat,
             longitude: lng,
@@ -90,12 +91,17 @@ export function useTerrainData(
             onProgress: (pct) =>
               setStatus((prev) => ({ ...prev, progress: pct })),
           }),
-          fetchNearbyPeaks(lat, lng),
+          fetchAnnotatedPeaks(obsPlaceholder, {
+            radiusKm: 50,
+            resolveElevations: true,
+            signal: controller.signal,
+          }),
         ]);
 
-        // Guard: ignore results if this fetch was superseded
+        // Guard: ignore results if this fetch was superseded by a newer one
         if (controller.signal.aborted) return;
 
+        // Build the accurate observer using the SRTM-resolved elevation
         const obs: Observer = {
           latitude: lat,
           longitude: lng,
@@ -104,18 +110,12 @@ export function useTerrainData(
         setObserver(obs);
         setHorizonProfile(horizonResult.profile);
 
-        const annotated: PeakWithVisibility[] = rawPeaks.map((peak) => ({
-          ...peak,
-          bearingDeg: calculateBearing(lat, lng, peak.latitude, peak.longitude),
-          elevationAngleDeg: elevationAngle(obs, peak.latitude, peak.longitude, peak.elevationM),
-          distanceKm: haversineDistance(lat, lng, peak.latitude, peak.longitude),
-          isVisible: isPeakVisible(
-            obs, peak.latitude, peak.longitude, peak.elevationM,
-            horizonResult.profile,
-          ),
-        }));
+        // filterVisiblePeaks uses linear interpolation against the horizon
+        // profile and returns VisiblePeak[] with clearanceAngleDeg attached
+        const visible = filterVisiblePeaks(annotatedPeaks, horizonResult.profile);
 
-        setPeaks(annotated);
+        setAllPeaks(annotatedPeaks);
+        setVisiblePeaks(visible);
         setStatus({
           loading: false,
           progress: 100,
@@ -127,8 +127,11 @@ export function useTerrainData(
         if (controller.signal.aborted) return; // cancelled — not an error
 
         if (err instanceof HorizonError) {
-          // Render whatever partial profile was computed before failure
-          if (err.partial.length > 0) setHorizonProfile(err.partial);
+          if (err.partial.length > 0) {
+            setHorizonProfile(err.partial);
+            // Re-run visibility filter against the partial profile
+            setVisiblePeaks(filterVisiblePeaks(allPeaks, err.partial));
+          }
 
           const userMessage: Record<string, string> = {
             NO_GPS:
@@ -181,5 +184,5 @@ export function useTerrainData(
     };
   }, [latitude, longitude, gpsAltitudeM, gpsAccuracyM, runFetch]);
 
-  return { observer, peaks, horizonProfile, status };
+  return { observer, allPeaks, visiblePeaks, horizonProfile, status };
 }

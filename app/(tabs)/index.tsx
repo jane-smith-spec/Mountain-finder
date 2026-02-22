@@ -30,7 +30,7 @@ export default function ARScreen() {
 
   const { heading, available: compassAvailable } = useCompass();
 
-  const { peaks, horizonProfile, status: terrainStatus } = useTerrainData(
+  const { visiblePeaks, horizonProfile, status: terrainStatus } = useTerrainData(
     location?.latitude ?? null,
     location?.longitude ?? null,
     location?.altitude ?? null,
@@ -64,7 +64,7 @@ export default function ARScreen() {
   }
 
   // ── Main view ──────────────────────────────────────────────────────────────
-  const visibleCount = peaks.filter((p) => p.isVisible).length;
+  const visibleCount = visiblePeaks.length;
 
   return (
     <View style={styles.container}>
@@ -74,7 +74,7 @@ export default function ARScreen() {
       {/* Layer 2 — AR overlay (peaks, horizon, compass) */}
       {location && (
         <AROverlay
-          peaks={peaks}
+          peaks={visiblePeaks}
           horizonProfile={horizonProfile}
           heading={heading}
         />

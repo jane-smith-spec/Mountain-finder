@@ -16,16 +16,16 @@ import { View, StyleSheet } from 'react-native';
 import { PeakMarker } from './PeakMarker';
 import { HorizonProfile } from './HorizonProfile';
 import { CompassIndicator } from './CompassIndicator';
-import { PeakWithVisibility } from '../hooks/useTerrainData';
+import { VisiblePeak } from '../hooks/useTerrainData';
 import { HorizonPoint, projectToScreen } from '../utils/terrainProjection';
 import { CONFIG } from '../constants/config';
 
 interface Props {
-  peaks: PeakWithVisibility[];
+  /** Pre-filtered list from filterVisiblePeaks() — all peaks passed in are rendered. */
+  peaks: VisiblePeak[];
   horizonProfile: HorizonPoint[];
   heading: number;
   showHorizon?: boolean;
-  showOccluded?: boolean;
   showDistance?: boolean;
   showElevation?: boolean;
 }
@@ -35,12 +35,9 @@ export function AROverlay({
   horizonProfile,
   heading,
   showHorizon = true,
-  showOccluded = false,
   showDistance = true,
   showElevation = true,
 }: Props) {
-  const visiblePeaks = peaks.filter((p) => showOccluded || p.isVisible);
-
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       {/* ── Terrain silhouette ── */}
@@ -49,10 +46,10 @@ export function AROverlay({
       )}
 
       {/* ── Peak markers ── */}
-      {visiblePeaks.map((peak) => {
+      {peaks.map((peak) => {
         const screen = projectToScreen(
           peak.bearingDeg,
-          peak.elevationAngleDeg,
+          peak.verticalAngleDeg,  // renamed from elevationAngleDeg in new service
           heading,
           CONFIG.CAMERA_HFOV,
           CONFIG.CAMERA_VFOV,

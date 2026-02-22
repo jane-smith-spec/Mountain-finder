@@ -34,24 +34,10 @@ import {
   ElevationSample,
   haversineDistance,
   destinationPoint,
-  EARTH_RADIUS_KM,
+  elevationAngleRefracted,
+  EARTH_RADIUS_EFF_KM,
 } from '../utils/terrainProjection';
 import { CONFIG } from '../constants/config';
-
-// ─── Physical constants ───────────────────────────────────────────────────────
-
-/**
- * Standard atmospheric refraction coefficient k ≈ 0.13.
- *
- * Light bends slightly downward as it travels through air of decreasing
- * density. This makes terrain at long distances appear ~ 7 % higher than
- * the pure geometric (flat-atmosphere) model predicts.
- *
- * Effective Earth radius: R_eff = R / (1 − k) ≈ 7 314 km.
- * Used in the curvature-drop formula: drop = d² / (2 · R_eff).
- */
-const REFRACTION_K = 0.13;
-const EARTH_RADIUS_EFF_KM = EARTH_RADIUS_KM / (1 - REFRACTION_K); // ≈ 7 314 km
 
 // ─── API & retry constants ────────────────────────────────────────────────────
 
@@ -562,41 +548,8 @@ async function fetchAllElevations(
 }
 
 // ─── Step 5 & 6: Line-of-sight sweep with refraction ─────────────────────────
-
-/**
- * Elevation angle from `observer` to a target, with both Earth-curvature and
- * atmospheric refraction applied.
- *
- * Why refraction matters:
- *   Without correction, a peak 100 km away appears ~785 m lower than its
- *   true elevation due to Earth's curvature. Atmospheric refraction "lifts"
- *   it back by ~102 m (k = 0.13), so the net apparent drop is ~683 m.
- *   The difference affects whether a distant ridge is classified as visible
- *   or occluded, so we use the effective radius throughout.
- *
- * Returns degrees above (+) or below (−) the observer's true horizontal.
- */
-function elevationAngleRefracted(
-  observer: Observer,
-  targetLat: number,
-  targetLng: number,
-  targetElevM: number,
-): number {
-  const distKm = haversineDistance(
-    observer.latitude, observer.longitude,
-    targetLat, targetLng,
-  );
-  const distM = distKm * 1000;
-
-  if (distM < 1) return 90; // Effectively the same point — looking straight up
-
-  // Apparent height drop due to Earth's curvature, corrected for refraction.
-  // Using R_eff instead of R is the only change relative to the naive formula.
-  const curvatureDropM = (distM * distM) / (2 * EARTH_RADIUS_EFF_KM * 1000);
-  const heightDiffM = targetElevM - observer.elevationM - curvatureDropM;
-
-  return Math.atan2(heightDiffM, distM) * (180 / Math.PI);
-}
+// elevationAngleRefracted() is imported from terrainProjection — shared with
+// peakService so both modules use an identical physical model.
 
 /**
  * Walk each ray near → far and compute the visible horizon angle.
