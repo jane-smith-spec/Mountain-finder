@@ -39,12 +39,19 @@ Every product below lists its **self-check**: the exact command an agent runs to
 
 ### Phase 2 — Data providers *(agent group B)*
 
+**Revised per decision D7 (offline-first).** Local SRTM tiles are the primary elevation
+source; the HTTP clients below demote from a runtime dependency to an acquisition path.
+
 | Product | Description | Self-check |
 |---|---|---|
 | P2.1 Transport layer | `Transport` interface; `FetchTransport` (retry ×3, backoff, 429 handling, AbortSignal) + `FixtureTransport` (replays recorded JSON) | Fake-transport tests: fails twice → succeeds on 3rd; 429 → longer delay; abort → immediate typed error |
-| P2.2 Elevation provider | OpenTopoData SRTM client, 100-point batching, typed errors | Offline test against recorded fixture: request grid → correct parsed elevations, correct batch count |
+| P2.2 Elevation provider *(acquisition)* | OpenTopoData SRTM client, 100-point batching, typed errors | Offline test against recorded fixture: request grid → correct parsed elevations, correct batch count |
 | P2.3 Peaks provider | Overpass client (nodes + way centroids, ele/ele:ft parsing), typed errors | Offline test against recorded fixture: known area → expected peak list with correct elevations |
-| P2.4 Fixture recorder | `npm run record:fixtures -- --site <name>` captures live responses into `/fixtures/api/` | Run once per site during development; recorded files validate against provider schemas |
+| P2.4 Fixture recorder | `npm run record:fixtures -- --site <name>` captures live responses into `/fixtures/api/` | Recorded files validate against provider schemas. **Currently unmet** — egress 403. |
+| **P2.5 HGT tile reader** | Parse `.hgt`/`.hgt.gz` (SRTM1 3601², SRTM3 1201², int16 BE, row 0 = north). Bilinear + nearest lookup. **Voids (`−32768`) are an explicit no-data state, never coerced to a number.** | Synthetic tiles with closed-form terrain → exact values; grid-edge cases (first/last sample, north/south edge, shared tile overlap); void policy tested directly |
+| **P2.6 Tile store** | lat/lon → tile name with correct floor semantics across **both hemispheres** (`S01W001`, `N10W010`); directory load; in-memory cache | Hemisphere and negative-coordinate naming tested explicitly — this is where an off-by-one silently returns the wrong continent |
+| **P2.7 Tile fetcher** | `npm run fetch:tiles` pulls from AWS Open Data (`elevation-tiles-prod/skadi/…`), gunzips, skips existing | Acquisition tool; may hit network. Tiles land in gitignored `data/tiles/` |
+| **P2.8 Real-data fixture** | A small window of genuine Zermatt SRTM committed as raw bytes + provenance sidecar, reproducible via a generator script | Tests parse **real bytes in the real format**, not hand-authored JSON — strictly stronger than P2.2's fixtures |
 
 ### Phase 3 — Photo ingestion *(agent group C)*
 
