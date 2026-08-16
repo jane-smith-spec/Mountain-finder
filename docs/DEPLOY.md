@@ -87,6 +87,15 @@ alpine tiles. A real Alpine deployment would drop the lowland corners and land
 nearer 1.3 GB on disk. The unit to budget with is **25.93 MB / 16.35 MB per
 mountainous degree square**.
 
+**The windows-only row is a demo, not a deployment.** `--no-tiles --no-peaks`
+produces a complete working app in 1.77 MB — checked: served statically, the
+Gornergrat photo still renders `1 peak labelled: Matterhorn`. But those windows
+were cut to the terrain each *acceptance case* turns on, not to the app's 30 km
+sweep: the Gornergrat window is 361 × 1009 samples, about 11 km × 22 km. Rays
+run off the edge of it, and a ridge outside the cut cannot occlude anything, so
+this configuration can report a summit **visible** that a whole tile would show
+as hidden. Ship it to demo the pipeline; ship tiles to be right.
+
 **What one visitor downloads is not that total.** `selectTerrainGrid` picks the
 single largest grid covering the viewpoint, so a session costs *one grid*: 16.35
 MB gzipped for an alpine tile, 0.47 MB if the deployment ships only the tuned
