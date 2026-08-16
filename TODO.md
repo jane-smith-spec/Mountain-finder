@@ -7,12 +7,12 @@ Live checklist. Check items only after their self-check has been run and passed 
 - [x] P0.2 `check` / `test:e2e` / `test:acceptance` / `demo` scripts wired — all five commands verified green
 - [x] `src/core/types.ts` frozen shared contract (separates `elevationM` from `altitudeDeg`)
 
-## Phase 1 — Geometry core (group A) ✅ 151 tests
+## Phase 1 — Geometry core (group A) ✅ 178 tests
 - [x] P1.1 Geodesy — 56 tests; meridian-convergence test rejects a rhumb-line impostor
 - [x] P1.2 Sightline — 29 tests; analytic cone matches closed form to 1e-12 (spec asked 0.01°)
-- [x] P1.3 Horizon profile — 20 tests; exact at samples, seam continuity across 359°→0°
+- [x] P1.3 Horizon profile — 35 tests; exact at samples, seam continuity across 359°→0°
 - [x] P1.4 Camera projection — 29 tests; guards the tangent-vs-angle-linear mistake
-- [x] P1.5 Visibility filter — 17 tests; twin identical summits, only the unoccluded one survives
+- [x] P1.5 Visibility filter — 29 tests; occlusion by NEARER terrain only (see fix below)
 
 ## Phase 2 — Data providers (group B) ✅ 64 tests
 - [x] P2.1 Transport layer — injected sleep, so backoff is asserted with zero wall-clock wait
@@ -49,8 +49,25 @@ Live checklist. Check items only after their self-check has been run and passed 
 - [x] P6.3 Acceptance harness — green, with a banner stating a pass proves the yardstick
       is sound, NOT that the pipeline is correct. 26 pipeline assertions are `it.todo`.
 
-## 🔴 Correctness bug found by Group F — fix before Wave 2 renderer
-- [ ] **P1.5 over-occludes near peaks.** The rule compares a peak against the max terrain
+## ✅ Correctness bug found by Group F — FIXED
+- [x] **P1.5 over-occluded near peaks.** Fixed: a peak is now occluded only by terrain with
+      distance strictly `<` the peak's own. `HorizonPoint.skylineSteps` (additive, optional)
+      carries the per-bearing running-maximum staircase; `interpolateNearerTerrainAltitudeDeg`
+      answers "how high does terrain reach nearer than this?" using the *same* bearing
+      bracket and weight as the skyline query, seam included.
+      Core tests 151 → 178. Acceptance 112 → 116. No existing test needed changing — none had
+      encoded the old rule, because every hand-built fixture peak already sat behind its occluder.
+      Group F's `expect(nearVerdict).toBeUndefined()` is now
+      `expect(nearVerdict?.visible).toBe(true)`, and the test still asserts the crest sits 0.79°
+      *below* the skyline — proving the fix, not hiding the difficulty.
+      Two judgment calls recorded: strict `<` at the boundary (a summit *is* the sample at its
+      own distance, so `<=` would make every peak hide itself and leave the verdict to
+      floating-point luck); and a mixed bracket returns the real occluder rather than
+      interpolating toward an invented floor.
+
+<details><summary>Original bug description (kept for the record)</summary>
+
+- **P1.5 over-occludes near peaks.** The rule compares a peak against the max terrain
       angle at its bearing across *all* distances. But terrain BEHIND a peak cannot hide it.
       A nearer, lower summit standing in front of a taller far ridge is genuinely visible,
       and the current rule calls it hidden.
@@ -60,6 +77,8 @@ Live checklist. Check items only after their self-check has been run and passed 
       `HorizonPoint` already carries `distanceKm`, but only for the single winning sample.
       Group F asserts *no verdict* on this case so the simplification cannot be silently
       blessed; promote that assertion once fixed.
+
+</details>
 
 ## Gates
 - [ ] Wave 1 review (A, B, C, F diffs adversarially reviewed)

@@ -69,16 +69,53 @@ const S3_BASE = 'https://s3.amazonaws.com/elevation-tiles-prod/skadi';
  *     (45.97556 N, 7.65472 E), about 320 m WSW of the surveyed position.
  * So SRTM both under-reads a sharp summit (4230 vs 4478 m) and displaces it.
  */
-const WINDOW = {
-  name: 'matterhorn-window',
-  tile: 'N45E007',
-  row0: 64,
-  col0: 2240,
-  rows: 256,
-  cols: 256,
-} as const;
+interface WindowSpec {
+  readonly name: string;
+  readonly tile: string;
+  readonly row0: number;
+  readonly col0: number;
+  readonly rows: number;
+  readonly cols: number;
+  readonly description: string;
+}
 
-async function writeRealWindow(): Promise<void> {
+const WINDOWS: readonly WindowSpec[] = [
+  {
+    name: 'matterhorn-window',
+    tile: 'N45E007',
+    row0: 64,
+    col0: 2240,
+    rows: 256,
+    cols: 256,
+    description:
+      'A 256×256 rectangle of real SRTM1 data around the Matterhorn, cut byte-for-byte out ' +
+      'of the source tile. Same format as a .hgt file, but a window rather than a whole ' +
+      'degree, so its geometry is written down here instead of derived from the file length.',
+  },
+  {
+    /**
+     * Zermatt village itself, from the tile NORTH of the Matterhorn's: the
+     * village sits at 46.0207 N, which is above the 46° line, so it belongs to
+     * N46E007 and not to N45E007. That is the tile-naming floor rule in the
+     * field — a window "around Zermatt" cut from N45E007 would read somewhere
+     * else entirely.
+     *
+     * Source row 3525, col 2697 is the posting nearest the village centre.
+     */
+    name: 'zermatt-window',
+    tile: 'N46E007',
+    row0: 3494,
+    col0: 2665,
+    rows: 64,
+    cols: 64,
+    description:
+      'A 64×64 rectangle of real SRTM1 data over Zermatt village, cut byte-for-byte out of ' +
+      'N46E007. Committed as the offline evidence that this mirror is void-filled: the ' +
+      'valley floor reads a real elevation here, not the −32768 void marker.',
+  },
+];
+
+async function writeRealWindow(WINDOW: WindowSpec): Promise<void> {
   const sourcePath = join(TILE_DIR, `${WINDOW.tile}.hgt`);
   const raw = await readFile(sourcePath).catch(() => {
     throw new Error(
