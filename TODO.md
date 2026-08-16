@@ -39,10 +39,27 @@ Live checklist. Check items only after their self-check has been run and passed 
 - [ ] P5.1 App shell (drop-zone, autofill, overrides, trim sliders, test mode)
 - [ ] P5.2 Annotated PNG export
 
-## Phase 6 — Ground truth (group F)
-- [ ] P6.1 Synthetic analytic scenes (cone, twin ridges, plateau)
-- [ ] P6.2 Real photo set (3–5 open-license cases with documented coords)
-- [ ] P6.3 Acceptance suite green
+## Phase 6 — Ground truth (group F) ✅ 112 assertions + 26 todo
+- [x] P6.1 Analytic scenes — flat plane, twin ridges (2 variants), conical peak.
+      `R_eff` derived symbolically = 7 322 998.62 m; each scene states its R and k.
+- [x] P6.2 Real cases — Gornergrat, Mount Diablo, Kerry Park, Fort William.
+      Sources read via web-search index (egress 403s wikipedia/parks.ca.gov/seattle.gov);
+      every claim carries a resolvable source id + `access` field. Coordinates must be
+      re-verified against live pages before these gate a release.
+- [x] P6.3 Acceptance harness — green, with a banner stating a pass proves the yardstick
+      is sound, NOT that the pipeline is correct. 26 pipeline assertions are `it.todo`.
+
+## 🔴 Correctness bug found by Group F — fix before Wave 2 renderer
+- [ ] **P1.5 over-occludes near peaks.** The rule compares a peak against the max terrain
+      angle at its bearing across *all* distances. But terrain BEHIND a peak cannot hide it.
+      A nearer, lower summit standing in front of a taller far ridge is genuinely visible,
+      and the current rule calls it hidden.
+      Correct rule: a peak is occluded only by terrain NEARER than the peak itself.
+      Fix: retain the per-bearing skyline staircase (distance → running max altitude) so the
+      test can ask "max altitude among samples closer than this peak".
+      `HorizonPoint` already carries `distanceKm`, but only for the single winning sample.
+      Group F asserts *no verdict* on this case so the simplification cannot be silently
+      blessed; promote that assertion once fixed.
 
 ## Gates
 - [ ] Wave 1 review (A, B, C, F diffs adversarially reviewed)
