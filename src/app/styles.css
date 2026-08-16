@@ -1,0 +1,400 @@
+/*
+ * Working-tool styling: legible in both colour schemes, generous hit targets,
+ * a visible focus ring on everything focusable. The real design pass comes when
+ * the overlay is wired in (TODO.md Q1) — this is deliberately plain.
+ *
+ * The one place styling carries meaning is the provenance badge. EXIF / You /
+ * Assumed / needs-input differ in colour AND in text AND, for the missing case,
+ * in an icon, so the distinction survives greyscale and colour blindness.
+ */
+
+:root {
+  color-scheme: light dark;
+  --bg: #f6f6f4;
+  --panel: #ffffff;
+  --ink: #1b1b1b;
+  --muted: #5a5a5a;
+  --line: #d6d6d0;
+  --accent: #8a5a00;
+  --ok: #1f6f3f;
+  --warn: #8a4b00;
+  --error: #a01818;
+  --exif: #1e4f8a;
+  --user: #5a2d82;
+  --assumed: #6a6a2a;
+  --focus: #0b63c5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181a;
+    --panel: #202325;
+    --ink: #ececec;
+    --muted: #a8a8a8;
+    --line: #3a3f43;
+    --accent: #f0b429;
+    --ok: #6fd39b;
+    --warn: #f0b429;
+    --error: #ff8a80;
+    --exif: #7fb6f5;
+    --user: #d2a8f5;
+    --assumed: #d6d67f;
+    --focus: #7fb6f5;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.app {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 4rem;
+}
+
+.app__header h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.6rem;
+}
+
+.app__tagline {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  max-width: 62ch;
+}
+
+.app__columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.app__column {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.panel h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* --- drop zone --- */
+
+.dropzone {
+  border: 2px dashed var(--line);
+  border-radius: 8px;
+  padding: 1.25rem;
+  text-align: center;
+  cursor: pointer;
+}
+
+.dropzone--active {
+  border-color: var(--focus);
+  background: color-mix(in srgb, var(--focus) 10%, transparent);
+}
+
+.dropzone__prompt {
+  margin: 0 0 0.5rem;
+  font-weight: 600;
+}
+
+.dropzone__note {
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.file-label {
+  display: inline-block;
+  font-weight: 600;
+  margin-right: 0.5rem;
+}
+
+.file-input {
+  font: inherit;
+}
+
+/* --- status lines --- */
+
+.status {
+  margin: 0.6rem 0 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.status--ok {
+  color: var(--ok);
+}
+.status--warn {
+  color: var(--warn);
+}
+.status--error {
+  color: var(--error);
+}
+
+/* --- raw EXIF claims --- */
+
+.claims {
+  margin: 0;
+}
+
+.claims__row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 34%) 1fr;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.claims__row:first-child {
+  border-top: none;
+}
+
+.claims dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.claims dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.claims__caveat {
+  display: block;
+  color: var(--warn);
+  font-size: 0.8rem;
+}
+
+/* --- pose fields --- */
+
+.field-group {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin: 0 0 1rem;
+  padding: 0.5rem 0.75rem 0.75rem;
+}
+
+.field-group legend {
+  padding: 0 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.field {
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.field:first-of-type {
+  border-top: none;
+}
+
+.field__label {
+  display: block;
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.field__unit {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.field__control {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.25rem;
+}
+
+.field__input {
+  font: inherit;
+  padding: 0.3rem 0.4rem;
+  min-width: 8.5rem;
+  flex: 0 1 11rem;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.field__input--invalid {
+  border-color: var(--error);
+}
+
+.field__state {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.field__hint {
+  color: var(--muted);
+  opacity: 0.85;
+}
+
+.badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+
+.badge--exif {
+  color: var(--exif);
+}
+.badge--user {
+  color: var(--user);
+}
+.badge--default {
+  color: var(--assumed);
+}
+.badge--missing {
+  color: var(--error);
+  border-style: dashed;
+}
+
+.options__row {
+  margin-bottom: 0.75rem;
+}
+
+.options__label {
+  display: block;
+  font-weight: 600;
+  font-size: 0.92rem;
+  margin-bottom: 0.25rem;
+}
+
+.options__checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+/* --- photo stage --- */
+
+.stage {
+  position: relative;
+  width: 100%;
+  background: #000;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.stage__photo,
+.stage__layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.stage__photo {
+  object-fit: contain;
+}
+
+.stage__layer {
+  pointer-events: none;
+}
+
+.stage__layer svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* --- sliders --- */
+
+.slider {
+  display: grid;
+  grid-template-columns: minmax(8rem, 30%) 1fr;
+  gap: 0.4rem 0.75rem;
+  align-items: center;
+  padding: 0.4rem 0;
+}
+
+.slider__label {
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.slider__input {
+  width: 100%;
+}
+
+.slider__readout {
+  grid-column: 2;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+}
+
+.slider__detail {
+  display: block;
+  color: var(--muted);
+}
+
+/* --- buttons --- */
+
+.button {
+  font: inherit;
+  font-weight: 600;
+  padding: 0.45rem 0.9rem;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.button--primary {
+  border-color: var(--accent);
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.link-button {
+  font: inherit;
+  font-size: 0.8rem;
+  background: none;
+  border: none;
+  padding: 0.15rem 0.3rem;
+  color: var(--focus);
+  text-decoration: underline;
+  cursor: pointer;
+}

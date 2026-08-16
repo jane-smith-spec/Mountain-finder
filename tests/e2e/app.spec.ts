@@ -19,7 +19,7 @@
  *
  * The field-of-view trim case uses the 3-4-5 triangle so the expectation is a
  * standard reference value: with a 4:3 frame and hFov = 90°, tan(vFov/2) = 3/4,
- * so vFov = 2·atan(3/4) = 73.739795291688042°.
+ * so vFov = 2·atan(3/4) = 73.73979529168804°.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -235,12 +235,12 @@ test('trim sliders move the pose the overlay consumes by exactly the amount aske
   // --- field of view: the tangent relation, not a linear scaling -----------
   // Type an 80° horizontal FOV, then trim +10° to land on exactly 90°.
   // The frame is 800×600, so tan(vFov/2) = tan(45°)·(3/4) = 3/4 and
-  // vFov = 2·atan(3/4) = 73.739795291688042° — the 3-4-5 triangle.
+  // vFov = 2·atan(3/4) = 73.73979529168804° — the 3-4-5 triangle.
   await page.getByTestId('input-hFovDeg').fill('80');
   await expect(page.getByTestId('badge-hFovDeg')).toHaveText('You');
   await page.getByTestId('trim-hFovDeg').fill('10');
   expect(await poseNumber(page, 'data-hfov-deg')).toBeCloseTo(90, 10);
-  expect(await poseNumber(page, 'data-vfov-deg')).toBeCloseTo(73.739795291688042, 9);
+  expect(await poseNumber(page, 'data-vfov-deg')).toBeCloseTo(73.73979529168804, 9);
 
   // The panel still reports what the photo and the user said, un-trimmed:
   // the trim is an offset, not a rewrite of the metadata.
@@ -275,12 +275,58 @@ test('the overlay region is an obvious placeholder, and export is honestly disab
   await expect(page.getByTestId('export-state')).toContainText('compositor is not wired up');
 });
 
+/**
+ * P5.2 — the export seam, proved before the real pipeline exists.
+ *
+ * `?seam-probe=1` swaps in the throwaway implementations from
+ * `src/app/seam-probe.ts` (an obviously-fake overlay and a flat-colour PNG, no
+ * compositing). What is under test is the APP's half of the seam: the overlay
+ * effect runs, the SVG lands over the photo, the export button un-disables, and
+ * a PNG of the photo's own pixel dimensions reaches the user with the right
+ * filename. When Q1 replaces the probes, this path is already known to work.
+ */
+test('the overlay and export seam works end to end when an implementation is supplied', async ({
+  page,
+}) => {
+  await page.goto('/?seam-probe=1');
+  await pickPhoto(page, CHAMONIX);
+  await page.getByTestId('input-assumptions').check();
+
+  await expect(page.getByTestId('overlay-svg')).toBeVisible();
+  await expect(page.getByTestId('overlay-placeholder')).toHaveCount(0);
+  await expect(page.getByTestId('overlay-state')).toHaveAttribute('data-overlay', 'live');
+
+  const button = page.getByTestId('export-png');
+  await expect(button).toBeEnabled();
+  await expect(page.getByTestId('export-state')).toHaveAttribute('data-disabled-reason', '');
+
+  const downloadPromise = page.waitForEvent('download');
+  await button.click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe('chamonix-north-east-annotated.png');
+
+  const path = await download.path();
+  const bytes = await readFile(path);
+  // PNG signature, then the IHDR chunk: width at byte 16, height at byte 20,
+  // both big-endian uint32 (PNG spec, ISO/IEC 15948).
+  expect(bytes.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+  expect(bytes.readUInt32BE(16)).toBe(800);
+  expect(bytes.readUInt32BE(20)).toBe(600);
+
+  await expect(page.getByTestId('export-message')).toContainText(
+    'chamonix-north-east-annotated.png',
+  );
+});
+
 test('every control is labelled and reachable from the keyboard', async ({ page }) => {
   await pickPhoto(page, CHAMONIX);
 
   // Labels, not placeholders, are what a screen reader announces.
   await expect(page.getByLabel('Latitude')).toBeVisible();
-  await expect(page.getByLabel('Heading', { exact: false })).toBeVisible();
+  // The pose field and its slider have distinct names, so neither can be
+  // mistaken for the other by anyone navigating by label.
+  await expect(page.getByLabel('Heading ° true')).toHaveAttribute('data-testid', 'input-headingDeg');
+  await expect(page.getByLabel('Heading trim')).toHaveAttribute('data-testid', 'trim-headingDeg');
   await expect(page.getByLabel('Magnetic declination')).toBeVisible();
   await expect(page.getByLabel('Apply standard assumptions')).toBeVisible();
   await expect(page.getByLabel('Field-of-view trim')).toBeVisible();
