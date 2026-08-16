@@ -64,8 +64,15 @@ export interface PeakExpectation {
   rationale: string;
 }
 
-/** A claim that could not be settled. Reported, never asserted. */
-export interface DisputedExpectation extends Omit<PeakExpectation, 'confidence'> {
+/**
+ * A claim that could not be settled. Reported, never asserted.
+ *
+ * It has no `confidence` (there is none to state) and no `rationale`: the
+ * `conflict` field replaces it, and must name the sources on each side rather
+ * than argue for one of them.
+ */
+export interface DisputedExpectation
+  extends Omit<PeakExpectation, 'confidence' | 'rationale'> {
   /** Summary of the conflict, naming the sources on each side. */
   conflict: string;
 }

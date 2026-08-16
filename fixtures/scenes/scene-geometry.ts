@@ -89,6 +89,32 @@ export function greatCircleDistanceM(a: LatLng, b: LatLng): number {
 }
 
 /**
+ * Initial great-circle bearing from `a` to `b`, degrees clockwise from true
+ * north, normalised to [0, 360).
+ *
+ * From the spherical triangle (north pole, a, b):
+ *
+ *   θ = atan2( sin Δλ · cos φ₂ ,
+ *              cos φ₁ · sin φ₂ − sin φ₁ · cos φ₂ · cos Δλ )
+ *
+ * "Initial" matters: on a great circle the bearing changes along the path, and
+ * what a camera at `a` sees is the bearing AT `a`. Used only to cross-check the
+ * real-world ground-truth cases; the synthetic scenes place their own terrain.
+ */
+export function initialBearingDeg(a: LatLng, b: LatLng): number {
+  const phi1 = a.lat * DEG;
+  const phi2 = b.lat * DEG;
+  const dLambda = (b.lon - a.lon) * DEG;
+
+  const y = Math.sin(dLambda) * Math.cos(phi2);
+  const x =
+    Math.cos(phi1) * Math.sin(phi2) -
+    Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLambda);
+
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+/**
  * Direct geodetic problem on a sphere: where do you arrive travelling
  * `distanceM` along the great circle leaving `origin` on `bearingDeg`?
  *
