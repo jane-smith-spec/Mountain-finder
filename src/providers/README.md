@@ -77,6 +77,15 @@ a 32 km trench. Either silently corrupts a skyline. So:
   displacement, and visible to the caller). If **all four** corners are void the
   result is `status: 'void'`. Pass `voidPolicy: 'no-data'` to make any void
   corner produce `'void'` instead.
+* **…but only a void the interpolation actually weighted.** On a grid line the
+  off-line corners have weight zero, so a reading exactly on a valid sample —
+  or anywhere along an edge whose void sits off that edge — is plain
+  `'bilinear'`: its value cannot depend on what is stored in the void. Calling
+  that `'nearest-valid'` would understate good data, and under `'no-data'` it
+  would discard a correct measurement. The bound is stated as an elevation
+  error (`NEGLIGIBLE_VOID_WEIGHT` in `hgt-tile.ts`) rather than a bare
+  `weight === 0`, because 1/3600° is not representable in binary and a query
+  aimed at a sample line lands ~1e-12 off it.
 * Nearest-neighbour never substitutes: a void sample reads `'void'`.
 
 The AWS `elevation-tiles-prod/skadi` mirror that `fetch:tiles` uses is

@@ -106,10 +106,14 @@ Recorded because "we looked hard and it holds" is real information:
 
 1. ~~Partial-coverage profiles may bridge a data gap linearly~~ — **CONFIRMED and fixed,
    2026-08-16. Promoted to finding 6 below.**
-2. `method: 'nearest-valid'` is reported for readings that are exactly bilinear but merely have
-   a void *neighbour*; a consumer filtering on `method` would discard good data.
-3. `resolvePose` accepts a negative `eyeHeightM`, which would place the eye below terrain and
-   invert every clearance. No path to it demonstrated.
+2. ~~`method: 'nearest-valid'` is reported for readings that are exactly bilinear but merely
+   have a void *neighbour*~~ — **CONFIRMED and fixed, 2026-08-16. Promoted to finding 7 below,
+   where it turned out to be a value error as well as a reporting one.**
+3. ~~`resolvePose` accepts a negative `eyeHeightM`~~ — **found real and fixed** (Q2 item 4:
+   `eyeHeightM ≥ 0` is now a range check, and an out-of-range override surfaces as
+   `needs-manual` / `'out-of-range'` rather than being replaced by EXIF).
+
+**All three suspicions from the first review are now closed.**
 
 ## Confirmed findings, part 2 (after the pipeline existed)
 
@@ -161,6 +165,72 @@ different answer (sweep it, or refuse it, or rely on it being off-frame). And `s
 grew its own `profileCoverage` for the aligner — a largest-gap-vs-median heuristic over the
 profile alone, which cannot see a hole and a sector edge at the same time. The two notions of
 coverage should be reconciled on the exact one.
+
+### 7. MEDIUM — a void that carried no weight was reported as if it had, and cost 50 m
+*Suspicion 2, promoted. Real, and one step worse than recorded: it is not only a false report
+about data quality, it is a needless 50 m value error on the same readings.*
+
+`HgtTile.bilinear` (`src/providers/hgt-tile.ts`) tracked `voidSeen` as a boolean over the four
+corners of the cell, without looking at the **weight** each corner carried. A query that lands
+on a grid line gives the corners off that line a weight of exactly zero, so their contents
+cannot reach the answer — but a void among them still flipped `voidSeen`, and the whole reading
+was demoted.
+
+Demonstrated on a hand-built 3 × 3 tile at 0.5° spacing with a single void at its centre:
+
+```
+         lon 0   lon 0.5   lon 1
+ lat 1    100      200      300
+ lat 0.5  400     VOID      600
+ lat 0    700      800      900
+```
+
+| query | void's bilinear weight | true value | was, `nearest-valid` | was, `no-data` | now |
+|---|---|---|---|---|---|
+| lat 1, lon 0.5 — **exactly on** the 200 m sample, void due south | 0 | 200 | 200 m, `nearest-valid` | **`void`, null** | 200 m, `bilinear` |
+| lat 1, lon 0.75 — mid the north edge, void off the edge | 0 | **250** | **200 m**, `nearest-valid` | **`void`, null** | 250 m, `bilinear` |
+| `N10W010` fixture (7,9), the valid row just north of the 3 × 3 void block | 2.8e-14 | 500 | 500 m, `nearest-valid` | **`void`, null** | 499.9999999999858 m, `bilinear` |
+| lat 0.99995, lon 0.5 — a hair *off* the line | 1e-4 | 200 ± 0.3 | 200 m, `nearest-valid` | `void`, null | **unchanged** |
+
+Row 2 is the sharp one. Along that edge two valid corners carry the entire weight and the exact
+answer is `0.5·200 + 0.5·300 = 250`; the code computed 250 into `sum`, then **threw it away**
+and returned the nearest corner's 200 instead. 50 m of avoidable elevation error, on a reading
+whose value never depended on the void at all. Row 1 is the suspicion as written, and row 3
+shows it reaching a committed fixture through real grid geometry.
+
+Under `'no-data'` every one of the first three rows was a correct measurement reported as no
+data — the worse failure, because a caller who chose the strict policy chose it to be told the
+truth about coverage, and was instead told the terrain was unmeasured where it was measured.
+
+**Fix.** Sum the weights of the void corners instead of setting a flag. If that total is
+negligible the reading is exactly the interpolation over the corners that do carry the weight,
+and is reported as `'bilinear'` under **both** policies; above it, the existing `'nearest-valid'`
+fallback and the existing strict refusal are untouched (row 4). Void policy semantics are
+unchanged: voids are still `null`, still never averaged in, and the fallback still fires the
+moment a void can move the answer.
+
+**Why a bound and not `weight === 0`.** Sample lines sit at multiples of 1/3600°, which is not
+representable in binary — the module already says so, which is why there is no `'exact'` method
+— so a query aimed at row 2 of an SRTM1 grid divides back to `2.0000000000067` and the "zero"
+weights come out near 1e-12, as row 3 shows. The test is therefore on the reading's **error**,
+not on the weight: omitting a corner of weight `w` moves the answer by `w × (its true
+elevation)`, unknown but bounded by the format's own extreme ±32767 m. `NEGLIGIBLE_VOID_WEIGHT`
+= 1 mm / 32767 m ≈ 3.05e-8 makes the claim "this is bilinear" mean "within a millimetre of full
+bilinear, whatever the radar failed to see there" — six orders of magnitude inside SRTM's own
+±10 m. Everything above it still degrades, including weights far too small to matter physically.
+
+**Blast radius today is the defensive path only.** The AWS mirror this project fetches from has
+0 voids in 51 868 804 samples (MISSION.md), so no shipped reading changes; `check` and
+`test:acceptance` are unchanged. It matters for USGS SRTMGL1 v2 and any other void-carrying
+distribution, and it is exactly the kind of over-report that a downstream coverage filter — the
+one finding 6 just built — would act on.
+
+*Residual, deliberately not changed here:* the fallback is discontinuous at a grid line. On the
+north edge above, the reading is 250 m ON the line and 200 m a hair off it, because
+`'nearest-valid'` returns a corner rather than re-normalising the valid weights. That is the
+documented policy ("displaced by at most one sample spacing"), it is flagged to the caller, and
+changing it would mean inventing a value for the void — a change of policy, not of reporting.
+Worth a decision on its own.
 
 ## Decision taken
 

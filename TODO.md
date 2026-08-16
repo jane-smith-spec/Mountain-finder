@@ -62,10 +62,30 @@
       that walked all its rays lost nothing, so its peaks are untouched; the distinction is
       exact (a bearing the sweep asked about and lost) rather than a gap-width heuristic.
       All 4 ground-truth cases lose no rays, so 148/148 acceptance verdicts are unchanged.
-      Still open: suspicion 2 (`nearest-valid` reporting), and two residuals noted under
-      finding 6 — peaks outside a bounded sweep are still judged against the bridged
-      complement, and `src/cv/rays.ts:profileCoverage` duplicates this with a largest-gap
-      heuristic that should be reconciled onto the exact one.
+      **Suspicion 2 (`nearest-valid` over-reporting) is CONFIRMED and fixed (2026-08-16) —
+      now finding 7,** and it was a value error as well as a reporting one. `HgtTile.bilinear`
+      demoted a reading whenever ANY corner of the cell was void, without asking what WEIGHT
+      that corner carried. On a grid line the off-line corners weigh exactly zero, so a query
+      landing on a valid sample — or anywhere along an edge whose void sits off that edge —
+      was reported `'nearest-valid'` though its value could not depend on the void, and under
+      `voidPolicy: 'no-data'` a correct measurement was thrown away as `status: 'void'`. Worse:
+      mid the north edge of the demo tile the exact answer 0.5·200 + 0.5·300 = 250 m was
+      computed and then DISCARDED for the nearest corner's 200 m — 50 m of avoidable error.
+      The fix sums the void corners' weights instead of setting a flag; a total below
+      `NEGLIGIBLE_VOID_WEIGHT` (1 mm ÷ the format's ±32767 m extreme ≈ 3.05e-8, a bound on the
+      reading's ERROR because 1/3600° is not binary-representable and an on-line query lands
+      ~1e-12 off) reads `'bilinear'` under both policies. Above it nothing changes: the
+      fallback and the strict refusal still fire the moment a void can move the answer.
+      Void semantics untouched — voids stay `null` and are still never averaged in. The AWS
+      mirror has 0 voids in 51.8 M samples, so no shipped reading moves; this is the defensive
+      path other SRTM distributions need. **Both open suspicions from the first review are now
+      closed** (suspicion 3, negative `eyeHeightM`, was real and is covered by item 4 above).
+      Still open, both noted under finding 6: peaks outside a bounded sweep are still judged
+      against the bridged complement, and `src/cv/rays.ts:profileCoverage` duplicates the
+      coverage notion with a largest-gap heuristic that should be reconciled onto the exact
+      one. Finding 7 adds a third: `'nearest-valid'` is discontinuous at a grid line (250 m on
+      it, 200 m a hair off it) because it returns a corner rather than re-normalising the valid
+      weights — the documented policy, flagged to the caller, and a policy decision to change.
 - [x] **Q3 — The demo PNG.** `npm run demo -- gornergrat` writes `out/annotated.png`: the real
       pipeline over the full `data/tiles/N45E007.hgt`, laid out by `src/render` and composited by
       `src/render/composite.ts` in Chromium (`scripts/rasterise.ts` + `src/render/composite-page.html`
