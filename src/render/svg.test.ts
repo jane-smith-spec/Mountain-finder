@@ -363,3 +363,119 @@ describe('buildOverlaySvg — obscured peaks (D8)', () => {
     expect(svg).not.toContain('<circle');
   });
 });
+
+/**
+ * ## Summits the frame had no room to name
+ *
+ * The layout may withhold a label when the frame is full (`layout.ts` rule 7).
+ * The permission is only defensible if the omission is visible in the delivered
+ * document, so this block asserts the two marks that make it visible: the dot
+ * that stays behind, and the line in the corner that counts them.
+ *
+ * Positions are the same closed form used throughout this file: a peak at
+ * Δ = 15°, α = 3° projects to x = 1600·(√3 − 1) = 1171.28 px and y = 524.82 px,
+ * and with `summitDotRadiusPx: 5` and the theme's `crowdedDotScale` of 0.7 the
+ * unnamed dot has radius 3.5 px. The indicator sits one frame margin in from
+ * the bottom-right corner: (1600 − 10, 1200 − 10).
+ */
+describe('buildOverlaySvg — crowded-out summits', () => {
+  const CROWDED = { ...PINNED, maxLabels: 1 };
+
+  function crowdedScene(): OverlayScene {
+    return scene({
+      peaks: [
+        // Rides higher, so it wins the single label.
+        peak({ id: 'node/1', name: 'Tall', bearingDeg: 80, altitudeDeg: 6 }),
+        peak({ id: 'node/2', name: 'Short', bearingDeg: 105, altitudeDeg: 3 }),
+      ],
+    });
+  }
+
+  it('leaves a smaller dot where the name would not fit', () => {
+    const svg = buildOverlaySvg(crowdedScene(), CROWDED);
+    expect(svg).toContain('<circle cx="1171.28" cy="524.82" r="3.5"/>');
+  });
+
+  it('does not draw the withheld name, or a pole to it', () => {
+    const svg = buildOverlaySvg(crowdedScene(), CROWDED);
+    expect(svg).toContain('>Tall<');
+    expect(svg).not.toContain('>Short<');
+    // One pole, for the one labelled marker.
+    expect(svg.match(/<line /g)).toHaveLength(2 * 1);
+  });
+
+  it('states in the document how many summits went unnamed', () => {
+    const svg = buildOverlaySvg(crowdedScene(), CROWDED);
+    expect(svg).toContain('+1 more named summit in this frame');
+    expect(svg).toContain('too crowded to label');
+    expect(svg).toContain('x="1590" y="1190"');
+    expect(svg).toContain('text-anchor="end"');
+  });
+
+  it('pluralises the count', () => {
+    const svg = buildOverlaySvg(
+      scene({
+        peaks: [
+          peak({ id: 'node/1', name: 'Tall', bearingDeg: 80, altitudeDeg: 6 }),
+          peak({ id: 'node/2', name: 'Short', bearingDeg: 105, altitudeDeg: 3 }),
+          peak({ id: 'node/3', name: 'Lower', bearingDeg: 100, altitudeDeg: 2 }),
+        ],
+      }),
+      CROWDED,
+    );
+    expect(svg).toContain('+2 more named summits in this frame');
+  });
+
+  it('says nothing at all when every summit got its name', () => {
+    const svg = buildOverlaySvg(crowdedScene(), PINNED);
+    expect(svg).not.toContain('too crowded');
+    expect(svg).not.toContain('mf-crowding');
+  });
+
+  it('keeps a greyed summit greyed when it loses its label (D8)', () => {
+    // A self-occluded summit that is crowded out keeps the hollow-ring shape,
+    // so the one cue that survives without colour survives without a label too.
+    const svg = buildOverlaySvg(
+      scene({
+        peaks: [
+          peak({ id: 'node/1', name: 'Tall', bearingDeg: 80, altitudeDeg: 6 }),
+          {
+            ...peak({ id: 'node/2', name: 'Short', bearingDeg: 105, altitudeDeg: 3 }),
+            visibility: 'self-occluded' as const,
+          },
+        ],
+      }),
+      CROWDED,
+    );
+    const obscuredGroup = svg.slice(svg.indexOf('mf-summits--obscured'));
+    expect(obscuredGroup).toContain('<circle cx="1171.28" cy="524.82" r="3.5"/>');
+    const solidGroup = svg.slice(
+      svg.indexOf('class="mf-summits"'),
+      svg.indexOf('mf-summits--obscured'),
+    );
+    expect(solidGroup).not.toContain('cx="1171.28"');
+  });
+
+  it('never marks a foreground-occluded summit, crowded or not (D8)', () => {
+    const svg = buildOverlaySvg(
+      scene({
+        peaks: [
+          peak({ id: 'node/1', name: 'Tall', bearingDeg: 80, altitudeDeg: 6 }),
+          {
+            ...peak({ id: 'node/2', name: 'Ben Nevis', bearingDeg: 105, altitudeDeg: 9 }),
+            visibility: 'foreground-occluded' as const,
+          },
+        ],
+      }),
+      CROWDED,
+    );
+    expect(svg).not.toContain('Ben Nevis');
+    expect(svg).not.toContain('cx="1171.28"');
+    // Refused, not crowded out — so the crowding line must not claim otherwise.
+    expect(svg).not.toContain('too crowded');
+  });
+
+  it('stays well-formed with the crowding line in it', () => {
+    expect(xmlProblems(buildOverlaySvg(crowdedScene(), CROWDED))).toEqual([]);
+  });
+});

@@ -45,6 +45,44 @@
  * cluster of near-collinear peaks comes out as a staircase of pole lengths
  * (with the occasional skipped rung), and two peaks far apart in x both stay
  * at level 0.
+ *
+ * ## What real peak density did to that, and the two rules added for it
+ *
+ * The rules above were designed and tested against handfuls of peaks. Then the
+ * peak database went from three summits to 1 786 for the Zermatt region alone,
+ * and they met a distribution they had never seen. Measured, from the
+ * Gornergrat platform on a 1600 × 1200 frame at hFOV 65°, heading 355°: **74**
+ * summits projected inside the frame, 21 of them flagged `overlapped`, 24 label
+ * boxes genuinely intersecting, and poles up to **467 px** long. Nothing
+ * crashed. The export was simply unreadable — a wall of text with a dozen
+ * crossing poles, which is a worse failure than an error, because it still
+ * looks like an answer.
+ *
+ * Two rules were added, and neither of them changes what a frame that fits
+ * already did:
+ *
+ * 6. **A pole may not exceed `maxPoleLengthPx`** (default 0.3 × frame height).
+ *    Step 3's candidate list stops at the last level that fits inside it. A
+ *    label further from its dot than that is not a label for that dot any more
+ *    — with twenty poles in the frame the reader cannot tell which one it
+ *    belongs to — so extending the ladder past this point buys nothing and
+ *    costs legibility everywhere it crosses.
+ * 7. **A frame has a label budget** (`maxLabels`, default derived — see
+ *    {@link labelSlotCapacity}). When more summits are in frame than the budget,
+ *    they are RANKED and only the top of the ranking is named. The rest keep
+ *    their summit dot, are returned in `crowdedOutSummits`, and are counted on
+ *    the image itself. Nothing is silently lost: a summit is either labelled,
+ *    dotted-and-reported, off-frame-and-reported, or refused by D8 and
+ *    reported, and the four lists partition the input exactly.
+ *
+ * The ranking (see {@link compareLabelPriority}) is **apparent height** — the
+ * altitude angle the summit rides at, which is the one quantity that combines
+ * height and distance the way an eye does, and which is already computed for
+ * every peak. It deliberately ignores `visibility`: a self-occluded summit is
+ * ranked by how big it looks, exactly like any other, because ranking greyed
+ * labels down would quietly undo decision D8 under cover of decluttering.
+ * Foreground-occluded peaks are refused *before* ranking, so no priority rule
+ * can promote one back into the picture.
  */
 
 import { interpolateHorizonAltitudeDeg } from '../core/horizon';
@@ -62,6 +100,7 @@ import type {
   PointPx,
   RectPx,
   ResolvedOverlayOptions,
+  UnlabelledSummit,
 } from './types';
 
 /** Line height as a multiple of font size. */
@@ -86,6 +125,17 @@ const HORIZON_SWEEP_FACTOR = 0.75;
 /** Hard cap on the sweep half-width. Beyond this the tangent blows up. */
 const HORIZON_SWEEP_MAX_HALF_DEG = 85;
 
+/**
+ * Default ceiling on pole length, as a fraction of the frame height.
+ *
+ * Chosen against the picture rather than against the arithmetic: at 0.3 a label
+ * on a 1200 px frame is at most 360 px from its dot, which is still close
+ * enough that the eye follows the pole in a frame holding a dozen of them.
+ * The measured dense frame reached 467 px before this cap existed, and at that
+ * length the association is gone.
+ */
+const MAX_POLE_HEIGHT_FRACTION = 0.3;
+
 /** Height of a label's reserved box for the given fonts and padding. */
 export function labelBlockHeightPx(
   nameFontPx: number,
@@ -107,18 +157,26 @@ export function resolveOverlayOptions(
   const detailFontPx = options.detailFontPx ?? Math.max(9, Math.round(nameFontPx * 0.72));
   const labelPaddingPx = options.labelPaddingPx ?? Math.max(2, Math.round(nameFontPx * 0.35));
   const blockHeightPx = labelBlockHeightPx(nameFontPx, detailFontPx, labelPaddingPx);
+  const basePoleLengthPx =
+    options.basePoleLengthPx ?? Math.max(18, Math.round(scene.heightPx * 0.06));
 
   return {
     horizonSampleCount: options.horizonSampleCount ?? 240,
     showHorizon: options.showHorizon ?? true,
     nameFontPx,
     detailFontPx,
-    basePoleLengthPx:
-      options.basePoleLengthPx ?? Math.max(18, Math.round(scene.heightPx * 0.06)),
+    basePoleLengthPx,
     // One whole label plus padding: a level bump is guaranteed to clear a
     // same-column neighbour rather than merely nudge it.
     stackStepPx: options.stackStepPx ?? Math.round(blockHeightPx + labelPaddingPx),
     maxStackLevels: options.maxStackLevels ?? 6,
+    // Never below one base pole: on a very small frame the fraction would
+    // otherwise forbid even level 0, and a marker with no label at all is a
+    // worse answer than a slightly long pole.
+    maxPoleLengthPx:
+      options.maxPoleLengthPx ??
+      Math.max(basePoleLengthPx, Math.round(scene.heightPx * MAX_POLE_HEIGHT_FRACTION)),
+    maxLabels: options.maxLabels ?? 'auto',
     labelPaddingPx,
     labelGapPx: options.labelGapPx ?? 3,
     frameMarginPx: options.frameMarginPx ?? Math.max(2, Math.round(scene.widthPx * 0.01)),
@@ -147,6 +205,84 @@ export function isPeakObscured(peak: OverlayPeak): boolean {
 export function formatPeakDetail(peak: OverlayPeak): string {
   const measurements = `${Math.round(peak.elevationM)} m · ${peak.distanceKm.toFixed(1)} km`;
   return isPeakObscured(peak) ? `${measurements} · ${OBSCURED_DETAIL_SUFFIX}` : measurements;
+}
+
+/**
+ * Which of two summits gets the label when only one of them can have it.
+ *
+ * **Apparent height first.** `altitudeDeg` is the angle the summit rides above
+ * the observer's horizontal — the single number that combines elevation and
+ * distance the way an eye does. A 4 500 m summit at 14 km outranks a 3 000 m
+ * one at 42 km because it is genuinely the bigger thing in the frame, and a
+ * near hill outranks a far one of the same height for the same reason. It is
+ * already computed for every peak, needs no prominence figure (Overture carries
+ * none) and no terrain, and it is the same quantity that decides the marker's y
+ * position, so the ranking and the picture cannot disagree.
+ *
+ * Ties fall to the greater elevation, then to a plain code-unit comparison of
+ * the id — never `localeCompare`, whose ordering depends on the host's locale
+ * data and would make the same scene drop different summits on a different
+ * machine.
+ *
+ * **What it deliberately does not look at: `visibility`.** Decision D8 says a
+ * self-occluded summit is labelled, greyed. Ranking those below clear ones
+ * whenever a frame is busy would repeal that decision by the back door, and
+ * would do it invisibly, since a crowded frame is exactly when nobody notices
+ * one more missing name. So a greyed summit competes on its height like any
+ * other. Foreground-occluded peaks never reach this comparison at all — they
+ * are refused in {@link layoutOverlay} before ranking begins.
+ */
+export function compareLabelPriority(a: OverlayPeak, b: OverlayPeak): number {
+  if (a.altitudeDeg !== b.altitudeDeg) return b.altitudeDeg - a.altitudeDeg;
+  if (a.elevationM !== b.elevationM) return b.elevationM - a.elevationM;
+  if (a.id < b.id) return -1;
+  if (a.id > b.id) return 1;
+  return 0;
+}
+
+/**
+ * How many stack levels the pole budget actually admits.
+ *
+ * A pole at level L is `basePoleLengthPx + L · stackStepPx` long, so the last
+ * usable level is `⌊(maxPoleLengthPx − basePoleLengthPx) / stackStepPx⌋`, and
+ * the count is one more than that. Never more than `maxStackLevels`, never less
+ * than one — level 0 always exists, because a marker with nowhere to put its
+ * label would be worse than a long pole.
+ */
+export function reachableStackLevels(options: ResolvedOverlayOptions): number {
+  const declared = Math.max(1, Math.round(options.maxStackLevels));
+  if (!(options.stackStepPx > 0)) return declared;
+  const headroomPx = options.maxPoleLengthPx - options.basePoleLengthPx;
+  if (!(headroomPx >= 0)) return 1;
+  return Math.max(1, Math.min(declared, Math.floor(headroomPx / options.stackStepPx) + 1));
+}
+
+/**
+ * How many labels this frame has room for.
+ *
+ * The frame is treated as a grid of label-sized slots: as many boxes as fit
+ * side by side across the usable width, times as many rungs as the pole budget
+ * admits (see {@link reachableStackLevels}). `meanLabelWidthPx` is measured
+ * from the scene's own labels, so a frame full of long Swiss compound names
+ * gets fewer slots than one full of short ones — which is the truth about how
+ * much room there is.
+ *
+ * Two known inaccuracies, in opposite directions, stated rather than hidden:
+ * the count ignores downward placements, which roughly halves it, and it
+ * assumes labels tile perfectly, which they never do. The residual is a
+ * deliberately conservative number — the failure this exists to prevent is an
+ * unreadable frame, and erring toward "name fewer, count the rest" is the safe
+ * side of that.
+ */
+export function labelSlotCapacity(
+  frameWidthPx: number,
+  meanLabelWidthPx: number,
+  options: ResolvedOverlayOptions,
+): number {
+  const usableWidthPx = frameWidthPx - 2 * options.frameMarginPx;
+  if (!(meanLabelWidthPx > 0) || !(usableWidthPx > 0)) return 1;
+  const columns = Math.max(1, Math.floor(usableWidthPx / meanLabelWidthPx));
+  return Math.max(1, columns * reachableStackLevels(options));
 }
 
 /** Strict rectangle intersection: rectangles that merely touch do not overlap. */
@@ -209,6 +345,14 @@ interface Sighting {
   detailText: string;
   labelWidthPx: number;
   labelHeightPx: number;
+}
+
+/** Mean reserved-box width across the scene's own labels. Zero for none. */
+function meanLabelWidthPx(sightings: readonly Sighting[]): number {
+  if (sightings.length === 0) return 0;
+  let total = 0;
+  for (const sighting of sightings) total += sighting.labelWidthPx;
+  return total / sightings.length;
 }
 
 /** One placement being considered for a label. */
@@ -351,23 +495,44 @@ export function layoutOverlay(
     });
   }
 
+  // How many of them this frame can name. Everything past the budget keeps its
+  // dot and is reported; nothing is dropped without being counted.
+  const budget =
+    resolved.maxLabels === 'auto'
+      ? labelSlotCapacity(scene.widthPx, meanLabelWidthPx(sightings), resolved)
+      : Math.max(0, Math.floor(resolved.maxLabels));
+
+  const crowdedOutSummits: UnlabelledSummit[] = [];
+  let labelled = sightings;
+  if (sightings.length > budget) {
+    const ranked = [...sightings].sort((a, b) => compareLabelPriority(a.peak, b.peak));
+    labelled = ranked.slice(0, budget);
+    for (const sighting of ranked.slice(budget)) {
+      crowdedOutSummits.push({
+        peak: sighting.peak,
+        summitPx: sighting.summitPx,
+        obscured: isPeakObscured(sighting.peak),
+      });
+    }
+  }
+
   // Deterministic placement order: left to right, ties broken by id with a
   // plain code-unit comparison (never `localeCompare`, whose ordering depends
   // on the host's locale data and would make the same scene lay out
   // differently on a different machine).
-  sightings.sort((a, b) => {
+  const placement = [...labelled].sort((a, b) => {
     if (a.summitPx.xPx !== b.summitPx.xPx) return a.summitPx.xPx - b.summitPx.xPx;
     if (a.peak.id < b.peak.id) return -1;
     if (a.peak.id > b.peak.id) return 1;
     return 0;
   });
 
-  const levels = Math.max(1, Math.round(resolved.maxStackLevels));
+  const levels = reachableStackLevels(resolved);
   const directions: readonly LabelDirection[] = ['up', 'down'];
   const placed: RectPx[] = [];
   const markers: PeakMarker[] = [];
 
-  for (const sighting of sightings) {
+  for (const sighting of placement) {
     let fallback: Candidate | undefined;
     let chosen: Candidate | undefined;
 
@@ -399,6 +564,7 @@ export function layoutOverlay(
     markers,
     offFramePeaks,
     foregroundOccludedPeaks,
+    crowdedOutSummits,
     options: resolved,
   };
 }

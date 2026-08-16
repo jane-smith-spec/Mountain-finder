@@ -32,8 +32,24 @@
  * backgrounds this renderer faces: sky and snow shadows are blue, distant haze
  * is blue-grey, so the accent that separates furthest from all of them is their
  * complement.
+ *
+ * ## Summits that could not be named
+ *
+ * When a frame holds more summits than it has room to label (`layout.ts` rule
+ * 7), the ones that lost still appear — as a dot at `crowdedDotScale` of the
+ * normal radius, with no pole and no text — and a single line in the corner
+ * says how many there are. Two marks, because they answer two different
+ * questions: the dots say WHERE the unnamed summits are, and the line says HOW
+ * MANY, which is the number a reader needs to know that the naming is partial.
+ * Both use the same shape language as the labelled markers: a disc for a clear
+ * summit, a hollow ring for a self-occluded one (D8), so a smaller dot reads as
+ * "same thing, less of it" rather than as a new symbol.
+ *
+ * A foreground-occluded peak reaches neither list — `layoutOverlay` refuses it
+ * before any of this — so there is no path here by which one gets a mark.
  */
 
+import { crowdingIndicatorText } from './crowding';
 import { layoutOverlay } from './layout';
 import type { OverlayLayout, OverlayOptions, OverlayScene, PeakMarker } from './types';
 import { attributes, escapeXml, formatCoordinate } from './xml';
@@ -70,6 +86,12 @@ export interface OverlayTheme {
    * and a hostile background, none of which opacity does.
    */
   obscuredDashFactor: number;
+  /**
+   * Radius of an unnamed, crowded-out summit's dot, as a multiple of the normal
+   * summit dot radius. Smaller so the labelled summits stay the primary read,
+   * large enough to be unmistakably a mark and not a compression artifact.
+   */
+  crowdedDotScale: number;
 }
 
 export const DEFAULT_THEME: OverlayTheme = {
@@ -86,6 +108,7 @@ export const DEFAULT_THEME: OverlayTheme = {
   fontWeight: '600',
   obscuredOpacity: 0.7,
   obscuredDashFactor: 3,
+  crowdedDotScale: 0.7,
 };
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
@@ -139,12 +162,48 @@ function textElement(
   })}>${escapeXml(content)}</text>`;
 }
 
+/** One summit dot: a labelled marker's, or a crowded-out summit's smaller one. */
+interface SummitDot {
+  xPx: number;
+  yPx: number;
+  radiusPx: number;
+  obscured: boolean;
+}
+
+/**
+ * Every dot the overlay draws, labelled markers first.
+ *
+ * Markers keep their existing order and radius, so a frame with nothing crowded
+ * out serialises byte for byte as it did before crowding existed.
+ */
+function summitDots(layout: OverlayLayout, theme: OverlayTheme): SummitDot[] {
+  const radiusPx = layout.options.summitDotRadiusPx;
+  const dots: SummitDot[] = layout.markers.map((marker) => ({
+    xPx: marker.summitPx.xPx,
+    yPx: marker.summitPx.yPx,
+    radiusPx,
+    obscured: marker.obscured,
+  }));
+  for (const summit of layout.crowdedOutSummits) {
+    dots.push({
+      xPx: summit.summitPx.xPx,
+      yPx: summit.summitPx.yPx,
+      radiusPx: radiusPx * theme.crowdedDotScale,
+      obscured: summit.obscured,
+    });
+  }
+  return dots;
+}
+
 /** Serialise an already-laid-out overlay. */
 export function buildOverlaySvgFromLayout(
   layout: OverlayLayout,
   theme: OverlayTheme = DEFAULT_THEME,
 ): string {
   const widths = strokeWidths(layout);
+  const dots = summitDots(layout, theme);
+  const solidDots = dots.filter((dot) => !dot.obscured);
+  const obscuredDots = dots.filter((dot) => dot.obscured);
   const lines: string[] = [];
 
   lines.push(
@@ -186,13 +245,12 @@ export function buildOverlaySvgFromLayout(
   // An obscured summit is a hollow ring rather than a filled dot, so unlike the
   // filled marker — which carries its own dark outline — it needs a halo of its
   // own to stay visible against snow.
-  for (const marker of layout.markers) {
-    if (!marker.obscured) continue;
+  for (const dot of obscuredDots) {
     lines.push(
       `<circle${attributes({
-        cx: marker.summitPx.xPx,
-        cy: marker.summitPx.yPx,
-        r: layout.options.summitDotRadiusPx,
+        cx: dot.xPx,
+        cy: dot.yPx,
+        r: dot.radiusPx,
         'stroke-width': formatCoordinate(widths.polePx + 2 * theme.haloSpreadPx),
       })}/>`,
     );
@@ -254,19 +312,12 @@ export function buildOverlaySvgFromLayout(
       'stroke-width': formatCoordinate(Math.max(1, widths.polePx * 0.8)),
     })}>`,
   );
-  for (const marker of layout.markers) {
-    if (marker.obscured) continue;
-    lines.push(
-      `<circle${attributes({
-        cx: marker.summitPx.xPx,
-        cy: marker.summitPx.yPx,
-        r: layout.options.summitDotRadiusPx,
-      })}/>`,
-    );
+  for (const dot of solidDots) {
+    lines.push(`<circle${attributes({ cx: dot.xPx, cy: dot.yPx, r: dot.radiusPx })}/>`);
   }
   lines.push('</g>');
 
-  if (obscuredMarkers.length > 0) {
+  if (obscuredDots.length > 0) {
     lines.push(
       `<g${attributes({
         class: 'mf-summits mf-summits--obscured',
@@ -276,14 +327,8 @@ export function buildOverlaySvgFromLayout(
         'stroke-width': formatCoordinate(Math.max(1.25, widths.polePx)),
       })}>`,
     );
-    for (const marker of obscuredMarkers) {
-      lines.push(
-        `<circle${attributes({
-          cx: marker.summitPx.xPx,
-          cy: marker.summitPx.yPx,
-          r: layout.options.summitDotRadiusPx,
-        })}/>`,
-      );
+    for (const dot of obscuredDots) {
+      lines.push(`<circle${attributes({ cx: dot.xPx, cy: dot.yPx, r: dot.radiusPx })}/>`);
     }
     lines.push('</g>');
   }
@@ -321,6 +366,34 @@ export function buildOverlaySvgFromLayout(
     );
   }
   lines.push('</g>');
+
+  // The count of summits that got a dot and no name. Bottom-right, right
+  // anchored, at the detail font — small enough to stay out of the picture,
+  // permanent enough that it cannot be lost the way a UI note can be when the
+  // export is screenshotted and pasted somewhere else.
+  const indicator = crowdingIndicatorText(layout.crowdedOutSummits.length);
+  if (indicator !== undefined) {
+    lines.push(
+      `<g${attributes({
+        class: 'mf-crowding',
+        'font-family': theme.fontFamily,
+        'font-weight': theme.fontWeight,
+        'text-anchor': 'end',
+      })}>`,
+    );
+    lines.push(
+      textElement(
+        layout.widthPx - layout.options.frameMarginPx,
+        layout.heightPx - layout.options.frameMarginPx,
+        layout.options.detailFontPx,
+        theme.detailColor,
+        theme,
+        indicator,
+        false,
+      ),
+    );
+    lines.push('</g>');
+  }
 
   lines.push('</svg>');
   return lines.join('\n');

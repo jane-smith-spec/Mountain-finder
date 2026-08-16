@@ -94,6 +94,34 @@ export interface OverlayOptions {
   stackStepPx?: number;
   /** How many stack levels are tried in each direction before giving up. Default 6. */
   maxStackLevels?: number;
+  /**
+   * Longest a flag pole may get, px. Default `0.3 × heightPx`, never less than
+   * `basePoleLengthPx`.
+   *
+   * A hard ceiling on the *distance between a label and the summit it names*.
+   * Stack levels alone do not bound that: six levels at a default step is more
+   * than a third of the frame, and a measured dense frame (74 summits from the
+   * Gornergrat) reached 467 px of pole in a 1200 px image. At that separation
+   * the label has stopped naming anything — the reader cannot follow which of
+   * a dozen crossing poles ends at which dot. The cap turns crowding into a
+   * reported shortage of room instead of an unreadable ladder.
+   */
+  maxPoleLengthPx?: number;
+  /**
+   * How many labels this frame gets at most. Default `'auto'`.
+   *
+   * `'auto'` derives the budget from the frame itself — see
+   * {@link labelSlotCapacity}. A number pins it; `0` labels nothing and reports
+   * everything, which is a legitimate way to ask for markers with no names.
+   *
+   * Peaks beyond the budget are NOT lost: they keep a summit dot, they are
+   * listed in {@link OverlayLayout.crowdedOutSummits}, and the SVG says how
+   * many there are. Which peaks make the cut is decided by
+   * {@link compareLabelPriority}, on apparent height alone — never on
+   * visibility, so this cannot become a back door that quietly drops the greyed
+   * labels of decision D8.
+   */
+  maxLabels?: number | 'auto';
   /** Padding inside a label's reserved box, px. Default `0.35 × nameFontPx`. */
   labelPaddingPx?: number;
   /** Gap between the top of a pole and the bottom of its label, px. Default 3. */
@@ -109,6 +137,25 @@ export type ResolvedOverlayOptions = Required<OverlayOptions>;
 
 /** Which way a label was pushed off its summit to find free space. */
 export type LabelDirection = 'up' | 'down';
+
+/**
+ * A summit that is in the picture and gets a dot, but no name, because the
+ * frame's label budget ran out.
+ *
+ * It carries a pixel position — unlike `offFramePeaks` and
+ * `foregroundOccludedPeaks`, which are not drawn at all — precisely because
+ * this one IS drawn. Dropping the name while keeping the dot is the honest
+ * middle: the overlay still says "there is a named summit here", and the count
+ * of unnamed dots is what makes an over-full frame look over-full instead of
+ * looking like a view with twenty peaks in it.
+ */
+export interface UnlabelledSummit {
+  peak: OverlayPeak;
+  /** Projected summit position — where the dot goes. */
+  summitPx: PointPx;
+  /** True for a self-occluded summit (D8): drawn as a ring, not a disc. */
+  obscured: boolean;
+}
 
 /**
  * One laid-out peak marker: a dot on the summit, a pole, and a label box.
@@ -180,5 +227,15 @@ export interface OverlayLayout {
    * behind something else".
    */
   foregroundOccludedPeaks: readonly OverlayPeak[];
+  /**
+   * Summits inside the frame that got a dot but no label, because the frame's
+   * label budget was already spent. Ordered by the priority that decided it —
+   * highest apparent summit first — so a caller naming a few of them names the
+   * ones a viewer is most likely to be asking about.
+   *
+   * Empty for every scene that fits, which is every scene the renderer handled
+   * before real peak density arrived.
+   */
+  crowdedOutSummits: readonly UnlabelledSummit[];
   options: ResolvedOverlayOptions;
 }

@@ -667,3 +667,263 @@ describe('layoutOverlay — obscured peaks (D8)', () => {
     expect(layout.markers[0]?.detailText).not.toContain('obscured');
   });
 });
+
+/**
+ * ## Real peak density (Phase 9)
+ *
+ * ### Why these tests exist
+ *
+ * The collision code above was designed against handfuls of peaks. The Overture
+ * import put 1 786 named summits into the Zermatt region alone, and a measured
+ * run from the Gornergrat platform (45.98333 N, 7.78222 E, 3 089 m) at heading
+ * 355°, hFOV 65°, on a 1600 × 1200 frame, projected **74** of them inside the
+ * frame. The old layout drew all 74: 21 flagged `overlapped`, 24 label boxes
+ * genuinely intersecting, poles up to 467 px long in a 1200 px frame. The
+ * export was unreadable. See `src/render/README.md` for the full measurement.
+ *
+ * ### How the expectations below are derived
+ *
+ * Arithmetic only, from the option values, never from running the layout.
+ *
+ * **Label width.** Every peak built by the `peak()` helper carries
+ * `elevationM: 4478` and `distanceKm: 12.3`, so its detail line is the 16
+ * characters `4478 m · 12.3 km`. In the advance-width table of
+ * `text-metrics.ts` that is
+ *
+ *     4·0.556 (digits 4478) + 0.28 (space) + 0.87 (m) + 0.28 (space)
+ *   + 0.55 (·) + 0.28 (space) + 2·0.556 (digits 12) + 0.28 (.)
+ *   + 0.556 (digit 3) + 0.28 (space) + 0.55 (k) + 0.87 (m)
+ *   = 8.132 em
+ *
+ * → 8.132 × 14 px = **113.848 px**. Every name used below is short enough that
+ * the detail line is the wider of the two lines, so with `labelPaddingPx: 4`
+ * every reserved box is exactly **121.848 px** wide.
+ *
+ * **Rows.** A pole at level L is `basePoleLengthPx + L · stackStepPx` long. With
+ * `basePoleLengthPx: 60`, `stackStepPx: 51` (PINNED's implied default) and a
+ * cap of 200 px, `60 + 51 L ≤ 200` gives L ≤ 2.745, i.e. levels 0, 1, 2 — three
+ * rows.
+ *
+ * **Columns.** The usable width is `1600 − 2 × 10 = 1580` px, and
+ * `⌊1580 / 121.848⌋ = 12` (12 boxes span 1462.2 px, 13 would need 1584.0 px).
+ *
+ * So the derived label budget for that option set is 12 × 3 = **36**.
+ */
+describe('layoutOverlay — real peak density', () => {
+  /** A row of peaks spread across the frame, altitude rising with the index. */
+  function spread(count: number, altitudeStepDeg = 0.05): VisiblePeak[] {
+    const peaks: VisiblePeak[] = [];
+    for (let index = 0; index < count; index += 1) {
+      const deltaDeg = -25 + (50 * index) / (count - 1);
+      peaks.push(
+        peak({
+          id: `node/${String(index)}`,
+          name: `P${String(index)}`,
+          bearingDeg: 90 + deltaDeg,
+          altitudeDeg: 1 + index * altitudeStepDeg,
+        }),
+      );
+    }
+    return peaks;
+  }
+
+  it('never stands a label further from its summit than the pole budget', () => {
+    // Eight peaks within 0.14° of bearing — one column. The budget allows
+    // levels 0, 1 and 2 only (60 + 51 L ≤ 200), so no pole may exceed
+    // 60 + 2 × 51 = 162 px, and certainly not the 60 + 5 × 51 = 315 px the
+    // six-level search would otherwise reach.
+    const peaks: VisiblePeak[] = [];
+    for (let index = 0; index < 8; index += 1) {
+      peaks.push(
+        peak({
+          id: `node/${String(index)}`,
+          name: `P${String(index)}`,
+          bearingDeg: 105 + index * 0.02,
+          altitudeDeg: 3.7 - index * 0.1,
+        }),
+      );
+    }
+    const layout = layoutOverlay(scene({ peaks }), {
+      ...PINNED,
+      maxPoleLengthPx: 200,
+      maxLabels: 8,
+    });
+
+    expect(layout.markers).toHaveLength(8);
+    for (const marker of layout.markers) {
+      expect(marker.stackLevel).toBeLessThanOrEqual(2);
+      expect(60 + marker.stackLevel * 51).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('derives a label budget from how many boxes the frame holds', () => {
+    // 12 columns × 3 rows = 36, from the arithmetic in this block's header.
+    const layout = layoutOverlay(scene({ peaks: spread(40) }), {
+      ...PINNED,
+      maxPoleLengthPx: 200,
+    });
+
+    expect(layout.markers).toHaveLength(36);
+    expect(layout.crowdedOutSummits).toHaveLength(4);
+  });
+
+  it('accounts for every peak it was given', () => {
+    const peaks = [
+      ...spread(40),
+      // Off frame to the right: Δ = 40° with hFOV 60°.
+      peak({ id: 'node/off', name: 'Off', bearingDeg: 130 }),
+      {
+        ...peak({ id: 'node/hidden', name: 'Hidden', bearingDeg: 88 }),
+        visibility: 'foreground-occluded' as const,
+      },
+    ];
+    const layout = layoutOverlay(scene({ peaks }), { ...PINNED, maxPoleLengthPx: 200 });
+
+    expect(
+      layout.markers.length +
+        layout.crowdedOutSummits.length +
+        layout.offFramePeaks.length +
+        layout.foregroundOccludedPeaks.length,
+    ).toBe(peaks.length);
+    expect(layout.offFramePeaks.map((entry) => entry.name)).toEqual(['Off']);
+    expect(layout.foregroundOccludedPeaks.map((entry) => entry.name)).toEqual(['Hidden']);
+  });
+
+  it('keeps the summits that ride highest in the view, not the first four given', () => {
+    // Five well-separated peaks, altitudes 1°…5°, handed over in an order that
+    // is neither the priority order nor its reverse. With room for three, the
+    // three highest angles survive — the mountains that dominate the frame.
+    const peaks = [
+      peak({ id: 'node/1', name: 'One', bearingDeg: 70, altitudeDeg: 1 }),
+      peak({ id: 'node/5', name: 'Five', bearingDeg: 80, altitudeDeg: 5 }),
+      peak({ id: 'node/2', name: 'Two', bearingDeg: 90, altitudeDeg: 2 }),
+      peak({ id: 'node/4', name: 'Four', bearingDeg: 100, altitudeDeg: 4 }),
+      peak({ id: 'node/3', name: 'Three', bearingDeg: 110, altitudeDeg: 3 }),
+    ];
+    const layout = layoutOverlay(scene({ peaks }), { ...PINNED, maxLabels: 3 });
+
+    expect(layout.markers.map((marker) => marker.nameText).sort()).toEqual([
+      'Five',
+      'Four',
+      'Three',
+    ]);
+    // The two that lost are reported by name and in priority order, so a caller
+    // can say which summits it could not fit rather than only how many.
+    expect(layout.crowdedOutSummits.map((entry) => entry.peak.name)).toEqual(['Two', 'One']);
+  });
+
+  it('is still independent of the order the peaks arrive in when the frame is full', () => {
+    const peaks = spread(40);
+    const options: OverlayOptions = { ...PINNED, maxPoleLengthPx: 200 };
+    const forward = layoutOverlay(scene({ peaks }), options);
+    const reversed = layoutOverlay(scene({ peaks: [...peaks].reverse() }), options);
+    expect(reversed.markers).toEqual(forward.markers);
+    expect(reversed.crowdedOutSummits).toEqual(forward.crowdedOutSummits);
+  });
+
+  it('ranks a greyed summit by its height, never below the peaks that are clear (D8)', () => {
+    // The crowding rule must not become a quiet way of dropping the greyed
+    // labels the user asked for. Priority is apparent height and nothing else,
+    // so a self-occluded summit riding at 5° outranks visible ones at 1° and 2°.
+    const layout = layoutOverlay(
+      scene({
+        peaks: [
+          peak({ id: 'node/1', name: 'Low Ridge', bearingDeg: 80, altitudeDeg: 1 }),
+          {
+            ...peak({ id: 'node/2', name: 'Shoulder', bearingDeg: 90, altitudeDeg: 5 }),
+            visibility: 'self-occluded' as const,
+          },
+          peak({ id: 'node/3', name: 'Knoll', bearingDeg: 100, altitudeDeg: 2 }),
+        ],
+      }),
+      { ...PINNED, maxLabels: 1 },
+    );
+
+    expect(layout.markers.map((marker) => marker.nameText)).toEqual(['Shoulder']);
+    expect(layout.markers[0]?.obscured).toBe(true);
+    expect(layout.crowdedOutSummits.map((entry) => entry.peak.name)).toEqual(['Knoll', 'Low Ridge']);
+  });
+
+  it('never lets priority resurrect a foreground-occluded summit (D8)', () => {
+    // The highest-riding peak in the scene is one that is hidden behind a
+    // different hill. Ranking happens after the D8 refusal, so it cannot be
+    // ranked back into the picture — not as a label, and not as a dot.
+    const layout = layoutOverlay(
+      scene({
+        peaks: [
+          {
+            ...peak({ id: 'node/1', name: 'Ben Nevis', bearingDeg: 90, altitudeDeg: 9 }),
+            visibility: 'foreground-occluded' as const,
+          },
+          peak({ id: 'node/2', name: 'Cow Hill', bearingDeg: 100, altitudeDeg: 1 }),
+        ],
+      }),
+      { ...PINNED, maxLabels: 5 },
+    );
+
+    expect(layout.markers.map((marker) => marker.nameText)).toEqual(['Cow Hill']);
+    expect(layout.foregroundOccludedPeaks.map((entry) => entry.name)).toEqual(['Ben Nevis']);
+    expect(layout.crowdedOutSummits).toHaveLength(0);
+  });
+
+  it('marks a crowded-out summit at its projected position', () => {
+    // A dropped name is still a summit that is in the picture, so it keeps its
+    // dot. The position is the same closed form the labelled markers use.
+    const layout = layoutOverlay(
+      scene({
+        peaks: [
+          peak({ id: 'node/1', name: 'Big', bearingDeg: 80, altitudeDeg: 5 }),
+          peak({ id: 'node/2', name: 'Small', bearingDeg: 105, altitudeDeg: 3 }),
+        ],
+      }),
+      { ...PINNED, maxLabels: 1 },
+    );
+
+    const dropped = layout.crowdedOutSummits[0];
+    expect(dropped?.peak.name).toBe('Small');
+    expect(dropped?.summitPx.xPx).toBeCloseTo(1171.28129, 4);
+    expect(dropped?.summitPx.yPx).toBeCloseTo(524.81995, 4);
+    expect(dropped?.obscured).toBe(false);
+  });
+
+  it('leaves an uncrowded scene exactly as it was', () => {
+    // The budget must not change anything for the frames the renderer already
+    // handled: two well-separated peaks stay unstacked and nothing is dropped.
+    const layout = layoutOverlay(
+      scene({
+        peaks: [
+          peak({ id: 'node/1', name: 'Left', bearingDeg: 75 }),
+          peak({ id: 'node/2', name: 'Right', bearingDeg: 105 }),
+        ],
+      }),
+      PINNED,
+    );
+    expect(layout.markers.map((marker) => marker.stackLevel)).toEqual([0, 0]);
+    expect(layout.crowdedOutSummits).toHaveLength(0);
+  });
+});
+
+describe('resolveOverlayOptions — crowding', () => {
+  it('bounds the pole at 30 % of the frame height', () => {
+    // A label further from its dot than that is no longer readable as a label
+    // FOR that dot: 0.3 × 1200 = 360 px, 0.3 × 2400 = 720 px.
+    expect(resolveOverlayOptions(scene()).maxPoleLengthPx).toBe(360);
+    expect(
+      resolveOverlayOptions(scene({ widthPx: 3200, heightPx: 2400 })).maxPoleLengthPx,
+    ).toBe(720);
+  });
+
+  it('never bounds the pole below one base pole length', () => {
+    // 0.3 × 120 = 36 px, shorter than the 18 px floor... but on a tiny frame
+    // the base pole is 18 px and the cap must still admit level 0.
+    const resolved = resolveOverlayOptions(scene({ widthPx: 160, heightPx: 120 }), {
+      basePoleLengthPx: 90,
+    });
+    expect(resolved.maxPoleLengthPx).toBe(90);
+  });
+
+  it('leaves the label budget on "auto" unless it is asked for a number', () => {
+    expect(resolveOverlayOptions(scene()).maxLabels).toBe('auto');
+    expect(resolveOverlayOptions(scene(), { maxLabels: 12 }).maxLabels).toBe(12);
+  });
+});
