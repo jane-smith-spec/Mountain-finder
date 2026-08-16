@@ -15,3 +15,9 @@ playwright-report/
 # Downloaded topo tiles — large binaries, fetched via npm run fetch:tiles
 data/tiles/*.hgt
 data/tiles/*.hgt.gz
+
+# Overture parquet footers cached by npm run fetch:peaks
+data/overture/
+
+# Agent scratch space — never committed
+scratch/

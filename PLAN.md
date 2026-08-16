@@ -82,6 +82,22 @@ source; the HTTP clients below demote from a runtime dependency to an acquisitio
 | P6.2 Real photo set | 3–5 openly licensed mountain photos with documented shooting coordinates + expected visible peak names | Each case file lists source URL, license, coordinates, and must-see peaks — reviewed for correctness |
 | P6.3 Acceptance suite | `npm run test:acceptance` — full pipeline per case | Every must-see peak labeled; no peak labeled that the horizon proves hidden; where pixel positions are annotated, error within tolerance |
 
+### Phase 9 — Peak coverage *(Q5 — the binding constraint after v2.0)*
+
+v2.0 ships working. It works at four viewpoints, because the peak database holds three
+summits. Everything downstream of that database is finished and tested; the database is the
+product's limit. Every peak source is blocked from this environment except AWS S3, where
+Overture Maps is both listable and range-readable.
+
+| Product | Description | Self-check |
+|---|---|---|
+| P9.1 Parquet range reader | Read a remote Parquet footer over HTTP Range; expose row groups with their `bbox` statistics. Verified feasible: 524 KB read from an 850 MB part = **0.062%** | Against a committed real parquet slice, offline: footer parses, row-group count and bbox stats match values stated independently in the fixture sidecar |
+| P9.2 Spatial pruning | Keep only row groups whose bbox intersects the wanted area; never fetch a whole part | A bbox covering one row group fetches exactly that group; **bytes fetched vs part size is printed**, because that ratio is the whole design |
+| P9.3 Peak extraction | Establish what marks a summit in Overture (subtype/class), where `names.primary` lives, and **whether elevations exist at all** | Extracted peaks match values readable in the committed fixture and stated as literals |
+| P9.4 Elevation provenance | **Open question, must not be papered over.** If Overture carries no summit heights, that is a design problem, not a detail — SRTM under-reads sharp summits by 250–350 m and displaces them ~320 m (see MISSION.md), so sampling the DEM for peak heights is forbidden | Every imported peak's `elevationSource` is honest; a peak with no trustworthy height is reported, never given a DEM value |
+| P9.5 Scalable peak store | Serve "peaks within radius of a point" without loading a region into memory per query; keep the `PeaksProvider` seam unchanged | Pipeline is untouched; the cited `ground-truth-peaks.json` summits still resolve and all 148 acceptance assertions still pass |
+| P9.6 Conflict reporting | Where Overture disagrees with a cited ground-truth height or position | Disagreement is **reported, not silently resolved**; the cited value wins by default because it is the one with a source |
+
 ### Phase 7 — CV silhouette alignment *(v2.1 — after base ships)*
 
 Skyline extraction from the photo (per-column luminance gradient), 1-D cross-correlation against the computed profile solving heading/pitch offset, auto-trim replacing manual sliders. Self-check: synthetic rendered silhouettes with known injected offset → recovered within 0.5°; acceptance-suite label error strictly improves vs. manual baseline.
