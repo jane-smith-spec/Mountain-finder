@@ -1,30 +1,72 @@
 # Mountain Finder
 
-Point the app at a photo of mountains — it figures out which peaks you're looking at and plants labeled flags on their summits.
+Point it at a photo of mountains — it works out which peaks you're looking at and plants labeled flags on their summits.
 
-**Status:** v2 restart. The v1 Expo/React Native attempt is preserved in [`archive/v1-expo/`](archive/v1-expo/ARCHIVE-NOTE.md). v2 is a self-testable TypeScript pipeline + web app, built still-photo-first.
+**Status:** v2 in build. Phase 0–3 and the offline elevation layer are done and verified; the renderer and end-to-end pipeline are in progress. The v1 Expo/React Native attempt is retired to [`archive/v1-expo/`](archive/v1-expo/ARCHIVE-NOTE.md).
 
 | Document | Purpose |
 |---|---|
-| [MISSION.md](MISSION.md) | What we're building, the prime directive, and the decision record |
-| [PLAN.md](PLAN.md) | Phased build plan — every product with its self-check, tasks grouped for agents |
-| [TODO.md](TODO.md) | Live checklist, updated as work lands |
-| [CLAUDE.md](CLAUDE.md) | Working rules for agent sessions in this repo |
+| [MISSION.md](MISSION.md) | What we're building, the prime directive, the decision record |
+| [PLAN.md](PLAN.md) | Every product paired with the executable check that proves it |
+| [TODO.md](TODO.md) | Live checklist |
+| [CLAUDE.md](CLAUDE.md) | Working rules for agent sessions |
 
-## The pipeline at a glance
+## The prime directive
+
+**Nothing is done until the agent that built it ran its check and watched it pass.**
+
+v1 died of the opposite: ~2,500 lines of plausible, never-executed code that needed a phone's camera, GPS, and compass to do anything. v2 is still-photo-first precisely because a photo is a file, a location is a number, and an annotated image is an artifact you can assert against.
+
+This is not ceremony. Running things has repeatedly overturned what we believed:
+
+- The plan's own **occlusion rule was wrong** — it compared peaks against the skyline at all distances, but terrain *behind* a peak cannot hide it. Found by the group whose only job was independent ground truth.
+- **SRTM doesn't just underestimate sharp summits, it displaces them.** The Matterhorn's highest posting reads 4230 m (true: 4478 m) and sits ~320 m from the surveyed summit. So peak heights come from the peak database; terrain comes from SRTM.
+- A **"discovery" of SRTM voids turned out to be a bug in the sampling code** — reading a coordinate from the tile one degree south of the one containing it. The correction is recorded inline in `MISSION.md` rather than quietly edited away.
+
+## Pipeline
 
 ```
 photo (JPEG)
   │
-  ├─ EXIF extract ──► lat/lng, altitude, compass direction, focal length → FOV
-  │                    (manual override for any missing/wrong value)
+  ├─ EXIF ──► lat/lon, altitude, GPSImgDirection (+ True/Magnetic ref), focal → FOV
+  │            missing or wrong values are an explicit "needs manual" state,
+  │            never a silent default; magnetic is never treated as true
   │
-  ├─ elevation data (OpenTopoData SRTM) ──► 360° line-of-sight sweep
-  │                                          ──► terrain horizon silhouette
-  ├─ peak database (OpenStreetMap Overpass) ─► named peaks + geometry
+  ├─ local SRTM .hgt tiles ──► ray sweep per bearing ──► skyline staircase
+  │            (offline; no network at runtime)         (angle as a function of distance)
   │
-  └─ camera projection ──► visible peaks placed at pixel coordinates
-                            ──► SVG overlay: horizon line + flags + names
+  ├─ local peak database ──► named summits with tagged elevations
+  │
+  └─ visibility: a peak is occluded only by terrain NEARER than itself
+        └─► camera projection ──► SVG overlay: horizon line + flags + names
 ```
 
-Later phases add computer-vision skyline alignment (snap the computed silhouette to the actual one in the photo) and a live-camera mobile app that reuses the same core.
+## Commands
+
+| Command | What it proves |
+|---|---|
+| `npm run check` | typecheck + lint + full unit suite, offline and deterministic |
+| `npm run test:e2e` | Playwright against real Chromium |
+| `npm run test:acceptance` | ground-truth cases; a pass means the *yardstick* is sound |
+| `npm run demo -- <case>` | runs a real case end to end — the human-viewable proof |
+| `npm run fetch:tiles` | acquisition only: pulls SRTM tiles from AWS Open Data |
+
+## Layout
+
+```
+src/core/       Pure geometry: geodesy, sightline, horizon, projection, visibility.
+                No network, no DOM, no device APIs, no Date.now. Deterministic throughout.
+src/providers/  Elevation from local .hgt tiles; HTTP clients demoted to acquisition.
+src/exif/       Photo metadata → camera pose, with an explicit manual-override model.
+src/render/     Pure overlay builder: scene in, SVG string out.
+src/pipeline/   Orchestration, fully injectable so tests run offline.
+fixtures/       Analytic scenes with closed-form answers, real SRTM windows, cited cases.
+archive/        Retired v1. Read-only reference.
+```
+
+## Testing rules
+
+1. **Tests never touch the network.** Only `record:fixtures` and `fetch:tiles` may, and only when run deliberately.
+2. **Expectations are derived independently** — from closed-form mathematics or cited references, never by running the code and pasting its output back. This is what caught the effective-Earth-radius error and the occlusion bug.
+3. **Ground truth is built by people who don't implement the pipeline**, so the yardstick can't quietly bend to fit it.
+4. **Uncertainty is recorded, not resolved by guessing.** Half Dome from Mount Diablo clears its ridge by 0.0043° — about 8 m at 200 km — so it's marked *disputed* and asserted in neither direction.
