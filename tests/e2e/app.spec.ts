@@ -34,6 +34,7 @@ const PHOTO_DIR = resolve(HERE, '../../fixtures/photos');
 const CHAMONIX = resolve(PHOTO_DIR, 'chamonix-north-east.jpg');
 const ACONCAGUA = resolve(PHOTO_DIR, 'aconcagua-south-west.jpg');
 const STRIPPED = resolve(PHOTO_DIR, 'stripped-no-exif.jpg');
+const GORNERGRAT = resolve(PHOTO_DIR, 'gornergrat-matterhorn.jpg');
 
 /** The nine pose fields, in POSE_FIELDS order. */
 const POSE_FIELDS = [
@@ -255,47 +256,107 @@ test('trim sliders move the pose the overlay consumes by exactly the amount aske
   await expect(page.getByTestId('trim-reset')).toBeDisabled();
 });
 
-test('the overlay region is an obvious placeholder, and export is honestly disabled', async ({
+test('a photo with no terrain says which tile is missing instead of drawing nothing', async ({
   page,
 }) => {
+  // Chamonix sits in N45E006. This repository holds N45E007/N46E007 (Zermatt),
+  // N37W122, N47W123, N56W006 and the committed case windows — nothing for
+  // Chamonix — so the honest answer is a named absence, not an empty overlay.
   await pickPhoto(page, CHAMONIX);
   await page.getByTestId('input-assumptions').check();
   await expect(page.getByTestId('missing-summary')).toHaveAttribute('data-missing-count', '0');
 
   // The photo is displayed at its own aspect ratio…
   await expect(page.getByTestId('photo-image')).toBeVisible();
-  // …with a placeholder that cannot be mistaken for a result.
+  // …and the overlay layer stays an unmistakable placeholder.
   await expect(page.getByTestId('overlay-placeholder')).toBeVisible();
   await expect(page.getByTestId('overlay-state')).toHaveAttribute('data-overlay', 'placeholder');
-  await expect(page.getByTestId('overlay-state')).toContainText('No peaks have been computed');
   await expect(page.getByTestId('overlay-svg')).toHaveCount(0);
+
+  // The decisive assertion: the failure is SPECIFIC and actionable.
+  const error = page.getByTestId('overlay-error');
+  await expect(error).toBeVisible();
+  await expect(error).toContainText('N45E006');
+  await expect(error).toContainText('npm run fetch:tiles');
+  await expect(error).toContainText('45.92370, 6.86940');
+  // And it says outright that silence here is not a verdict about the view.
+  await expect(error).toContainText('no peaks are visible');
 
   // Export cannot lie about being ready when nothing has been rendered.
   await expect(page.getByTestId('export-png')).toBeDisabled();
-  await expect(page.getByTestId('export-state')).toContainText('compositor is not wired up');
+  await expect(page.getByTestId('export-state')).toContainText('no overlay to export');
 });
 
 /**
- * P5.2 — the export seam, proved before the real pipeline exists.
+ * P5.1 + P5.2, end to end on the REAL pipeline (TODO.md Q1).
  *
- * `?seam-probe=1` swaps in the throwaway implementations from
- * `src/app/seam-probe.ts` (an obviously-fake overlay and a flat-colour PNG, no
- * compositing). What is under test is the APP's half of the seam: the overlay
- * effect runs, the SVG lands over the photo, the export button un-disables, and
- * a PNG of the photo's own pixel dimensions reaches the user with the right
- * filename. When Q1 replaces the probes, this path is already known to work.
+ * This is the test the `?seam-probe=1` case was a stand-in for, and it is
+ * strictly stronger: no probe, no stub, no fabricated overlay. The browser
+ * fetches genuine SRTM samples from /terrain/ (a whole N45E007 tile when
+ * `npm run fetch:tiles` has been run, otherwise the committed Gornergrat
+ * window), runs `annotateScene`, lays the overlay out with `src/render`, and
+ * composites the export with `src/render/composite`.
+ *
+ * ## Where the expected pixel position comes from
+ *
+ * Independent of the renderer, from the case file's own geometry and the
+ * projection model. Observer 45°59'00"N 7°46'56"E, eye 3089 + 1.6 m; Matterhorn
+ * 45.976389 N, 7.658611 E at 4478 m:
+ *
+ *   bearing  265.42252°   (great-circle, from the fixture's coordinate)
+ *   range      9.5827 km
+ *   α = atan((4478 − 3090.6 − d²/2R_eff) / d) = +8.20143°,  R_eff = R/(1 − 0.13)
+ *
+ * The camera looks along 265.4°, so Δ = +0.02252°, and with hFOV 65.4704525°
+ * on a 1200 × 900 frame:
+ *
+ *   x = 1200 · (0.5 + tanΔ / (2·tan(hFOV/2)))            = 600.37 px
+ *   y =  900 · (0.5 − (tanα / cosΔ) / (2·tan(vFOV/2)))   = 315.48 px
+ *
+ * asserted to ±12 px — 1 % of the frame width, far tighter than any labelling
+ * error would need to be to matter, and loose enough to survive the last digit
+ * of the peak database's coordinates.
  */
-test('the overlay and export seam works end to end when an implementation is supplied', async ({
-  page,
-}) => {
-  await page.goto('/?seam-probe=1');
-  await pickPhoto(page, CHAMONIX);
+test('a photo over terrain the app holds gets a real overlay, and exports it', async ({ page }) => {
+  await pickPhoto(page, GORNERGRAT);
+
+  // EXIF first: 45 + 59/60 = 45.983333, 7 + 46/60 + 56/3600 = 7.782222.
+  await expect(page.getByTestId('input-lat')).toHaveValue('45.983333');
+  await expect(page.getByTestId('input-lon')).toHaveValue('7.782222');
+  await expect(page.getByTestId('input-headingDeg')).toHaveValue('265.4');
+  // 2·atan(18/28) = 65.4704525442152°, shown to 3 dp with trailing zeros cut.
+  await expect(page.getByTestId('input-hFovDeg')).toHaveValue('65.47');
+  await expect(page.getByTestId('input-vFovDeg')).toHaveValue('51.481');
+
   await page.getByTestId('input-assumptions').check();
+  // GPS altitude 3090.6 m − 1.6 m eye height = the platform's 3089 m.
+  await expect(page.getByTestId('input-groundElevationM')).toHaveValue('3089');
+  await expect(page.getByTestId('missing-summary')).toHaveAttribute('data-missing-count', '0');
 
-  await expect(page.getByTestId('overlay-svg')).toBeVisible();
+  // The pipeline runs in the browser over real tiles: allow for a 25 MB fetch.
+  const overlayState = page.getByTestId('overlay-state');
+  await expect(overlayState).toHaveAttribute('data-overlay', 'live', { timeout: 120_000 });
+  await expect(overlayState).toContainText('Matterhorn');
   await expect(page.getByTestId('overlay-placeholder')).toHaveCount(0);
-  await expect(page.getByTestId('overlay-state')).toHaveAttribute('data-overlay', 'live');
+  await expect(page.getByTestId('overlay-error')).toHaveCount(0);
 
+  // It is our renderer's output over the photo: a terrain skyline…
+  const overlay = page.locator('[data-testid="overlay-svg"] svg');
+  await expect(overlay).toHaveAttribute('viewBox', '0 0 1200 900');
+  await expect(page.locator('[data-testid="overlay-svg"] g.mf-horizon polyline').first()).toBeVisible();
+
+  // …and exactly one summit marker, where the geometry above puts it.
+  const summits = page.locator('[data-testid="overlay-svg"] g.mf-summits circle');
+  await expect(summits).toHaveCount(1);
+  const summit = summits.first();
+  expect(Math.abs(Number(await summit.getAttribute('cx')) - 600.37)).toBeLessThan(12);
+  expect(Math.abs(Number(await summit.getAttribute('cy')) - 315.48)).toBeLessThan(12);
+
+  // Breithorn (210°) and Dufourspitze (128°) are outside a 65° frame centred
+  // on 265.4°, and the app says so rather than leaving them unexplained.
+  await expect(page.getByTestId('overlay-notes')).toContainText('Breithorn');
+
+  // P5.2 — the export, composited by src/render/composite in this same browser.
   const button = page.getByTestId('export-png');
   await expect(button).toBeEnabled();
   await expect(page.getByTestId('export-state')).toHaveAttribute('data-disabled-reason', '');
@@ -303,18 +364,21 @@ test('the overlay and export seam works end to end when an implementation is sup
   const downloadPromise = page.waitForEvent('download');
   await button.click();
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toBe('chamonix-north-east-annotated.png');
+  expect(download.suggestedFilename()).toBe('gornergrat-matterhorn-annotated.png');
 
   const path = await download.path();
   const bytes = await readFile(path);
   // PNG signature, then the IHDR chunk: width at byte 16, height at byte 20,
   // both big-endian uint32 (PNG spec, ISO/IEC 15948).
   expect(bytes.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
-  expect(bytes.readUInt32BE(16)).toBe(800);
-  expect(bytes.readUInt32BE(20)).toBe(600);
+  expect(bytes.readUInt32BE(16)).toBe(1200);
+  expect(bytes.readUInt32BE(20)).toBe(900);
+  // A flat-colour PNG of this size would be a few kB; a composited photo plus
+  // overlay is far larger. Cheap proof that something was actually drawn.
+  expect(bytes.length).toBeGreaterThan(10_000);
 
   await expect(page.getByTestId('export-message')).toContainText(
-    'chamonix-north-east-annotated.png',
+    'gornergrat-matterhorn-annotated.png',
   );
 });
 

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Mountain Finder — compositor page</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #101214;
+      }
+      img {
+        display: block;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      A page whose only job is to expose the REAL compositor to a script driving
+      this browser (scripts/rasterise.ts, used by `npm run demo`).
+
+      Why a page at all: `src/render/composite.ts` needs `Image`, `<canvas>` and
+      `toBlob`, so a PNG has to be produced by a browser. The alternative would
+      be re-implementing compositing in Node — a second implementation that
+      would quietly disagree with the one the app ships. Instead the demo drives
+      the same module the app calls, served as a real ES module by Vite.
+
+      Not part of the app: nothing links here, and the app's own entry point is
+      index.html.
+    -->
+    <div id="mount"></div>
+    <script type="module">
+      import { compositeToPngDataUrl } from '/src/render/composite.ts';
+
+      /**
+       * Parse an SVG and report any error the browser finds. `drawImage` on a
+       * malformed SVG fails silently — a blank layer, no exception — so both
+       * inputs are checked before they are drawn.
+       */
+      function svgParseError(svg, label) {
+        const parsed = new DOMParser().parseFromString(svg, 'image/svg+xml');
+        const error = parsed.querySelector('parsererror');
+        return error === null ? null : `${label}: ${error.textContent.trim().slice(0, 300)}`;
+      }
+
+      window.mfComposite = async ({ backdropSvg, overlaySvg, widthPx, heightPx }) => {
+        const problem =
+          svgParseError(backdropSvg, 'backdrop') ?? svgParseError(overlaySvg, 'overlay');
+        if (problem !== null) throw new Error(problem);
+
+        const photoSrc = `data:image/svg+xml;base64,${btoa(
+          String.fromCharCode(...new TextEncoder().encode(backdropSvg)),
+        )}`;
+        const pngDataUrl = await compositeToPngDataUrl({
+          photoSrc,
+          overlaySvg,
+          widthPx,
+          heightPx,
+        });
+
+        const preview = document.createElement('img');
+        preview.src = pngDataUrl;
+        document.getElementById('mount').replaceChildren(preview);
+        return pngDataUrl;
+      };
+
+      window.mfCompositeReady = true;
+    </script>
+  </body>
+</html>

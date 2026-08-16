@@ -1,13 +1,13 @@
 /**
  * The seam's small pure parts. The seam's *behaviour* is proved in the browser
- * by `tests/e2e/app.spec.ts` ("the overlay and export seam works end to end"),
- * which drives the probe implementations through the real component tree.
+ * by `tests/e2e/app.spec.ts` ("a photo with terrain gets a real overlay…"),
+ * which drives the REAL pipeline, renderer and compositor — as of TODO.md Q1
+ * there are no probe implementations left to drive.
  */
 
 import { describe, expect, it } from 'vitest';
 
 import { annotatedFileName } from './seam';
-import { seamProbeEnabled } from './seam-probe';
 
 describe('annotatedFileName', () => {
   it('swaps the photo extension for an annotated PNG name', () => {
@@ -23,19 +23,5 @@ describe('annotatedFileName', () => {
   it('never produces a bare "-annotated.png" from an empty name', () => {
     expect(annotatedFileName('')).toBe('photo-annotated.png');
     expect(annotatedFileName('.jpg')).toBe('photo-annotated.png');
-  });
-});
-
-describe('seamProbeEnabled', () => {
-  it('is off for every ordinary URL', () => {
-    expect(seamProbeEnabled('')).toBe(false);
-    expect(seamProbeEnabled('?foo=1')).toBe(false);
-    expect(seamProbeEnabled('?seam-probe=0')).toBe(false);
-    expect(seamProbeEnabled('?seam-probe')).toBe(false);
-  });
-
-  it('is on only when explicitly asked for', () => {
-    expect(seamProbeEnabled('?seam-probe=1')).toBe(true);
-    expect(seamProbeEnabled('?a=b&seam-probe=1')).toBe(true);
   });
 });

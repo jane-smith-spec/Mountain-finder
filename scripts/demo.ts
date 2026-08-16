@@ -1,60 +1,126 @@
 /**
- * `npm run demo -- <case>` — run one ground-truth viewpoint end to end and
- * print what the pipeline saw.
+ * `npm run demo -- <case>` — run one ground-truth viewpoint end to end, print
+ * what the pipeline saw, and write the annotated image to `out/annotated.png`.
  *
- *   npm run demo                          # list the cases
- *   npm run demo -- gornergrat            # committed window terrain (offline)
- *   npm run demo -- gornergrat --full-tiles
+ *   npm run demo                              # list the cases
+ *   npm run demo -- gornergrat                # full SRTM tiles + PNG
+ *   npm run demo -- gornergrat --window       # the committed 728 KB window
+ *   npm run demo -- gornergrat --heading 238 --hfov 85 --out out/wide.png
  *   npm run demo -- fort-william --range-km 8 --range-step-m 30 --bearing-step 0.5
+ *   npm run demo -- gornergrat --no-png       # text report only
  *
- * This is the human-viewable proof that BUILD 1 + BUILD 2 work together: an
- * offline peak database, offline SRTM terrain, and the geometry core, with no
- * network and no test harness in the way.
+ * This is the human-viewable proof that the whole system works together: an
+ * offline peak database, offline SRTM terrain, the geometry core, the renderer
+ * and the compositor, with no network and no test harness in the way.
  *
- * ── The renderer seam ──────────────────────────────────────────────────────
- * PLAN.md P4.2 says this command eventually writes `out/annotated.png`. It does
- * not do that yet, and deliberately does not fake it: the overlay builder
- * (`src/render`, P4.1) is being written in parallel. Everything that renderer
- * needs is already in the `AnnotatedScene` this script prints —
- * `scene.horizon` (the full profile, with its per-bearing skyline staircase),
- * `scene.visible[].image` (normalised x/y for every label) and `scene.camera`.
- * Wiring it up is one call at the marked seam below; nothing else here changes.
+ * ── WHAT THE IMAGE IS, EXACTLY ─────────────────────────────────────────────
+ * There is no photograph for these viewpoints (the case files cite images on
+ * Wikimedia Commons and deliberately do not vendor them), so the overlay is
+ * composited onto a SYNTHETIC BACKDROP: the run's own terrain silhouette, flat,
+ * hatched and captioned as such on the image itself. See
+ * `src/render/synthetic-backdrop.ts` for why a convincing fake photograph would
+ * be the worst possible artifact here.
+ *
+ * Read the picture accordingly:
+ *
+ *   TAUTOLOGICAL   the overlay's horizon line lying on the silhouette. Both
+ *                  come from the same horizon profile; their agreement means
+ *                  nothing.
+ *   REAL           the peak markers. They are computed from the peak database
+ *                  and the camera projection with no reference to the terrain
+ *                  sweep, so a summit dot sitting on its own bump in the SRTM
+ *                  silhouette is two independent computations agreeing.
+ *
+ * ── TERRAIN ────────────────────────────────────────────────────────────────
+ * The demo is a developer tool, not a test, so it reads the FULL tiles from
+ * `data/tiles/` by default — more terrain than any committed window, and the
+ * only source that can prove an occlusion beyond the window's cut. If the tile
+ * is not there it says so and stops, rather than quietly falling back; use
+ * `--window` to ask for the committed window on purpose.
  */
 
-import { cameraPoseFromFocalLength } from '../src/core/projection.js';
+import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+
+import { interpolateHorizonAltitudeDeg } from '../src/core/horizon.js';
+import { cameraPoseFromFocalLength, vFovDegFromHFovDeg } from '../src/core/projection.js';
 import type { CameraPose } from '../src/core/types.js';
 import { annotateScene } from '../src/pipeline/annotate.js';
-import { loadCaseTerrain, caseTerrainSpec } from '../src/pipeline/testing/case-terrain.js';
+import {
+  FULL_TILE_DIR,
+  loadCaseTerrain,
+  caseTerrainSpec,
+} from '../src/pipeline/testing/case-terrain.js';
 import type { AnnotatedPeak, AnnotatedScene } from '../src/pipeline/types.js';
+import { buildOverlaySvgFromLayout, layoutOverlay } from '../src/render/index.js';
+import { buildSyntheticBackdropSvg } from '../src/render/synthetic-backdrop.js';
+import type { OverlayScene } from '../src/render/types.js';
 import { groundTruthPeakStore } from '../fixtures/peaks/index.js';
 import { groundTruthCases, type GroundTruthCase } from '../tests/acceptance/cases/index.js';
+import { rasteriseToPng, RasteriseUnavailableError } from './rasterise.js';
 
-/** A typical phone photograph: 28 mm-equivalent on a 4:3 frame. */
+/**
+ * A wide-angle 4:3 frame at review size.
+ *
+ * 28 mm-equivalent is a typical phone lens, and the case files' stated view
+ * bearings describe photographs taken with something like one. 1600 × 1200 is
+ * the same aspect ratio as a 4032 × 3024 phone image — so the field of view and
+ * every projected position are identical — at a size a human can open.
+ */
 const DEMO_FOCAL_35MM = 28;
-const DEMO_IMAGE_WIDTH_PX = 4032;
-const DEMO_IMAGE_HEIGHT_PX = 3024;
+const DEMO_IMAGE_WIDTH_PX = 1600;
+const DEMO_IMAGE_HEIGHT_PX = 1200;
+
+/** Where the annotated image lands unless `--out` says otherwise. */
+const DEFAULT_PNG_PATH = 'out/annotated.png';
 
 interface Options {
   readonly caseId: string | undefined;
-  readonly fullTiles: boolean;
+  /** Use the committed window instead of the full tile. */
+  readonly useWindow: boolean;
   readonly maxRangeKm: number | undefined;
   readonly rangeStepM: number | undefined;
   readonly bearingStepDeg: number | undefined;
+  /** Framing overrides — the default is the case's own stated view. */
+  readonly headingDeg: number | undefined;
+  readonly hFovDeg: number | undefined;
+  readonly widthPx: number;
+  readonly heightPx: number;
+  readonly writePng: boolean;
+  readonly outPath: string;
 }
 
 function parseArgs(argv: readonly string[]): Options {
   let caseId: string | undefined;
-  let fullTiles = false;
+  let useWindow = false;
   let maxRangeKm: number | undefined;
   let rangeStepM: number | undefined;
   let bearingStepDeg: number | undefined;
+  let headingDeg: number | undefined;
+  let hFovDeg: number | undefined;
+  let widthPx = DEMO_IMAGE_WIDTH_PX;
+  let heightPx = DEMO_IMAGE_HEIGHT_PX;
+  let writePng = true;
+  let outPath = DEFAULT_PNG_PATH;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === undefined) continue;
     switch (arg) {
+      case '--window':
+        useWindow = true;
+        break;
       case '--full-tiles':
-        fullTiles = true;
+        // Kept as a no-op alias: full tiles are now the default, and silently
+        // ignoring a flag someone typed is worse than saying it changed.
+        process.stderr.write('note: --full-tiles is the default now; use --window for the committed cut\n');
+        break;
+      case '--no-png':
+        writePng = false;
+        break;
+      case '--out':
+        outPath = stringArg(argv[index + 1], arg);
+        index += 1;
         break;
       case '--range-km':
         maxRangeKm = numberArg(argv[index + 1], arg);
@@ -68,12 +134,45 @@ function parseArgs(argv: readonly string[]): Options {
         bearingStepDeg = numberArg(argv[index + 1], arg);
         index += 1;
         break;
+      case '--heading':
+        headingDeg = numberArg(argv[index + 1], arg);
+        index += 1;
+        break;
+      case '--hfov':
+        hFovDeg = numberArg(argv[index + 1], arg);
+        index += 1;
+        break;
+      case '--width':
+        widthPx = numberArg(argv[index + 1], arg);
+        index += 1;
+        break;
+      case '--height':
+        heightPx = numberArg(argv[index + 1], arg);
+        index += 1;
+        break;
       default:
         if (arg.startsWith('--')) throw new Error(`Unknown flag ${arg}`);
         caseId = arg;
     }
   }
-  return { caseId, fullTiles, maxRangeKm, rangeStepM, bearingStepDeg };
+  return {
+    caseId,
+    useWindow,
+    maxRangeKm,
+    rangeStepM,
+    bearingStepDeg,
+    headingDeg,
+    hFovDeg,
+    widthPx,
+    heightPx,
+    writePng,
+    outPath,
+  };
+}
+
+function stringArg(raw: string | undefined, flag: string): string {
+  if (raw === undefined || raw.startsWith('--')) throw new Error(`${flag} needs a value`);
+  return raw;
 }
 
 function numberArg(raw: string | undefined, flag: string): number {
@@ -93,7 +192,15 @@ function deg(value: number, digits = 2): string {
 }
 
 function listCases(): void {
-  line('usage: npm run demo -- <case> [--full-tiles] [--range-km N] [--range-step-m N] [--bearing-step N]');
+  line('usage: npm run demo -- <case> [options]');
+  line();
+  line('  --window            use the committed terrain window, not data/tiles/');
+  line('  --no-png            text report only, do not write an image');
+  line('  --out PATH          where to write the image (default out/annotated.png)');
+  line('  --heading DEG       override the case\'s stated view bearing');
+  line('  --hfov DEG          override the horizontal field of view');
+  line('  --width/--height N  frame size in pixels (default 1600x1200)');
+  line('  --range-km N  --range-step-m N  --bearing-step N   terrain sweep');
   line();
   line('cases with committed terrain:');
   for (const testCase of groundTruthCases) {
@@ -221,13 +328,143 @@ function report(testCase: GroundTruthCase, scene: AnnotatedScene, provenance: st
   if (spec !== undefined) {
     line();
     line('WHAT THIS RUN DOES AND DOES NOT PROVE');
-    line(`  ${spec.coverageNote}`);
+    // The window's coverage note describes the WINDOW. Printing it after a
+    // full-tile run would understate what was actually sampled.
+    line(
+      provenance.startsWith('full')
+        ? `  A whole ${spec.sourceTile} tile was sampled out to ` +
+          `${scene.config.sweep.maxRangeKm} km, so occlusion is testable ` +
+          'anywhere inside that degree square. Rays leaving it read no data.'
+        : `  ${spec.coverageNote}`,
+    );
   }
 
   line();
-  line('NEXT (renderer seam, PLAN.md P4.2)');
-  line('  out/annotated.png is NOT written yet: src/render is being built in parallel.');
-  line('  Everything it needs is in this scene — horizon profile, per-peak image x/y, camera.');
+}
+
+/**
+ * Load the case's terrain, preferring the FULL tile.
+ *
+ * A missing tile stops the run with instructions rather than falling back
+ * silently: `--full-tiles` used to do exactly that, which meant a developer
+ * could ask for 25 MB of real terrain, be handed a 728 KB cut, and never know.
+ */
+async function terrainFor(caseId: string, useWindow: boolean) {
+  const spec = caseTerrainSpec(caseId);
+  if (spec === undefined) {
+    throw new Error(`No terrain window is registered for case "${caseId}".`);
+  }
+  if (useWindow) return loadCaseTerrain(caseId, { preferFullTiles: false });
+
+  const tilePath = join(FULL_TILE_DIR, `${spec.sourceTile}.hgt`);
+  const present = await stat(tilePath).then(
+    () => true,
+    () => false,
+  );
+  if (!present) {
+    throw new Error(
+      `${tilePath} is not here, and the demo runs on the full SRTM tile by default.\n` +
+        `  Fetch it (25 MB, one-off):   npm run fetch:tiles -- ${spec.sourceTile}\n` +
+        `  Or use the committed cut:    npm run demo -- ${caseId} --window\n` +
+        `  (the window covers: ${spec.coverageNote})`,
+    );
+  }
+  return loadCaseTerrain(caseId, { preferFullTiles: true });
+}
+
+/** Camera for the demo frame: the case's stated view unless overridden. */
+function demoCamera(testCase: GroundTruthCase, options: Options): CameraPose {
+  const headingDeg = options.headingDeg ?? testCase.view.bearingDeg;
+  if (options.hFovDeg === undefined) {
+    return cameraPoseFromFocalLength({
+      headingDeg,
+      focalLength35mm: DEMO_FOCAL_35MM,
+      imageWidthPx: options.widthPx,
+      imageHeightPx: options.heightPx,
+    });
+  }
+  return {
+    headingDeg,
+    pitchDeg: 0,
+    rollDeg: 0,
+    hFovDeg: options.hFovDeg,
+    vFovDeg: vFovDegFromHFovDeg(options.hFovDeg, options.widthPx / options.heightPx),
+  };
+}
+
+/**
+ * Render the scene and write the PNG.
+ *
+ * The overlay is exactly what the app draws — same `layoutOverlay`, same
+ * `buildOverlaySvgFromLayout`, same compositor — over the synthetic backdrop
+ * described in this file's header. What is drawn is decided by
+ * `scene.labelled`, i.e. the pipeline's own answer to "which summits may be
+ * named", so this image cannot show a peak the acceptance gates would refuse.
+ */
+async function writeImage(
+  testCase: GroundTruthCase,
+  scene: AnnotatedScene,
+  provenance: string,
+  options: Options,
+): Promise<void> {
+  const overlayScene: OverlayScene = {
+    widthPx: options.widthPx,
+    heightPx: options.heightPx,
+    pose: scene.camera,
+    horizon: scene.horizon,
+    peaks: scene.labelled,
+  };
+  const layout = layoutOverlay(overlayScene);
+  const overlaySvg = buildOverlaySvgFromLayout(layout);
+  const backdropSvg = buildSyntheticBackdropSvg({
+    widthPx: options.widthPx,
+    heightPx: options.heightPx,
+    ridgePolylinesPx: layout.horizonPolylinesPx,
+    caption:
+      `${testCase.id}: ${scene.observer.lat.toFixed(5)}, ${scene.observer.lon.toFixed(5)} · ` +
+      `heading ${scene.camera.headingDeg.toFixed(1)}° · hFOV ${scene.camera.hFovDeg.toFixed(1)}° · ` +
+      `terrain: ${provenance}`,
+  });
+
+  line('IMAGE');
+  line(`  ${layout.markers.length} marker(s) drawn, ${layout.offFramePeaks.length} peak(s) off-frame, ` +
+    `${layout.horizonPolylinesPx.length} horizon polyline(s)`);
+  for (const marker of layout.markers) {
+    line(
+      `    ${marker.peak.name.padEnd(26)} summit at x=${marker.summitPx.xPx.toFixed(1)} ` +
+        `y=${marker.summitPx.yPx.toFixed(1)} px  label level ${marker.stackLevel} ${marker.direction}` +
+        `${marker.overlapped ? ' (OVERLAPPED — no free space)' : ''}` +
+        `${marker.obscured ? ' (obscured: greyed)' : ''}`,
+    );
+    // Why a summit dot may float ABOVE the silhouette it belongs to: the label
+    // height comes from the peak database, the silhouette from SRTM, and SRTM
+    // under-reads a sharp summit by hundreds of metres (MISSION.md). Printing
+    // both makes that gap a measured quantity instead of a visual puzzle.
+    const skylineDeg = interpolateHorizonAltitudeDeg(scene.horizon, marker.peak.bearingDeg);
+    line(
+      `      summit ${deg(marker.peak.altitudeDeg)} deg vs computed skyline ` +
+        `${deg(skylineDeg)} deg at the same bearing — the dot sits ` +
+        `${deg(marker.peak.altitudeDeg - skylineDeg)} deg above the drawn ridge`,
+    );
+  }
+  if (layout.markers.length === 0) {
+    line('    (no peak in this frame — the image shows the skyline and nothing else)');
+  }
+
+  const png = await rasteriseToPng({
+    backdropSvg,
+    overlaySvg,
+    widthPx: options.widthPx,
+    heightPx: options.heightPx,
+  });
+  await mkdir(dirname(options.outPath), { recursive: true });
+  await writeFile(options.outPath, png);
+  line();
+  line(`  wrote ${options.outPath} — ${options.widthPx}x${options.heightPx}, ${png.length} bytes`);
+  line('  The backdrop is NOT a photograph: it is this run\'s own terrain silhouette,');
+  line('  hatched and captioned on the image. The horizon line lying on the silhouette');
+  line('  is therefore tautological. The peak markers are not: they come from the peak');
+  line('  database and the projection, never from the terrain sweep.');
   line();
 }
 
@@ -245,13 +482,8 @@ async function main(): Promise<void> {
     );
   }
 
-  const terrain = await loadCaseTerrain(testCase.id, { preferFullTiles: options.fullTiles });
-  const camera: CameraPose = cameraPoseFromFocalLength({
-    headingDeg: testCase.view.bearingDeg,
-    focalLength35mm: DEMO_FOCAL_35MM,
-    imageWidthPx: DEMO_IMAGE_WIDTH_PX,
-    imageHeightPx: DEMO_IMAGE_HEIGHT_PX,
-  });
+  const terrain = await terrainFor(testCase.id, options.useWindow);
+  const camera = demoCamera(testCase, options);
 
   const scene = await annotateScene({
     // No groundElevationM: the demo exercises the terrain lookup, and prints
@@ -277,6 +509,25 @@ async function main(): Promise<void> {
   });
 
   report(testCase, scene, terrain.provenance);
+
+  if (!options.writePng) {
+    line('IMAGE');
+    line('  skipped (--no-png)');
+    line();
+    return;
+  }
+  try {
+    await writeImage(testCase, scene, terrain.provenance, options);
+  } catch (error) {
+    if (error instanceof RasteriseUnavailableError) {
+      line('IMAGE');
+      line(`  NOT written: ${error.message}`);
+      line();
+      process.exitCode = 1;
+      return;
+    }
+    throw error;
+  }
 }
 
 main().catch((error: unknown) => {

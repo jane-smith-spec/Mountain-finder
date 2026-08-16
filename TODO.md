@@ -13,8 +13,24 @@
 
 **Queued behind them, in order:**
 
-- [ ] **Q1 — Integration.** Wire app ↔ pipeline ↔ renderer across the seams tasks 1/2/4 leave.
-      Mechanical if the seams are honest; the first real test of whether they are.
+- [x] **Q1 — Integration.** Wired: `src/app/overlay-builder.ts` (pipeline → renderer → SVG) and
+      `src/app/composite-export.ts` (P4.2) are passed to `<App>` in `main.tsx`. `seam-probe.ts`
+      and the `?seam-probe=1` branch are DELETED; the e2e test that depended on them is
+      replaced by one that drives the real pipeline over real SRTM bytes.
+      **Browser terrain: static grids on the app's own origin** — an index at
+      `/terrain/manifest.json` plus the sample files it names
+      (`src/providers/terrain-manifest.ts` + `http-terrain-store.ts`), published in dev and
+      preview by `scripts/terrain-server.ts` from `data/tiles/` (whole tiles) and
+      `fixtures/tiles/cases/` (committed real-SRTM windows). One code path for both, because a
+      whole tile is just a bigger grid; the largest grid covering a point wins, since a window
+      can produce a false visible and only the tile can prove an occlusion. Synthetic test
+      tiles are never served. D7 holds: no live API at runtime.
+      **Missing terrain is a named absence**, in the same family as `needs-manual`: the builder
+      checks coverage BEFORE running the pipeline and refuses with the position, the tile
+      needed (`N45E006`), what the app does hold and the `fetch:tiles` command — never a blank
+      overlay, which would read as "no peaks are visible". `OverlayResult.notes` does the same
+      job for a sparse overlay: off-frame summits, foreground-occluded summits, blind bearings,
+      and "the peak database has nothing within 200 km of here".
 - [~] **Q2 — Fix review findings** from task 3, by severity: silent-wrong-answer bugs first.
       Done (see REVIEW-FINDINGS.md for the numbering): 1 range-0 ray sample no longer walls off a
       bearing (`sweepRay` skips d = 0, throws on negative/NaN); 2 the cone fixture now states the
@@ -27,9 +43,22 @@
       Still open: rename `skylineAltitudeDeg` → `occludingAltitudeDeg` across
       `fixtures/scenes` + `src/core` (deferred — it collides with two live agents' surface); the
       review's unverified suspicions 1 and 2 (gap bridging, `nearest-valid` reporting).
-- [ ] **Q3 — The demo PNG.** `npm run demo -- gornergrat` producing an annotated image with
-      flags on real summits. This is v2.0's whole point — the first artifact a human can look at
-      and judge. Needs fetched tiles (`npm run fetch:tiles`), which is fine: acquisition, not runtime.
+- [x] **Q3 — The demo PNG.** `npm run demo -- gornergrat` writes `out/annotated.png`: the real
+      pipeline over the full `data/tiles/N45E007.hgt`, laid out by `src/render` and composited by
+      `src/render/composite.ts` in Chromium (`scripts/rasterise.ts` + `src/render/composite-page.html`
+      — no second rasteriser, no new dependency). Full tiles are now the DEFAULT and a missing
+      tile stops the run with instructions (`--window` asks for the committed cut on purpose);
+      the old `--full-tiles` silently fell back to the window, which is fixed.
+      **The overlay is composited onto a synthetic backdrop** — this run's own terrain
+      silhouette, hatched and captioned "not a photograph" on the image itself
+      (`src/render/synthetic-backdrop.ts`). The horizon line lying on that silhouette is
+      TAUTOLOGICAL and says so in the report; the peak markers are not, because they come from
+      the peak database and the projection with no reference to the terrain sweep.
+      **What the image shows:** the Matterhorn flag lands 1.92° above the drawn ridge — that is
+      SRTM under-reading a sharp summit (MISSION.md: −248 m, displaced ~320 m), and 1.92° at
+      9.58 km is ~327 m, so the picture reproduces the documented DEM error rather than a
+      labelling bug. Broad summits do not show it: in the wide framing
+      (`--heading 238 --hfov 85`) the Breithorn flag sits 0.27° above its own ridge, on it.
 - [ ] **Q4 — v2.0 ship gate.** `check` + `test:e2e` + `test:acceptance` green, demo PNG inspected,
       and every high-confidence ground-truth case passing (or its failure understood, not silenced).
 
@@ -123,9 +152,15 @@ Live checklist. Check items only after their self-check has been run and passed 
       probes the raster — the pixel at the hand-computed summit is marker-coloured, control
       pixels are not. Artifacts: `out/render-composite.png`, `out/render-overlay.svg`.
 
-## Phase 5 — Web app (group E)
-- [ ] P5.1 App shell (drop-zone, autofill, overrides, trim sliders, test mode)
-- [ ] P5.2 Annotated PNG export
+## Phase 5 — Web app (group E) ✅
+- [x] P5.1 App shell (drop-zone, autofill, overrides, trim sliders) — and, since Q1, a REAL
+      overlay: the Gornergrat fixture photo (`fixtures/photos/gornergrat-matterhorn.jpg`, the
+      one fixture whose coordinates have terrain in this repository) is driven through the
+      whole chain in Chromium and the Matterhorn flag lands within 12 px of the hand-derived
+      600.37, 315.48 px. A photo with no terrain (Chamonix, needs N45E006) shows the named
+      absence instead.
+- [x] P5.2 Annotated PNG export — the download is produced by `src/render/composite.ts`,
+      asserted from the PNG's own IHDR bytes at the photo's 1200×900.
 
 ## Phase 6 — Ground truth (group F) ✅ 112 assertions + 26 todo
 - [x] P6.1 Analytic scenes — flat plane, twin ridges (2 variants), conical peak.
@@ -136,10 +171,13 @@ Live checklist. Check items only after their self-check has been run and passed 
       re-verified against live pages before these gate a release.
 - [x] P6.3 Acceptance harness — green, with a banner stating a pass proves the yardstick
       is sound, NOT that the pipeline is correct. 26 pipeline assertions are `it.todo`.
-- [~] **P6.3 hooks switched on — 25 of the 26 `it.todo`s are now real assertions** against
-      the real pipeline, offline. 1 remains a `todo`: the SVG overlay hook, which waits on
-      P4.1 (`src/render`, being built in parallel — writing that assertion before the module
-      exists is the failure MISSION.md describes). Confidence policy respected exactly:
+- [x] **P6.3 hooks switched on — all 26 `it.todo`s are now real assertions** against
+      the real pipeline, offline. The last one, the SVG overlay hook, waited on P4.1 and was
+      switched on in Q1: each analytic scene is laid out with the camera pointed at its own
+      summit, so the flag must land on the centre line and at the hand-derived
+      y = h·(0.5 − tanα/(2·tan(vFOV/2))), gated at 0.5 % of the frame plus the scene's own
+      angular tolerance in pixels. 148 acceptance assertions, 0 todo. A 0.35° heading error
+      fails it, which was checked rather than assumed. Confidence policy respected exactly:
       `high` gates, `medium` reports, `disputed` informs. **One hard gate is FAILING and was
       left failing** — see below.
 

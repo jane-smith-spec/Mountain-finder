@@ -82,6 +82,27 @@ export {
 export type { TileBounds, TileCorner, TileStore } from './tile-store.js';
 
 export {
+  DEFAULT_TERRAIN_MANIFEST_URL,
+  TERRAIN_MANIFEST_VERSION,
+  expectedGridByteLength,
+  gridAreaDeg2,
+  gridContains,
+  parseTerrainManifest,
+  selectTerrainGrid,
+  terrainGridBounds,
+  terrainGridForTileFile,
+} from './terrain-manifest.js';
+export type { TerrainGrid, TerrainManifest } from './terrain-manifest.js';
+
+export { HttpTerrainStore, resolveTerrainUrl } from './http-terrain-store.js';
+export type {
+  HttpTerrainStoreOptions,
+  TerrainCoverage,
+  TerrainFetch,
+  TerrainFetchResponse,
+} from './http-terrain-store.js';
+
+export {
   MISSING_TILE_DATASET,
   TileElevationProvider,
   datasetLabelForGridSize,

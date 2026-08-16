@@ -67,6 +67,7 @@ import { interpolateHorizonAltitudeDeg } from '../../src/core/horizon';
 import type { CameraPose } from '../../src/core/types';
 import { isLabelled } from '../../src/core/visibility';
 import { annotateScene } from '../../src/pipeline/annotate';
+import { buildOverlaySvgFromLayout, escapeXml, layoutOverlay } from '../../src/render';
 import { loadCaseTerrain, caseTerrainSpec } from '../../src/pipeline/testing/case-terrain';
 import {
   SampleCloudElevationSource,
@@ -387,6 +388,74 @@ describe('P6.3 hooks — synthetic scenes through the real pipeline', () => {
         }
       });
     }
+
+  /**
+   * The last hook, switched on now that `src/render` exists (TODO.md Q1).
+   *
+   * The expectation is derived here, from the rectilinear projection written
+   * out by hand, and fed with the SCENE FIXTURE's closed-form peak altitude —
+   * not with anything the renderer or the projection module returned:
+   *
+   *     camera points exactly at the peak, so Δ = 0
+   *     x = width/2
+   *     y = height · (0.5 − tanα / (2·tan(vFOV/2)))
+   *
+   * The pixel gate is P4.1's own: 0.5 % of the frame, widened by whatever the
+   * scene's angular tolerance is worth in pixels at that altitude, since the
+   * pipeline is only required to reproduce α to within `scene.toleranceDeg`.
+   */
+  const visibleVerdicts = scene.expectedPeakVerdicts.filter((verdict) => verdict.visible);
+  if (visibleVerdicts.length > 0) {
+    it(`${scene.id}: renders an SVG overlay with its flag at the computed position`, async () => {
+      const { scene: annotated } = await runScene(scene);
+      const widthPx = 1600;
+      const heightPx = 1200;
+
+      for (const verdict of visibleVerdicts) {
+        const peak = annotated.peaks.find((candidate) => candidate.id === verdict.peakId);
+        expect(peak, `${scene.id}: no peak produced for ${verdict.peakId}`).toBeDefined();
+        if (peak === undefined) continue;
+
+        // Point the camera straight at it: Δ = 0 puts the flag on the centre
+        // line, which is the one x position that needs no trigonometry to
+        // predict and therefore cannot be fudged.
+        const pose = cameraFacing(peak.bearingDeg);
+        const layout = layoutOverlay({
+          widthPx,
+          heightPx,
+          pose,
+          horizon: annotated.horizon,
+          peaks: [peak],
+        });
+
+        expect(
+          layout.markers,
+          `${scene.id}/${verdict.peakId}: the overlay dropped a visible summit`,
+        ).toHaveLength(1);
+        const marker = layout.markers[0];
+        if (marker === undefined) continue;
+
+        const alphaRad = (verdict.peakAltitudeDeg * Math.PI) / 180;
+        const tanHalfV = Math.tan((pose.vFovDeg / 2) * (Math.PI / 180));
+        const expectedYPx = heightPx * (0.5 - Math.tan(alphaRad) / (2 * tanHalfV));
+        // Pixels per degree of altitude at this α, for the tolerance widening.
+        const pxPerDeg =
+          ((heightPx * Math.PI) / 180 / (2 * tanHalfV)) / Math.cos(alphaRad) ** 2;
+        const gatePx = 0.005 * heightPx + scene.toleranceDeg * pxPerDeg;
+
+        expect(marker.summitPx.xPx).toBeCloseTo(widthPx / 2, 6);
+        expect(
+          Math.abs(marker.summitPx.yPx - expectedYPx),
+          `${scene.id}/${verdict.peakId}: flag at y = ${marker.summitPx.yPx.toFixed(3)} px, ` +
+            `closed form ${expectedYPx.toFixed(3)} px (gate ${gatePx.toFixed(3)} px)`,
+        ).toBeLessThanOrEqual(gatePx);
+
+        const svg = buildOverlaySvgFromLayout(layout);
+        expect(svg).toContain(`viewBox="0 0 ${widthPx} ${heightPx}"`);
+        expect(svg).toContain(escapeXml(peak.name));
+      }
+    });
+  }
   }
 
   it('flat-plane: interpolation at a non-sampled bearing is exact on a constant profile', async () => {
@@ -425,13 +494,6 @@ describe('P6.3 hooks — synthetic scenes through the real pipeline', () => {
       12,
     );
   });
-
-  // STILL A TODO, and honestly so: the SVG overlay builder (PLAN.md P4.1) is
-  // being written in parallel by the renderer group. Everything it needs is
-  // already produced here — `scene.horizon` and `scene.visible[].image` — so
-  // this hook is one call away, but writing the assertion before the module
-  // exists is exactly the failure MISSION.md describes.
-  it.todo('every scene renders to an SVG overlay with flags at the computed positions (awaits P4.1, src/render)');
 });
 
 /* ══════════════════════════════════════════════════════════════════════════

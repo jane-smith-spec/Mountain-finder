@@ -40,6 +40,17 @@ Altitude below sea level (GPSAltitudeRef 1), portrait aspect, direction with no 
 - FocalLength 26 mm, FocalLengthIn35mmFormat 50 mm
 - PixelXDimension 600, PixelYDimension 800 (3:4 portrait)
 
+## gornergrat-matterhorn.jpg
+
+The Gornergrat ground-truth viewpoint: complete metadata over terrain this repository actually holds, so the whole pipeline runs on it.
+
+- GPSLatitude  45 deg 59 min  0 sec, GPSLatitudeRef N  (45.983333 deg)
+- GPSLongitude  7 deg 46 min 56 sec, GPSLongitudeRef E ( 7.782222 deg)
+- GPSAltitude 3090.6 m, GPSAltitudeRef 0 -> 3089.0 m of ground under a 1.6 m eye height
+- GPSImgDirection 265.4, GPSImgDirectionRef T (true north) - the Matterhorn bearing
+- FocalLength 4.5 mm, FocalLengthIn35mmFormat 28 mm -> hFOV 65.4704525442152 deg
+- PixelXDimension 1200, PixelYDimension 900 (4:3 landscape)
+
 ## stripped-no-exif.jpg
 
 A valid JPEG with no EXIF at all — what a messaging app hands you.

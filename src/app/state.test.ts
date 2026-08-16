@@ -349,9 +349,17 @@ describe('exportDisabledReason — the button tells the truth', () => {
     );
   });
 
-  it('admits that the compositor and the pipeline are not wired up yet', () => {
-    expect(exportDisabledReason({ ...ready, hasExporter: false })).toMatch(/compositor/i);
-    expect(exportDisabledReason({ ...ready, hasOverlay: false })).toMatch(/no overlay/i);
+  it('states the missing piece without blaming an unfinished build', () => {
+    // Both implementations are wired in as of TODO.md Q1, so these two reasons
+    // are now about THIS photo — there is no overlay for it yet — rather than
+    // about the app being half-built. The old copy pointed at a TODO item that
+    // no longer exists, which would read as an excuse for a real failure.
+    expect(exportDisabledReason({ ...ready, hasExporter: false })).toBe(
+      'This build has no PNG compositor.',
+    );
+    expect(exportDisabledReason({ ...ready, hasOverlay: false })).toBe(
+      'There is no overlay to export: the skyline for this photo has not been computed.',
+    );
   });
 });
 

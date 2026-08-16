@@ -13,6 +13,8 @@
  *                   no 35 mm-equivalent focal length
  *   dead-sea        altitude BELOW sea level (GPSAltitudeRef = 1), portrait
  *                   aspect, direction with no reference tag
+ *   gornergrat      complete metadata over terrain this repository HOLDS, so the
+ *                   whole app — EXIF, pipeline, renderer, export — runs on it
  *   stripped        a valid JPEG with no EXIF whatsoever (the messaging-app case)
  */
 
@@ -210,6 +212,75 @@ const DEAD_SEA: PhotoFixture = {
   },
 };
 
+/**
+ * The one fixture that points at REAL TERRAIN THIS REPOSITORY HOLDS.
+ *
+ * The other three are metadata exercises: their coordinates are chosen to prove
+ * hemisphere and reference-tag handling, and no elevation data exists for any of
+ * them, which is exactly what makes them good tests of the "no terrain here"
+ * path. This one is the opposite — it is the end-to-end case. Its position is
+ * the Gornergrat ground-truth viewpoint (tests/acceptance/cases/gornergrat.ts),
+ * covered both by the committed window `fixtures/tiles/cases/gornergrat-window`
+ * and by `data/tiles/N45E007.hgt`, so dropping it into the app runs the real
+ * pipeline over real SRTM samples and must label the Matterhorn.
+ *
+ * Every authored number is a whole-second DMS value or an exact rational, so
+ * the expectations are arithmetic:
+ *
+ *   45°59'00"N → 45 + 59/60            = 45.983333…  (case: 45.98333)
+ *    7°46'56"E →  7 + 46/60 + 56/3600  =  7.782222…  (case:  7.78222)
+ *   GPSAltitude 3090.6 m − 1.6 m eye   = 3089.0 m of ground, the platform
+ *                                         height the case file cites
+ *   hFOV(f35 = 28) = 2·atan(18/28)     = 65.4704525442152°
+ *   vFOV(4:3)      : tan(v/2) = (18/28)·(3/4) → 51.48141671246569°
+ *   GPSImgDirection 265.4° TRUE — the Matterhorn's own bearing from the
+ *   platform, per the case file's independent geometry check.
+ */
+const GORNERGRAT: PhotoFixture = {
+  fileName: 'gornergrat-matterhorn.jpg',
+  description:
+    'The Gornergrat ground-truth viewpoint: complete metadata over terrain this repository actually holds, so the whole pipeline runs on it.',
+  authoredNotes: [
+    'GPSLatitude  45 deg 59 min  0 sec, GPSLatitudeRef N  (45.983333 deg)',
+    'GPSLongitude  7 deg 46 min 56 sec, GPSLongitudeRef E ( 7.782222 deg)',
+    'GPSAltitude 3090.6 m, GPSAltitudeRef 0 -> 3089.0 m of ground under a 1.6 m eye height',
+    'GPSImgDirection 265.4, GPSImgDirectionRef T (true north) - the Matterhorn bearing',
+    'FocalLength 4.5 mm, FocalLengthIn35mmFormat 28 mm -> hFOV 65.4704525442152 deg',
+    'PixelXDimension 1200, PixelYDimension 900 (4:3 landscape)',
+  ],
+  spec: {
+    widthPx: 1200,
+    heightPx: 900,
+    exif: {
+      ifd0: [
+        ascii(TAG_MAKE, 'MountainFinder'),
+        ascii(TAG_MODEL, 'Fixture Camera'),
+        short(TAG_ORIENTATION, 1),
+      ],
+      exif: [
+        { tag: TAG_FOCAL_LENGTH, value: { type: 'RATIONAL', values: [rational(45, 10)] } },
+        long(TAG_PIXEL_X_DIMENSION, 1200),
+        long(TAG_PIXEL_Y_DIMENSION, 900),
+        short(TAG_FOCAL_LENGTH_35MM, 28),
+      ],
+      gps: [
+        byte(TAG_GPS_VERSION_ID, 2, 3, 0, 0),
+        ascii(TAG_GPS_LATITUDE_REF, 'N'),
+        dmsField(TAG_GPS_LATITUDE, { deg: 45, min: 59, sec: 0 }),
+        ascii(TAG_GPS_LONGITUDE_REF, 'E'),
+        dmsField(TAG_GPS_LONGITUDE, { deg: 7, min: 46, sec: 56 }),
+        byte(TAG_GPS_ALTITUDE_REF, 0),
+        { tag: TAG_GPS_ALTITUDE, value: { type: 'RATIONAL', values: [rational(61812, 20)] } },
+        ascii(TAG_GPS_IMG_DIRECTION_REF, 'T'),
+        {
+          tag: TAG_GPS_IMG_DIRECTION,
+          value: { type: 'RATIONAL', values: [decimalRational(265.4, 1)] },
+        },
+      ],
+    },
+  },
+};
+
 const STRIPPED: PhotoFixture = {
   fileName: 'stripped-no-exif.jpg',
   description: 'A valid JPEG with no EXIF at all — what a messaging app hands you.',
@@ -224,6 +295,7 @@ export const PHOTO_FIXTURES: readonly PhotoFixture[] = [
   CHAMONIX,
   ACONCAGUA,
   DEAD_SEA,
+  GORNERGRAT,
   STRIPPED,
 ] as const;
 

@@ -1,0 +1,217 @@
+/**
+ * The wiring between the app, the pipeline and the renderer (TODO.md Q1).
+ *
+ * Everything here is offline and analytic: terrain is a function (a flat plane
+ * at 0 m), peaks are a fixed list, and the expectations are derived from the
+ * geometry rather than from the pipeline's own output.
+ *
+ * The scene used by the end-to-end cases:
+ *
+ *   observer  0°N 0°E, ground 0 m, eye 1.6 m, camera heading 90° (due east),
+ *             hFOV 60°, vFOV 45°
+ *   EAST      a 1000 m summit at 0°N 0.09°E — bearing 90°, ~10.0 km away, so
+ *             it sits dead centre of the frame and stands far above a plane
+ *             that is level with the observer's feet. It must be labelled.
+ *   WEST      an identical summit at 0°N −0.09°E — bearing 270°, directly
+ *             BEHIND the camera. It must never be labelled, whatever the
+ *             pipeline thinks of it.
+ */
+
+import { describe, expect, it } from 'vitest';
+
+import type { Peak } from '../core/types';
+import { FunctionElevationSource, StaticPeakSource } from '../pipeline/testing/elevation-sources';
+import type { TerrainCoverage } from '../providers/http-terrain-store';
+import {
+  createOverlayBuilder,
+  noTerrainMessage,
+  selectOverlayPeaks,
+  sweepForPose,
+  type TerrainSource,
+} from './overlay-builder';
+import type { OverlayRequest } from './seam';
+
+const EAST_PEAK: Peak = {
+  id: 'test/east',
+  name: 'East Summit',
+  lat: 0,
+  lon: 0.09,
+  elevationM: 1000,
+  elevationSource: 'osm',
+};
+
+const WEST_PEAK: Peak = { ...EAST_PEAK, id: 'test/west', name: 'West Summit', lon: -0.09 };
+
+const REQUEST: OverlayRequest = {
+  frame: { widthPx: 1600, heightPx: 1200 },
+  observer: { lat: 0, lon: 0, groundElevationM: 0, eyeHeightM: 1.6 },
+  pose: { headingDeg: 90, pitchDeg: 0, rollDeg: 0, hFovDeg: 60, vFovDeg: 45 },
+  showObscuredPeaks: true,
+};
+
+/** A terrain source that is flat, complete, and knows it. */
+function flatTerrain(covered = true): TerrainSource {
+  return {
+    elevation: new FunctionElevationSource(() => 0, 'flat-plane'),
+    coverage: (): Promise<TerrainCoverage> =>
+      Promise.resolve({
+        covered,
+        tileName: 'N00E000',
+        available: covered ? ['N00E000'] : ['N45E007'],
+        ...(covered
+          ? {
+              grid: {
+                name: 'N00E000',
+                url: 'tiles/N00E000.hgt',
+                dataset: 'srtm1',
+                geometry: {
+                  northLat: 1,
+                  westLon: 0,
+                  rows: 3601,
+                  cols: 3601,
+                  latStepDeg: 1 / 3600,
+                  lonStepDeg: 1 / 3600,
+                },
+              },
+            }
+          : {}),
+      }),
+  };
+}
+
+function builder(options: { covered?: boolean; peaks?: readonly Peak[] } = {}) {
+  return createOverlayBuilder({
+    terrain: flatTerrain(options.covered ?? true),
+    peaks: new StaticPeakSource(options.peaks ?? [EAST_PEAK, WEST_PEAK]),
+    // A short sweep: the scene is a plane, and 5 km of it settles the horizon
+    // as conclusively as 30 would, in a fraction of the samples.
+    config: { sweep: { maxRangeKm: 5, rangeStepM: 250, bearingStepDeg: 1 } },
+  });
+}
+
+describe('sweepForPose', () => {
+  it('sweeps twice the field of view, centred on the heading', () => {
+    // hFOV 60 → span 120, so the sweep starts at 265.4 − 60 = 205.4°.
+    const sweep = sweepForPose({
+      headingDeg: 265.4,
+      pitchDeg: 0,
+      rollDeg: 0,
+      hFovDeg: 60,
+      vFovDeg: 45,
+    });
+    expect(sweep.spanDeg).toBeCloseTo(120, 12);
+    expect(sweep.startBearingDeg).toBeCloseTo(205.4, 12);
+  });
+
+  it('wraps the start bearing into [0, 360) rather than going negative', () => {
+    // Heading 10°, hFOV 60 → start at −50°, which is 310°.
+    const sweep = sweepForPose({
+      headingDeg: 10,
+      pitchDeg: 0,
+      rollDeg: 0,
+      hFovDeg: 60,
+      vFovDeg: 45,
+    });
+    expect(sweep.startBearingDeg).toBeCloseTo(310, 12);
+  });
+
+  it('never asks for more than a full circle', () => {
+    const sweep = sweepForPose({
+      headingDeg: 0,
+      pitchDeg: 0,
+      rollDeg: 0,
+      hFovDeg: 200,
+      vFovDeg: 120,
+    });
+    expect(sweep.spanDeg).toBe(360);
+  });
+
+  it('always covers more than the renderer draws', () => {
+    // The overlay samples its horizon polyline across 1.5 × hFOV, so a sweep
+    // of exactly hFOV would leave the ends of the drawn line unsupported.
+    const hFovDeg = 65.47;
+    const sweep = sweepForPose({ headingDeg: 180, pitchDeg: 0, rollDeg: 0, hFovDeg, vFovDeg: 50 });
+    expect(sweep.spanDeg).toBeGreaterThan(1.5 * hFovDeg);
+  });
+});
+
+describe('selectOverlayPeaks', () => {
+  const visible = { name: 'Clear', visibility: 'visible' as const };
+  const selfOccluded = { name: 'Own hill', visibility: 'self-occluded' as const };
+
+  it('passes the visibility state through so the renderer can grey a summit', () => {
+    const peaks = selectOverlayPeaks(
+      { visible: [visible], labelled: [visible, selfOccluded] },
+      true,
+    );
+    expect(peaks.map((peak) => peak.visibility)).toEqual(['visible', 'self-occluded']);
+  });
+
+  it('drops obscured summits entirely when the switch is off', () => {
+    const peaks = selectOverlayPeaks(
+      { visible: [visible], labelled: [visible, selfOccluded] },
+      false,
+    );
+    expect(peaks.map((peak) => peak.name)).toEqual(['Clear']);
+  });
+});
+
+describe('noTerrainMessage', () => {
+  const message = noTerrainMessage(
+    { covered: false, tileName: 'N45E006', available: ['N45E007', 'N46E007'] },
+    { lat: 45.9237, lon: 6.8694 },
+  );
+
+  it('names the position, the missing tile and how to get it', () => {
+    expect(message).toContain('45.9237');
+    expect(message).toContain('6.8694');
+    expect(message).toContain('N45E006');
+    expect(message).toContain('npm run fetch:tiles');
+  });
+
+  it('says what terrain the app does hold, so the absence is checkable', () => {
+    expect(message).toContain('N45E007');
+  });
+
+  it('never suggests anything was drawn', () => {
+    expect(message).toMatch(/no (horizon|terrain)/i);
+  });
+});
+
+describe('createOverlayBuilder', () => {
+  it('labels the summit in front of the camera and returns real SVG', async () => {
+    const result = await builder()(REQUEST);
+    expect(result.peakNames).toEqual(['East Summit']);
+    expect(result.svgMarkup.startsWith('<svg')).toBe(true);
+    expect(result.svgMarkup).toContain('East Summit');
+    // The frame the app hands over is the frame the overlay is drawn for.
+    expect(result.svgMarkup).toContain('viewBox="0 0 1600 1200"');
+  });
+
+  it('never labels a summit behind the camera, and says it left it out', async () => {
+    const result = await builder()(REQUEST);
+    expect(result.svgMarkup).not.toContain('West Summit');
+    expect(result.notes?.join(' ')).toContain('West Summit');
+  });
+
+  it('refuses to build anything where the app has no terrain', async () => {
+    await expect(builder({ covered: false })(REQUEST)).rejects.toThrow(/N45E007/);
+    // And it refuses BEFORE running the pipeline, so the message is about the
+    // missing tile rather than about an empty sweep.
+    await expect(builder({ covered: false })(REQUEST)).rejects.toThrow(/npm run fetch:tiles/);
+  });
+
+  it('says so when the peak database has nothing here, rather than drawing an empty frame', async () => {
+    const result = await builder({ peaks: [] })(REQUEST);
+    expect(result.peakNames).toEqual([]);
+    expect(result.notes?.join(' ')).toMatch(/peak database/i);
+    // The horizon is still drawn — that part IS a result.
+    expect(result.svgMarkup).toContain('polyline');
+  });
+
+  it('honours an abort signal instead of finishing a run nobody wants', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(builder()({ ...REQUEST, signal: controller.signal })).rejects.toThrow();
+  });
+});

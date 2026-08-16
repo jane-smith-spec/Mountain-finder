@@ -2,7 +2,7 @@
 
 Point it at a photo of mountains — it works out which peaks you're looking at and plants labeled flags on their summits.
 
-**Status:** v2 in build. Phase 0–3 and the offline elevation layer are done and verified; the renderer and end-to-end pipeline are in progress. The v1 Expo/React Native attempt is retired to [`archive/v1-expo/`](archive/v1-expo/ARCHIVE-NOTE.md).
+**Status:** v2 in build. The whole chain is wired end to end — drop a photo into the web app and, where terrain is available, it renders a real overlay and exports it; `npm run demo -- gornergrat` writes an annotated image from real SRTM data. The v1 Expo/React Native attempt is retired to [`archive/v1-expo/`](archive/v1-expo/ARCHIVE-NOTE.md).
 
 | Document | Purpose |
 |---|---|
@@ -48,8 +48,30 @@ photo (JPEG)
 | `npm run check` | typecheck + lint + full unit suite, offline and deterministic |
 | `npm run test:e2e` | Playwright against real Chromium |
 | `npm run test:acceptance` | ground-truth cases; a pass means the *yardstick* is sound |
-| `npm run demo -- <case>` | runs a real case end to end — the human-viewable proof |
+| `npm run demo -- <case>` | runs a real case end to end and writes `out/annotated.png` — the human-viewable proof |
+| `npm run build` | typecheck + production bundle |
 | `npm run fetch:tiles` | acquisition only: pulls SRTM tiles from AWS Open Data |
+
+## How the browser gets terrain
+
+The app reads elevation from **static grids on its own origin** — an index at
+`/terrain/manifest.json` plus the raw sample files it names
+(`src/providers/terrain-manifest.ts`, `src/providers/http-terrain-store.ts`). No
+live elevation API is ever called at runtime; `npm run fetch:tiles` remains the
+only thing that talks to the outside world.
+
+During `npm run dev` / `npm run preview` that directory is published by
+`scripts/terrain-server.ts` out of what the repository already holds: whole
+tiles from `data/tiles/` (gitignored, fetched on demand) and the committed
+real-SRTM case windows from `fixtures/tiles/cases/`. Synthetic test tiles are
+deliberately never served — invented mountains at real coordinates is the exact
+failure mode this project exists to avoid. A production deployment serves its
+own tile directory at `/terrain/`.
+
+Where the app has no terrain it says so specifically — which tile is missing,
+what it holds instead, and the command that fixes it — and draws nothing. An
+empty overlay would read as "no peaks are visible from here", which is a
+different claim and would be a fabricated one.
 
 ## Layout
 

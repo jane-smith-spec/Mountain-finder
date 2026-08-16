@@ -231,10 +231,10 @@ export function exportDisabledReason(readiness: ExportReadiness): string | undef
     return `${String(readiness.missingFieldCount)} pose ${subject} manual input.`;
   }
   if (!readiness.hasExporter) {
-    return 'The PNG compositor is not wired up yet (P4.2 / TODO.md Q1).';
+    return 'This build has no PNG compositor.';
   }
   if (!readiness.hasOverlay) {
-    return 'There is no overlay to export yet — the pipeline is not wired up (TODO.md Q1).';
+    return 'There is no overlay to export: the skyline for this photo has not been computed.';
   }
   return undefined;
 }

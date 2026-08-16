@@ -8,8 +8,9 @@
  * and effects.
  *
  * It imports NOTHING from `src/render` or `src/pipeline`. Both arrive as
- * optional props typed in `seam.ts`; with neither supplied the app runs exactly
- * as it does today, showing a labelled placeholder instead of inventing peaks.
+ * optional props typed in `seam.ts` and are constructed in `main.tsx`; with
+ * neither supplied the app still runs, showing a labelled placeholder instead
+ * of inventing peaks.
  */
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
@@ -27,9 +28,13 @@ import { annotatedFileName, type OverlayBuilder, type OverlayResult, type PngExp
 import { deriveSession, exportDisabledReason, INITIAL_STATE, reducer } from './state';
 
 export interface AppProps {
-  /** The pipeline + renderer call. Absent until TODO.md Q1 wires it up. */
+  /**
+   * The pipeline + renderer call (`createOverlayBuilder`, wired in main.tsx).
+   * Optional so this component can be rendered without one — the app then
+   * shows its placeholder rather than pretending to have computed anything.
+   */
   overlayBuilder?: OverlayBuilder;
-  /** The PNG compositor (P4.2). Absent until the same wiring step. */
+  /** The PNG compositor (P4.2), likewise wired in main.tsx. */
   pngExporter?: PngExporter;
 }
 
