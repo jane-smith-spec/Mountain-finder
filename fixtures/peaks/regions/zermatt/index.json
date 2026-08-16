@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "description": "Named summits imported from Overture Maps for \"zermatt\". Upper Valais: the Gornergrat acceptance case and the terrain tiles N45E007/N46E007. Heights are OpenStreetMap `ele` tags carried through Overture, never DEM samples.",
+  "release": "2026-06-17.0",
+  "generatedBy": "npm run fetch:peaks -- --region zermatt",
+  "bounds": {
+    "south": 45.6,
+    "west": 7.2,
+    "north": 46.4,
+    "east": 8.2
+  },
+  "sources": [
+    {
+      "id": "overture-2026-06-17.0-base-land",
+      "title": "Overture Maps Foundation, base theme, type=land, release 2026-06-17.0 — summit features (subtype=physical, class=peak|volcano), © OpenStreetMap contributors, ODbL-1.0",
+      "url": "https://overturemaps-us-west-2.s3.amazonaws.com/release/2026-06-17.0/theme=base/type=land/",
+      "retrieved": "2026-08-16",
+      "access": "fetched",
+      "note": "Position is the midpoint of Overture's float32-rounded `bbox` (sub-metre for a point feature); height is the `elevation` column, which carries the OpenStreetMap `ele` tag unchanged — verified row-by-row against the same rows' `source_tags.ele`. Heights are therefore tagged/surveyed values, NEVER DEM samples (MISSION.md: SRTM under-reads sharp summits by 250–350 m). Area imported: 45.6,7.2 … 46.4,8.2."
+    }
+  ],
+  "cells": [
+    {
+      "name": "N45E007",
+      "peaks": 827,
+      "file": "cells/N45E007.json"
+    },
+    {
+      "name": "N45E008",
+      "peaks": 226,
+      "file": "cells/N45E008.json"
+    },
+    {
+      "name": "N46E007",
+      "peaks": 564,
+      "file": "cells/N46E007.json"
+    },
+    {
+      "name": "N46E008",
+      "peaks": 169,
+      "file": "cells/N46E008.json"
+    }
+  ],
+  "peakCount": 1786
+}
