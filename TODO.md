@@ -50,8 +50,22 @@
       `ExpectedSkylinePoint`, `interpolateHorizonAltitudeDeg` and twin-ridges.ts's local
       `skylineAltitudeDeg` (which feeds `expectedSkyline` and IS the maximum over all
       distances). Every expected value is byte-identical; only identifiers and prose moved.
-      Still open: the review's unverified suspicions 1 and 2 (gap bridging, `nearest-valid`
-      reporting).
+      **Suspicion 1 (gap bridging) is CONFIRMED and fixed (2026-08-16) — now finding 6.**
+      A wedge of unfetched tiles drops whole rays, and the profile bridged the hole: the same
+      peak at bearing 120° inside a 40°-wide hole with zero terrain samples came out
+      `foreground-occluded` (clearance −5.14°, "behind" a ridge on the ray at 100°) or `visible`
+      and labelled (clearance +4.30°) purely according to terrain 20° away on the far side of
+      the hole. `horizonCoverage` + `hasTerrainAtBearing` in `src/core/horizon.ts` (pure) now
+      take the sweep's own bearing list and refuse a bearing whose bracketing pair has a lost
+      ray between them; `annotateScene` reaches NO verdict for such peaks and reports them in
+      `AnnotatedScene.unmeasured` with a warning. A bounded sweep is not a hole — a 60° sector
+      that walked all its rays lost nothing, so its peaks are untouched; the distinction is
+      exact (a bearing the sweep asked about and lost) rather than a gap-width heuristic.
+      All 4 ground-truth cases lose no rays, so 148/148 acceptance verdicts are unchanged.
+      Still open: suspicion 2 (`nearest-valid` reporting), and two residuals noted under
+      finding 6 — peaks outside a bounded sweep are still judged against the bridged
+      complement, and `src/cv/rays.ts:profileCoverage` duplicates this with a largest-gap
+      heuristic that should be reconciled onto the exact one.
 - [x] **Q3 — The demo PNG.** `npm run demo -- gornergrat` writes `out/annotated.png`: the real
       pipeline over the full `data/tiles/N45E007.hgt`, laid out by `src/render` and composited by
       `src/render/composite.ts` in Chromium (`scripts/rasterise.ts` + `src/render/composite-page.html`

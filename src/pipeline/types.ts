@@ -21,6 +21,7 @@ import type {
   LatLng,
   Observer,
   Peak,
+  PeakSighting,
   PeakVisibility,
   VisiblePeak,
 } from '../core/types.js';
@@ -190,12 +191,35 @@ export interface AnnotatedScene {
   /** The skyline, for the renderer to draw and the filter to judge against. */
   readonly horizon: HorizonProfile;
   readonly sweep: SweepReport;
-  /** Every peak considered, nearest first, each with its verdict. */
+  /**
+   * Every peak the run reached a verdict on, nearest first. Peaks whose own
+   * bearing had no terrain data are NOT here — they are in `unmeasured`,
+   * because there is no verdict to carry.
+   */
   readonly peaks: readonly AnnotatedPeak[];
   /** The subset that cleared the terrain in front of it, in the same order. */
   readonly visible: readonly AnnotatedPeak[];
   /** The subset that did not. Equals `selfOccluded` ∪ `foregroundOccluded`. */
   readonly occluded: readonly AnnotatedPeak[];
+  /**
+   * Peaks on a bearing the sweep asked about and got NO terrain data for:
+   * every ray there was dropped, so the profile has a hole and any horizon
+   * angle at that bearing would be a straight line drawn across it. Sighted
+   * (bearing, range and altitude angle are pure geometry and still true) but
+   * deliberately unjudged — a `visible` or `hidden` verdict would be measured
+   * against terrain nobody looked at, and both answers would be inventions.
+   *
+   * Nearest first. Never drawn as a labelled peak: the overlay is entitled to
+   * name what the terrain says is in view, and here the terrain says nothing.
+   * A caller that wants them anyway — a "what might be out there" mode, or a
+   * prompt to fetch the missing tiles — has them, with the reason attached in
+   * `warnings` and the raw counts in `sweep`.
+   *
+   * Empty for a complete sweep, and empty for a SECTOR sweep whose every ray
+   * came back: bearings the sweep never asked about are not lost data. See
+   * `hasTerrainAtBearing` in src/core/horizon.ts.
+   */
+  readonly unmeasured: readonly PeakSighting[];
   /**
    * Occluded peaks whose summit is tucked behind a shoulder of their own hill.
    * The overlay draws these, de-emphasised (D8).

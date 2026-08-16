@@ -9,6 +9,9 @@
  *   3. build the horizon profile     running maximum per ray = the skyline
  *   4. fetch named peaks             from the peak database, NEVER from the DEM
  *   5. sight each peak               bearing, range, altitude angle
+ *   5b. set aside peaks on a bearing the sweep asked about and got no terrain
+ *       for — they are `unmeasured`, and get NO verdict rather than one read
+ *       off a horizon interpolated across the hole
  *   6. filter by the NEARER-terrain rule
  *   7. classify each occlusion    self-occluded (labelled, greyed) or
  *                                 foreground-occluded (never drawn) — D8
@@ -37,7 +40,7 @@
  * result — horizon profile included, deliberately — and draws it.
  */
 
-import { buildHorizonProfile } from '../core/horizon.js';
+import { buildHorizonProfile, hasTerrainAtBearing, horizonCoverage } from '../core/horizon.js';
 import { projectToImage } from '../core/projection.js';
 import { sightPeak } from '../core/sightline.js';
 import type { HorizonProfile, PeakSighting } from '../core/types.js';
@@ -51,7 +54,7 @@ import {
 import { PipelineError, throwIfAborted } from './errors.js';
 import { classifyPeakOcclusion, describeOccluder } from './occlusion.js';
 import { eyeElevationM, resolveObserver } from './observer.js';
-import { buildTerrainRays, resolveSweep } from './terrain.js';
+import { buildTerrainRays, resolveSweep, sweepBearingsDeg } from './terrain.js';
 import type {
   AnnotateSceneRequest,
   AnnotatedPeak,
@@ -72,6 +75,16 @@ export const DEFAULT_PEAK_RADIUS_KM = 200;
  * rounding errors point, and the altitude angle heads for ±90°.
  */
 export const DEFAULT_MIN_PEAK_DISTANCE_KM = 0.05;
+
+/** How many names a warning lists before it starts counting instead. */
+const WARNING_NAME_LIMIT = 5;
+
+/** `"A, B and 7 more"` — enough to recognise the case without a wall of text. */
+function describePeakNames(sightings: readonly PeakSighting[]): string {
+  const names = sightings.slice(0, WARNING_NAME_LIMIT).map((peak) => `"${peak.name}"`);
+  const remaining = sightings.length - names.length;
+  return remaining > 0 ? `${names.join(', ')} and ${remaining} more` : names.join(', ');
+}
 
 /** Fill in every default, so the result can report what the run actually used. */
 export function resolveConfig(config: PipelineConfig = {}): ResolvedPipelineConfig {
@@ -136,7 +149,8 @@ export async function annotateScene(request: AnnotateSceneRequest): Promise<Anno
   if (report.raysWithTerrain < report.raysRequested) {
     warnings.push(
       `${report.raysRequested - report.raysWithTerrain} of ${report.raysRequested} rays had no ` +
-        'terrain data and contribute no horizon point; the profile is interpolated across them.',
+        'terrain data and contribute no horizon point, leaving holes in the profile. Peaks on ' +
+        'those bearings get no verdict — see `unmeasured`.',
     );
   }
   if (report.samplesWithElevation < report.samplesRequested) {
@@ -158,7 +172,14 @@ export async function annotateScene(request: AnnotateSceneRequest): Promise<Anno
     config.peakRadiusKm,
   );
 
+  // Which bearings the sweep asked about and lost. A profile is a list of
+  // successes and cannot tell a hole from its own edge, so the sweep's own
+  // bearing list is what separates "39 rays failed here" from "the sector
+  // stopped here" — see `hasTerrainAtBearing` in src/core/horizon.ts.
+  const coverage = horizonCoverage(horizon, sweepBearingsDeg(config.sweep));
+
   const sightings: PeakSighting[] = [];
+  const unmeasured: PeakSighting[] = [];
   for (const peak of found) {
     const sighting = sightPeak(observer, peak, config.sightline);
     if (sighting.distanceKm < config.minPeakDistanceKm) {
@@ -168,9 +189,27 @@ export async function annotateScene(request: AnnotateSceneRequest): Promise<Anno
       );
       continue;
     }
+    // No terrain at this bearing means no evidence either way: the horizon
+    // there would be a straight line drawn across the hole, and a peak judged
+    // against it is called visible or hidden by ground nobody measured. Both
+    // answers would be fabrications, so the peak gets no verdict at all — the
+    // same refusal `classifyOcclusion` makes when a ray's record has a hole in
+    // it wide enough to hide a col.
+    if (!hasTerrainAtBearing(horizon, sighting.bearingDeg, coverage)) {
+      unmeasured.push(sighting);
+      continue;
+    }
     sightings.push(sighting);
   }
   sightings.sort((a, b) => a.distanceKm - b.distanceKm);
+  unmeasured.sort((a, b) => a.distanceKm - b.distanceKm);
+  if (unmeasured.length > 0) {
+    warnings.push(
+      `No visible/hidden verdict for ${unmeasured.length} peak(s) on bearings the sweep asked ` +
+        `about and got no terrain data for: ${describePeakNames(unmeasured)}. Judging them ` +
+        'would mean measuring against a horizon interpolated across the hole.',
+    );
+  }
 
   const eyeM = eyeElevationM(observer);
   const peaks: AnnotatedPeak[] = sightings.map((sighting) => {
@@ -223,6 +262,7 @@ export async function annotateScene(request: AnnotateSceneRequest): Promise<Anno
     peaks,
     visible,
     occluded: peaks.filter((peak) => !peak.visible),
+    unmeasured,
     selfOccluded: peaks.filter((peak) => peak.visibility === 'self-occluded'),
     foregroundOccluded: peaks.filter((peak) => peak.visibility === 'foreground-occluded'),
     labelled: peaks.filter((peak) => isLabelled(peak.visibility)),

@@ -104,12 +104,63 @@ Recorded because "we looked hard and it holds" is real information:
 
 ## Unverified suspicions (hypotheses, not findings)
 
-1. Partial-coverage profiles may bridge a data gap linearly, producing a confident interpolated
-   horizon where no terrain data exists — composing badly with `missingTilePolicy: 'no-data'`.
+1. ~~Partial-coverage profiles may bridge a data gap linearly~~ — **CONFIRMED and fixed,
+   2026-08-16. Promoted to finding 6 below.**
 2. `method: 'nearest-valid'` is reported for readings that are exactly bilinear but merely have
    a void *neighbour*; a consumer filtering on `method` would discard good data.
 3. `resolvePose` accepts a negative `eyeHeightM`, which would place the eye below terrain and
    invert every clearance. No path to it demonstrated.
+
+## Confirmed findings, part 2 (after the pipeline existed)
+
+### 6. HIGH — a bearing with no terrain data got a confident, fabricated verdict
+*Suspicion 1, promoted. The reviewer could not demonstrate it because the pipeline did not yet
+exist to say what happened to a dropped ray. It does now, and it is real.*
+
+`buildTerrainRays` drops a ray that returned no elevation at all, `buildHorizonProfile` emits no
+point for it, and `bracketAtBearing` then treats the two lips of the hole as **neighbouring
+samples** and interpolates straight across. Nothing downstream could tell that apart from
+ordinary interpolation between two adjacent rays.
+
+Demonstrated end to end on the ring-ridge pipeline scene with the tiles between bearings 100°
+and 140° never fetched — 39 of 360 rays dropped, a 40°-wide hole — and one peak at bearing 120°,
+20 km out, 1500 m up, dead centre of it. The wedge contains **not one terrain sample**:
+
+| terrain outside the wedge | horizon "at" 120° | verdict on the peak |
+|---|---|---|
+| 900 m ring ridge at 5 km | `+9.0712°` | **foreground-occluded**, clearance −5.14°, "behind 900 m at 5 km" — read off the ray at bearing **100°** |
+| flat sea level | `−0.3083°` | **visible**, clearance +4.30°, **labelled** |
+
+Same hole, same peak, same absence of evidence; the verdict flips with terrain 20° away on the
+far side of the hole. Both answers are inventions, and the second one puts a label on a mountain
+that a 3000 m wall in the unmeasured wedge could be hiding entirely. The pipeline's own warning
+said the quiet part out loud — *"the profile is interpolated across them"* — and then went ahead
+and judged peaks against it.
+
+**Fix.** A profile is a list of successes and cannot tell a hole from its own edge, so the
+missing fact is supplied by the caller: `horizonCoverage(profile, sweptBearingsDeg)` records
+which bearings the sweep asked about and lost, and `hasTerrainAtBearing` refuses any bearing
+whose bracketing pair has a lost ray between them (`src/core/horizon.ts`, still pure).
+`annotateScene` consults it before judging, and a peak on such a bearing is **not judged at
+all**: it goes to `AnnotatedScene.unmeasured` — sighted (bearing, range and angle are geometry,
+and still true) but with no visible/hidden claim attached — plus a warning that names it. That
+is the same refusal `classifyOcclusion` already makes along a ray when the record has a hole in
+it wide enough to hide a col, applied across bearings instead of along one.
+
+**A hole is not an edge.** The un-swept remainder of a bounded sweep is untouched: a 60° sector
+that walked all sixty of its rays lost nothing, bearing 200° was never asked about, and its
+peaks keep the verdicts they had. The two cases are separated exactly rather than
+heuristically — a hole contains a bearing the sweep asked about and lost; an edge does not — so
+no threshold, gap-width factor or "largest gap" guess is involved, and a sector sweep can still
+have a hole found inside it. All 148 acceptance assertions and every ground-truth verdict are
+unchanged: none of the four real cases loses a ray.
+
+*Residual, out of scope here and worth a decision:* a peak OUTSIDE a bounded sweep still gets a
+verdict interpolated across the un-swept complement, which is a different fabrication with a
+different answer (sweep it, or refuse it, or rely on it being off-frame). And `src/cv/rays.ts`
+grew its own `profileCoverage` for the aligner — a largest-gap-vs-median heuristic over the
+profile alone, which cannot see a hole and a sector edge at the same time. The two notions of
+coverage should be reconciled on the exact one.
 
 ## Decision taken
 

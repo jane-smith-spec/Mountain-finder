@@ -48,7 +48,12 @@ import { describe, expect, it } from 'vitest';
 import { EARTH_RADIUS_M } from '../core/geodesy';
 import { interpolateHorizonAltitudeDeg } from '../core/horizon';
 import type { CameraPose, Peak } from '../core/types';
-import { apparentAltitudeDeg, greatCircleDistanceM } from '../../fixtures/scenes';
+import {
+  apparentAltitudeDeg,
+  destinationPoint,
+  greatCircleDistanceM,
+  initialBearingDeg,
+} from '../../fixtures/scenes';
 
 import { annotateScene } from './annotate';
 import { PipelineError } from './errors';
@@ -527,5 +532,108 @@ describe('annotateScene — occlusion classification (D8)', () => {
         expect(peak.visible).toBe(peak.visibility === 'visible');
       }
     }
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * A wedge of missing terrain — no verdict is better than a bridged one
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * The ring-ridge scene with the tiles between bearings 100° and 140° never
+ * fetched: every ray in that wedge returns no elevation at all and is dropped,
+ * so the horizon profile jumps straight from 100° to 140°.
+ *
+ * `Wedge Peak` stands at bearing 120°, 20 km out, 1500 m up — dead centre of
+ * the hole, 40° of compass with not one terrain sample in it. Interpolating the
+ * profile there produces a confident ridge angle bridged from the two lips of
+ * the hole, and the peak is then declared hidden by ground nobody measured.
+ * The only defensible answer is that there is no answer.
+ */
+const WEDGE_START_DEG = 100;
+const WEDGE_END_DEG = 140;
+const WEDGE_PEAK_BEARING_DEG = 120;
+const WEDGE_PEAK_DISTANCE_M = HIDDEN_DISTANCE_M;
+
+const wedgeOfMissingTiles: TerrainFunctionM = (point) => {
+  const bearingDeg = initialBearingDeg(ORIGIN, point);
+  if (bearingDeg > WEDGE_START_DEG && bearingDeg < WEDGE_END_DEG) return null;
+  return ringRidge(point);
+};
+
+const wedgePeak: Peak = {
+  id: 'test/wedge',
+  name: 'Wedge Peak',
+  ...destinationPoint(ORIGIN, WEDGE_PEAK_BEARING_DEG, WEDGE_PEAK_DISTANCE_M),
+  elevationM: HIDDEN_ELEVATION_M,
+  elevationSource: 'unknown',
+};
+
+function wedgeRequest(overrides: Partial<AnnotateSceneRequest> = {}): AnnotateSceneRequest {
+  return request({
+    elevation: new FunctionElevationSource(wedgeOfMissingTiles, 'wedge-of-missing-tiles'),
+    peaks: new StaticPeakSource([...peaks, wedgePeak]),
+    ...overrides,
+  });
+}
+
+describe('annotateScene — bearings the sweep asked about and lost', () => {
+  it('drops the rays in the wedge, leaving a hole in the profile', async () => {
+    const scene = await annotateScene(wedgeRequest());
+
+    // 101°–139° inclusive: 39 rays of the 360 asked for.
+    expect(scene.sweep.raysRequested).toBe(360);
+    expect(scene.sweep.raysWithTerrain).toBe(360 - 39);
+    expect(scene.horizon).toHaveLength(360 - 39);
+    expect(scene.horizon.map((point) => point.bearingDeg)).not.toContain(
+      WEDGE_PEAK_BEARING_DEG,
+    );
+  });
+
+  it('reaches no verdict on a peak inside the hole', async () => {
+    const scene = await annotateScene(wedgeRequest());
+
+    for (const list of [scene.peaks, scene.visible, scene.occluded, scene.labelled]) {
+      expect(list.map((peak) => peak.id)).not.toContain('test/wedge');
+    }
+    expect(scene.unmeasured.map((peak) => peak.id)).toEqual(['test/wedge']);
+    expect(scene.warnings.join('\n')).toMatch(/Wedge Peak/);
+    expect(scene.warnings.join('\n')).toMatch(/no terrain data/);
+  });
+
+  it('still judges the peaks whose own bearing was swept', async () => {
+    const scene = await annotateScene(wedgeRequest());
+    // High Peak and Hidden Peak are due east, well clear of the wedge, and the
+    // ring ridge in front of them is untouched — so their verdicts are the ones
+    // the ring-ridge scene documents.
+    expect(scene.visible.map((peak) => peak.id)).toEqual(['test/high']);
+    expect(byId(scene.peaks, 'test/hidden').visible).toBe(false);
+  });
+
+  it('does not treat the un-swept part of a SECTOR sweep as a lost bearing', async () => {
+    // Full terrain, but only 60°–120° swept. The rays that were asked for all
+    // came back, so nothing was lost: every peak still gets a verdict, and
+    // `unmeasured` stays empty. A sector sweep is a bounded profile, not a
+    // damaged one.
+    const scene = await annotateScene(
+      request({
+        config: {
+          sweep: {
+            startBearingDeg: 60,
+            spanDeg: 60,
+            bearingStepDeg: 1,
+            rangeStepM: 250,
+            maxRangeKm: 30,
+          },
+          peakRadiusKm: 50,
+          clock: () => FIXED_CLOCK,
+        },
+      }),
+    );
+
+    expect(scene.sweep.raysWithTerrain).toBe(scene.sweep.raysRequested);
+    expect(scene.unmeasured).toEqual([]);
+    expect(scene.peaks.map((peak) => peak.id)).toEqual(['test/high', 'test/hidden']);
+    expect(scene.visible.map((peak) => peak.id)).toEqual(['test/high']);
   });
 });
