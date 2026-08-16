@@ -46,6 +46,16 @@ const CHAMONIX = resolve(PHOTO_DIR, 'chamonix-north-east.jpg');
 /** A tile fetch plus a 130° sweep over it; the dev-server suite allows as much. */
 const OVERLAY_TIMEOUT_MS = 120_000;
 
+/** The names in the packaged index — what this deployment actually holds. */
+async function packagedGridNames(): Promise<readonly string[]> {
+  const manifest = JSON.parse(
+    await readFile(resolve(DIST, 'terrain/manifest.json'), 'utf8'),
+  ) as { grids?: readonly { name?: unknown }[] };
+  return (manifest.grids ?? [])
+    .map((grid) => grid.name)
+    .filter((name): name is string => typeof name === 'string');
+}
+
 test.beforeAll(async () => {
   for (const file of ['index.html', 'terrain/manifest.json']) {
     const path = resolve(DIST, file);
@@ -55,6 +65,14 @@ test.beforeAll(async () => {
           '  npm run build && npm run package:deploy -- --gzip',
       );
     });
+  }
+  const names = await packagedGridNames();
+  if (!names.includes('N45E007')) {
+    throw new Error(
+      'The packaged deployment holds no N45E007, so the Gornergrat photo cannot be ' +
+        'the proof it is meant to be. Fetch it and repackage:\n' +
+        '  npm run fetch:tiles -- N45E007 && npm run package:deploy -- --gzip',
+    );
   }
 });
 
@@ -155,7 +173,6 @@ test('a statically served build draws a real overlay from a real photo', async (
   expect(response.status()).toBe(200);
   const encoding = response.headers()['content-encoding'] ?? 'identity';
   const { responseBodySize } = await response.request().sizes();
-  // eslint-disable-next-line no-console
   console.log(
     `terrain: N45E007.hgt 25934402 B on disk, ${responseBodySize} B on the wire ` +
       `(Content-Encoding: ${encoding})`,
@@ -166,6 +183,12 @@ test('a statically served build draws a real overlay from a real photo', async (
 });
 
 test('a viewpoint the deployment has no tile for is named, not silently blank', async ({ page }) => {
+  // Chamonix sits in N45E006. If a deployment ever ships that tile this case
+  // stops being a no-terrain case, and skipping is the honest response —
+  // quietly asserting an absence that is no longer true would be worse.
+  const names = await packagedGridNames();
+  test.skip(names.includes('N45E006'), 'this deployment now holds N45E006');
+
   await page.goto('/');
   await pickPhoto(page, CHAMONIX);
   await page.getByTestId('input-assumptions').check();

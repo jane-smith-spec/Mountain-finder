@@ -29,8 +29,10 @@ old, small dataset, and the acceptance suite is unchanged: it gates on the cited
 figures, which carry individual citations, and never on these.
 
 The Gornergrat frame went from **1 label to 10**, and the wide frame from 2 to
-**14** — and both are still readable: labels stack on poles of increasing length
-rather than piling on each other. Honest caveats about what the density exposed are below.
+**18** — and both are still readable: labels stack on poles of increasing length
+rather than piling on each other. Four of the wide frame's 18 are greyed
+self-occluded summits on dashed poles (Rocca di Verra, Gobba di Rollin, Punta di
+Rollin, Gagenhaupt) — decision D8 drawn rather than described. Honest caveats about what the density exposed are below.
 
 ## What to look at
 
@@ -109,3 +111,9 @@ that stresses curvature, not the one that photographs well.
 
 Do not regenerate these on every run. Update them when the output meaningfully
 changes, so the diff stays reviewable.
+
+These three were written on 2026-08-16 against `src/render` as it stood that
+afternoon, while label placement was still being hardened for density. The
+counts quoted above (10 / 18 / 10 markers) are what those runs printed; if a
+later renderer change moves them, regenerate and update the numbers rather than
+leaving a caption that no longer matches its picture.

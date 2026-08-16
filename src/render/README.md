@@ -50,13 +50,17 @@ numbers instead of as substrings.
 
 Peaks cluster on a real skyline, so overlapping labels are the default outcome.
 The rule, in full, is documented at the top of [`layout.ts`](layout.ts). In
-brief: markers are placed left to right (ties broken by peak id, never by input
-order), each takes the first free placement from a fixed candidate list — pole
-lengths increasing one `stackStepPx` at a time, upward first and then downward —
-and if nothing is free it is placed anyway and flagged `overlapped`. A level can
-be *skipped*, because poles are measured from their own summits and summits
+brief: markers are placed in **priority order** — apparent height, highest
+first, ties broken by elevation then by peak id, never by input order — each
+taking the first free placement from a fixed candidate list of pole lengths
+increasing one `stackStepPx` at a time, upward first and then downward. A level
+can be *skipped*, because poles are measured from their own summits and summits
 differ in height; the search tests the real boxes rather than trusting the
-arithmetic. What is guaranteed is disjoint boxes, never a particular level.
+arithmetic. What is guaranteed is disjoint boxes, never a particular level. The
+returned `markers` are sorted left to right, which is the reading order of the
+picture — placement order allocates space, report order presents it.
+
+If nothing is free the label is **withheld**, not drawn overlapping: see below.
 
 ### Real peak density (Phase 9)
 
@@ -86,15 +90,33 @@ frame is busy would repeal decision D8 by the back door, invisibly, exactly
 where nobody would notice one more missing name. Foreground-occluded peaks are
 refused *before* ranking, so no priority rule can promote one into the picture.
 
-Above capacity a marker that finds no free candidate is withheld rather than
-drawn overlapping. That extends rule 5 rather than reversing it: rule 5 exists
-because losing a name silently is a lie, and above capacity the frame is
-already saying on its own face that it is withholding names.
+A marker that finds no free candidate is **withheld**, not drawn overlapping,
+and the rule is unconditional. Rule 5 used to draw it anyway and flag
+`overlapped`; that was right when there was no channel through which a withheld
+name could be reported, because a name that silently disappears is a lie about
+what is in the photograph. `crowdedOutSummits` plus the count on the image *are*
+that channel, so the reason has gone. `overlapped` now means one thing only, and
+it is not crowding: a frame with no room for the label anywhere (a label taller
+than the photograph), where withholding would empty an overlay that has peaks in
+it.
 
-Result on the same measured scene: 74 in frame, 21 labelled, 53 dotted, **0**
-overlapping label boxes, longest pole 309 px. Across all 72 headings sampled at
-5°, exactly one frame (heading 50°, 20 summits, under capacity) still produces
-overlapping labels — the deliberate never-drop behaviour of rule 5.
+Making the rule conditional on the budget was measurably worse than either
+alternative — a 30-summit frame came out with 9 colliding labels while a fuller
+43-summit frame came out clean, because only the fuller one crossed the
+threshold. A slightly emptier view must not render worse than a fuller one.
+
+Measured over the same 72 headings, genuine old code vs new, same scene:
+
+| | old | new |
+|---|---|---|
+| headings with ≥1 colliding label | **15 / 72** | **0 / 72** |
+| worst frame's colliding labels | 10 | 0 |
+| worst frame's `overlapped` flags | 7 | 0 |
+| longest pole anywhere | 467 px | 309 px |
+| densest frame (heading 355°, 50 in frame) | 50 labelled, 8 colliding | 22 labelled, 28 dotted, 0 colliding |
+
+Collision search cost, 5000 in-frame peaks: **329.5 ms → 6.8 ms**. The old search
+was quadratic in the peaks placed; the budget bounds how many ever enter it.
 
 ### Legibility
 
@@ -124,7 +146,7 @@ bright sky) that the exported artifact is reviewed against.
 ## Self-checks
 
 ```
-npx vitest run src/render                              # P4.1 — 141 unit tests
+npx vitest run src/render                              # P4.1 — 143 unit tests
 npx playwright test tests/e2e/render.spec.ts           # P4.2 — export + raster probes
 npx playwright test tests/e2e/render-density.spec.ts   # 77 summits in one frame
 ```

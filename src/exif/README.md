@@ -22,10 +22,26 @@ if (pose.complete) {
 ```
 
 `extractPhotoExif` reads GPS latitude/longitude, GPS altitude, GPSImgDirection
-with its GPSImgDirectionRef, focal length and 35 mm equivalent, and the image
-pixel dimensions. It derives `hFovDeg = 2*atan(36 / (2*f35))` and, from the
-aspect ratio, `tan(vFov/2) = tan(hFov/2) * height/width`. Missing tags come back
-as absent properties — never as zeros.
+with its GPSImgDirectionRef, focal length and 35 mm equivalent, **Orientation**,
+and the image pixel dimensions. Missing tags come back as absent properties —
+never as zeros.
+
+Two normalisations happen on the way out:
+
+- **Orientation is applied.** `imageWidthPx`/`imageHeightPx` are the DISPLAYED
+  dimensions, so a photo stored 4032x3024 with `Orientation = 6` (a phone held
+  upright) reports 3024x4032 — the frame the user sees and the browser decodes.
+- **The 36 mm gate angle goes to the longer displayed axis.** 36 mm is the LONG
+  side of the 35 mm frame, so `2*atan(36/(2*f35))` is the angle across the width
+  of a landscape photo and across the HEIGHT of a portrait one; the other axis
+  follows from `tan(θ/2)` scaled by the aspect ratio. Attributing it to the
+  width unconditionally cost 12 % of the frame's width on the portrait fixture.
+  Which convention `FocalLengthIn35mmFormat` implies is genuinely a convention —
+  the long-side and diagonal readings agree exactly at 3:2 and differ by about a
+  degree at 4:3 — and `fov.ts` states the choice and its alternative in full.
+  Both angles need the pixel dimensions, so a photo with a 35 mm equivalent and
+  no dimensions reports neither, and `resolvePose` asks for the size rather than
+  for a focal length the file already has.
 
 `resolvePose` merges three layers, highest precedence first: **user overrides**,
 then **EXIF**, then **caller-supplied defaults**. Each of the nine pose fields
@@ -55,10 +71,12 @@ reason a UI can act on).
 
 ## Fixtures
 
-`fixtures/photos/` holds four generated JPEGs, one per awkward case (complete
+`fixtures/photos/` holds six generated JPEGs, one per awkward case (complete
 N/E photo, S/W photo with a magnetic heading and no 35 mm equivalent, a
-below-sea-level portrait with an unreferenced direction, and a fully stripped
-photo). They are authored in `testing/fixtures.ts` and written by:
+below-sea-level portrait with an unreferenced direction, a complete photo over
+terrain this repository holds, a landscape-stored/portrait-DISPLAYED photo with
+`Orientation = 6`, and a fully stripped photo). They are authored in
+`testing/fixtures.ts` and written by:
 
 ```
 npx tsx src/exif/testing/generate.ts

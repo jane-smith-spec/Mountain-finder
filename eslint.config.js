@@ -13,6 +13,12 @@ export default tseslint.config(
       'test-results/**',
       // v1 is retired reference material — never linted, never built.
       'archive/**',
+      // Gitignored scratch space for review agents demonstrating findings.
+      // tsconfig.json already excludes it for exactly this reason: nothing
+      // there ships, and a half-written probe must not break `npm run check`
+      // for everyone else. Lint was still walking into it and failing on 30
+      // `any`s in throwaway files.
+      'tests/scratch/**',
     ],
   },
   js.configs.recommended,

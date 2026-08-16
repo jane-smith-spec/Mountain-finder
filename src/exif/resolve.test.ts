@@ -213,6 +213,31 @@ describe('resolvePose — magnetic north is never passed off as true north', () 
     expectNeedsManual(resolution.fields.groundElevationM, 'absent-from-exif');
   });
 
+  it('asks for the image size, not the focal length, when only the shape is unknown', () => {
+    // A 35 mm equivalent WITH no pixel dimensions: the angle is known, the axis
+    // it spans is not, and assuming landscape is exactly what review 2's
+    // finding 3 was about. Naming 'no-35mm-equivalent-focal-length' here would
+    // send the user off to find a number the photo already carries.
+    const resolution = resolvePose({ focalLength35mmMm: 26, focalLengthMm: 4.2 });
+
+    expectNeedsManual(resolution.fields.hFovDeg, 'image-dimensions-unknown');
+    expectNeedsManual(resolution.fields.vFovDeg, 'image-dimensions-unknown');
+  });
+
+  it('derives both angles once the decoded size arrives, portrait included', () => {
+    // Supplying the dimensions as overrides is what the app does after
+    // decoding the bitmap. 600x800 portrait, f35 = 26:
+    //   vFov = 2*atan(9/13) = 69.390307 deg (the long side is the height)
+    //   hFov = 2*atan((9/13)*0.75) = 54.879456 deg
+    const resolution = resolvePose(
+      { focalLength35mmMm: 26, hFovDeg: 54.87945589639861, imageWidthPx: 600, imageHeightPx: 800 },
+      { imageWidthPx: 600, imageHeightPx: 800 },
+    );
+
+    expectResolved(resolution.fields.hFovDeg, 54.879456, 'exif', 6);
+    expectResolved(resolution.fields.vFovDeg, 69.390307, 'exif', 6);
+  });
+
   it('keeps the southern/western signs through to the Observer', () => {
     const resolution = resolvePose(
       aconcagua,
