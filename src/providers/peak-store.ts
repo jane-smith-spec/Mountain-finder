@@ -342,10 +342,12 @@ export class LocalPeakStore implements PeaksProvider {
 
   /**
    * `PeaksProvider` contract, so this store is drop-in for the Overpass client.
-   * Empty results throw `empty-result` unless the caller opts out, matching
-   * `OverpassPeaksProvider` exactly.
+   * Empty results reject with `empty-result` unless the caller opts out,
+   * matching `OverpassPeaksProvider` exactly — `async` so that failures arrive
+   * as a rejected promise rather than a synchronous throw, which is the
+   * difference between a caller's `.catch` running and not running.
    */
-  fetchPeaks(
+  async fetchPeaks(
     area: PeakSearchArea,
     options: PeaksRequestOptions = {},
   ): Promise<readonly PeakCandidate[]> {
@@ -363,6 +365,6 @@ export class LocalPeakStore implements PeaksProvider {
         'The local peak dataset holds no named peaks in this area',
       );
     }
-    return Promise.resolve(records.map(toPeakCandidate));
+    return records.map(toPeakCandidate);
   }
 }

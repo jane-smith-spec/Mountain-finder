@@ -1,0 +1,300 @@
+{
+  "version": 1,
+  "description": "Named summits needed by the ground-truth acceptance cases in tests/acceptance/cases/. Every coordinate and every height is COPIED from the case file that already cites it — nothing here was invented, estimated or sampled from a DEM. The case files remain the authority; this dataset is the machine-readable form the pipeline queries. Peak ids are prefixed mf/ because they are not OSM object ids: when Overpass egress opens, scripts/record-fixtures.ts can import the same summits as node/<id> and this file is replaced wholesale rather than merged.",
+  "sources": [
+    {
+      "id": "wp-matterhorn",
+      "title": "Matterhorn — Wikipedia",
+      "url": "https://en.wikipedia.org/wiki/Matterhorn",
+      "retrieved": "2026-08-16",
+      "access": "via-search-index",
+      "note": "Read via the web-search index; en.wikipedia.org is 403 at this environment's egress proxy. Copied into this dataset from tests/acceptance/cases/gornergrat.ts."
+    },
+    {
+      "id": "wp-dufourspitze",
+      "title": "Dufourspitze — Wikipedia",
+      "url": "https://en.wikipedia.org/wiki/Dufourspitze",
+      "retrieved": "2026-08-16",
+      "access": "via-search-index",
+      "note": "Copied from tests/acceptance/cases/gornergrat.ts."
+    },
+    {
+      "id": "wp-breithorn",
+      "title": "Breithorn — Wikipedia",
+      "url": "https://en.wikipedia.org/wiki/Breithorn",
+      "retrieved": "2026-08-16",
+      "access": "via-search-index",
+      "note": "Copied from tests/acceptance/cases/gornergrat.ts."
+    },
+    {
+      "id": "wp-mount-diablo",
+      "title": "Mount Diablo — Wikipedia (summit coordinates and elevation, USGS GNIS)",
+      "url": "https://en.wikipedia.org/wiki/Mount_Diablo",
+      "retrieved": "2026-08-16",
+      "access": "via-search-index",
+      "note": "Copied from tests/acceptance/cases/mount-diablo-summit.ts, where it is the observer's own position."
+    },
+    {
+      "id": "wp-mount-hamilton",
+      "title": "Mount Hamilton (California) — Wikipedia",
+      "url": "https://en.wikipedia.org/wiki/Mount_Hamilton_(California)",
+      "retrieved": "2026-08-16",
+      "access": "via-search-index",
+      "note": "Copied from tests/acceptance/cases/mount-diablo-summit.ts."
+    },
+    {
+      "id": "wp-mount-saint-helena",
+      "title": "Mount Saint Helena — Wikipedia",
+      "url": "https://en.wikipedia.org/wiki/Mount_Saint_Helena",
+      "retrieved": "2026-08-16",
+      "access": "via-search-index",
+      "note": "Copied from tests/acceptance/cases/mount-diablo-summit.ts."
+    },
+    {
+      "id": "wp-mount-tamalpais",
+      "title": "Mount Tamalpais — Wikipedia (East Peak coordinates and elevation)",
+      "url": "https://en.wikipedia.org/wiki/Mount_Tamalpais",
+      "retrieved": "2026-08-16",
+      "access": "via-search-index",
+      "note": "Copied from tests/acceptance/cases/mount-diablo-summit.ts."
+    },
+    {
+      "id": "wp-lassen-peak",
+      "title": "Lassen Peak — Wikipedia",
+      "url": "https://en.wikipedia.org/wiki/Lassen_Peak",
+      "retrieved": "2026-08-16",
+      "access": "via-search-index",
+      "note": "Copied from tests/acceptance/cases/mount-diablo-summit.ts."
+    },
+    {
+      "id": "wp-half-dome",
+      "title": "Half Dome — Wikipedia",
+      "url": "https://en.wikipedia.org/wiki/Half_Dome",
+      "retrieved": "2026-08-16",
+      "access": "via-search-index",
+      "note": "Copied from tests/acceptance/cases/mount-diablo-summit.ts, where Half Dome is a DISPUTED expectation — reported, never gated."
+    },
+    {
+      "id": "own-estimate-sentinel-dome",
+      "title": "Sentinel Dome coordinate — NOT independently sourced; approximate position used only for the disputed-entry arithmetic",
+      "url": "https://en.wikipedia.org/wiki/Sentinel_Dome",
+      "retrieved": "2026-08-16",
+      "access": "via-search-index",
+      "note": "The weakest position in the whole case set, by its own author's admission. Carried here only so the disputed Mount Diablo entry can be reported; must never back an assertion."
+    },
+    {
+      "id": "wp-mount-rainier",
+      "title": "Mount Rainier — Wikipedia",
+      "url": "https://en.wikipedia.org/wiki/Mount_Rainier",
+      "retrieved": "2026-08-16",
+      "access": "via-search-index",
+      "note": "Copied from tests/acceptance/cases/kerry-park-seattle.ts."
+    },
+    {
+      "id": "wp-mount-baker",
+      "title": "Mount Baker — Wikipedia",
+      "url": "https://en.wikipedia.org/wiki/Mount_Baker",
+      "retrieved": "2026-08-16",
+      "access": "via-search-index",
+      "note": "Copied from tests/acceptance/cases/kerry-park-seattle.ts."
+    },
+    {
+      "id": "wp-mount-hood",
+      "title": "Mount Hood — Wikipedia",
+      "url": "https://en.wikipedia.org/wiki/Mount_Hood",
+      "retrieved": "2026-08-16",
+      "access": "via-search-index",
+      "note": "Copied from tests/acceptance/cases/kerry-park-seattle.ts, where Mount Hood is a DISPUTED expectation."
+    },
+    {
+      "id": "wp-ben-nevis",
+      "title": "Ben Nevis — Wikipedia (56°47′49″N 5°00′13″W; 1,345 m)",
+      "url": "https://en.wikipedia.org/wiki/Ben_Nevis",
+      "retrieved": "2026-08-16",
+      "access": "via-search-index",
+      "note": "Copied from tests/acceptance/cases/fort-william.ts."
+    },
+    {
+      "id": "outdooractive-cow-hill",
+      "title": "Cow Hill viewpoint, Ben Nevis and Glen Coe — outdooractive.com",
+      "url": "https://www.outdooractive.com/en/poi/ben-nevis-and-glen-coe/cow-hill/41290838/",
+      "retrieved": "2026-08-16",
+      "access": "via-search-index",
+      "note": "A walking-route aggregator, not a national mapping agency — the least authoritative position in the case set. The Ordnance Survey grid reference should replace it before Fort William gates a release."
+    }
+  ],
+  "peaks": [
+    {
+      "id": "mf/matterhorn",
+      "name": "Matterhorn",
+      "lat": 45.976389,
+      "lon": 7.658611,
+      "elevationM": 4478,
+      "positionSourceId": "wp-matterhorn",
+      "elevationSourceId": "wp-matterhorn",
+      "elevationSourceKind": "unknown",
+      "usedBy": ["gornergrat"],
+      "note": "The published 4478 m is 248 m ABOVE what N45E007 reads at the summit (4230 m), and the tile's highest posting sits ~320 m WSW of it. This entry is the reason peak heights never come from the DEM."
+    },
+    {
+      "id": "mf/dufourspitze",
+      "name": "Dufourspitze",
+      "lat": 45.936833,
+      "lon": 7.867056,
+      "elevationM": 4634,
+      "positionSourceId": "wp-dufourspitze",
+      "elevationSourceId": "wp-dufourspitze",
+      "elevationSourceKind": "unknown",
+      "usedBy": ["gornergrat"]
+    },
+    {
+      "id": "mf/breithorn",
+      "name": "Breithorn",
+      "lat": 45.941111,
+      "lon": 7.747222,
+      "elevationM": 4164,
+      "positionSourceId": "wp-breithorn",
+      "elevationSourceId": "wp-breithorn",
+      "elevationSourceKind": "unknown",
+      "usedBy": ["gornergrat"]
+    },
+    {
+      "id": "mf/mount-diablo",
+      "name": "Mount Diablo",
+      "lat": 37.881697781,
+      "lon": -121.914154997,
+      "elevationM": 1173,
+      "positionSourceId": "wp-mount-diablo",
+      "elevationSourceId": "wp-mount-diablo",
+      "elevationSourceKind": "unknown",
+      "usedBy": ["mount-diablo-summit"],
+      "note": "The summit the mount-diablo-summit observer is standing on. Kept in the dataset on purpose: a peak at zero range is a real situation and the pipeline has to drop it deliberately rather than divide by its distance."
+    },
+    {
+      "id": "mf/mount-hamilton",
+      "name": "Mount Hamilton",
+      "lat": 37.341722,
+      "lon": -121.642833,
+      "elevationM": 1300,
+      "positionSourceId": "wp-mount-hamilton",
+      "elevationSourceId": "wp-mount-hamilton",
+      "elevationSourceKind": "unknown",
+      "usedBy": ["mount-diablo-summit"]
+    },
+    {
+      "id": "mf/mount-saint-helena",
+      "name": "Mount Saint Helena",
+      "lat": 38.669444,
+      "lon": -122.633611,
+      "elevationM": 1323,
+      "positionSourceId": "wp-mount-saint-helena",
+      "elevationSourceId": "wp-mount-saint-helena",
+      "elevationSourceKind": "unknown",
+      "usedBy": ["mount-diablo-summit"]
+    },
+    {
+      "id": "mf/mount-tamalpais-east-peak",
+      "name": "Mount Tamalpais East Peak",
+      "lat": 37.923922,
+      "lon": -122.596644,
+      "elevationM": 784,
+      "positionSourceId": "wp-mount-tamalpais",
+      "elevationSourceId": "wp-mount-tamalpais",
+      "elevationSourceKind": "unknown",
+      "usedBy": ["mount-diablo-summit"]
+    },
+    {
+      "id": "mf/lassen-peak",
+      "name": "Lassen Peak",
+      "lat": 40.488,
+      "lon": -121.5049,
+      "elevationM": 3187,
+      "positionSourceId": "wp-lassen-peak",
+      "elevationSourceId": "wp-lassen-peak",
+      "elevationSourceKind": "unknown",
+      "usedBy": ["mount-diablo-summit"],
+      "note": "292 km from Mount Diablo — a refraction test as much as a terrain test."
+    },
+    {
+      "id": "mf/half-dome",
+      "name": "Half Dome",
+      "lat": 37.746111,
+      "lon": -119.533056,
+      "elevationM": 2696,
+      "positionSourceId": "wp-half-dome",
+      "elevationSourceId": "wp-half-dome",
+      "elevationSourceKind": "unknown",
+      "usedBy": ["mount-diablo-summit"],
+      "note": "DISPUTED from Mount Diablo: the sources contradict each other and the margin is 0.004 deg. Reported, never gated."
+    },
+    {
+      "id": "mf/sentinel-dome",
+      "name": "Sentinel Dome",
+      "lat": 37.7231,
+      "lon": -119.5866,
+      "elevationM": 2476,
+      "positionSourceId": "own-estimate-sentinel-dome",
+      "elevationSourceId": "own-estimate-sentinel-dome",
+      "elevationSourceKind": "unknown",
+      "usedBy": ["mount-diablo-summit"],
+      "note": "DISPUTED, and on the weakest coordinate in the case set. Present so the disputed verdict can be reported; must never back an assertion."
+    },
+    {
+      "id": "mf/mount-rainier",
+      "name": "Mount Rainier",
+      "lat": 46.852886,
+      "lon": -121.760374,
+      "elevationM": 4392,
+      "positionSourceId": "wp-mount-rainier",
+      "elevationSourceId": "wp-mount-rainier",
+      "elevationSourceKind": "unknown",
+      "usedBy": ["kerry-park-seattle"]
+    },
+    {
+      "id": "mf/mount-baker",
+      "name": "Mount Baker",
+      "lat": 48.7767,
+      "lon": -121.8144,
+      "elevationM": 3286,
+      "positionSourceId": "wp-mount-baker",
+      "elevationSourceId": "wp-mount-baker",
+      "elevationSourceKind": "unknown",
+      "usedBy": ["kerry-park-seattle"],
+      "note": "134 km NNE of Kerry Park and 0.83 deg above horizontal — invisible from there only because the rest of Queen Anne Hill stands in the way. The must-not-see gate of the set."
+    },
+    {
+      "id": "mf/mount-hood",
+      "name": "Mount Hood",
+      "lat": 45.373611,
+      "lon": -121.695833,
+      "elevationM": 3429,
+      "positionSourceId": "wp-mount-hood",
+      "elevationSourceId": "wp-mount-hood",
+      "elevationSourceKind": "unknown",
+      "usedBy": ["kerry-park-seattle"],
+      "note": "DISPUTED from Kerry Park: clears the sea horizon by 0.061 deg, which is inside ordinary refraction variation."
+    },
+    {
+      "id": "mf/ben-nevis",
+      "name": "Ben Nevis",
+      "lat": 56.796849,
+      "lon": -5.003508,
+      "elevationM": 1345,
+      "positionSourceId": "wp-ben-nevis",
+      "elevationSourceId": "wp-ben-nevis",
+      "elevationSourceKind": "unknown",
+      "usedBy": ["fort-william"]
+    },
+    {
+      "id": "mf/cow-hill",
+      "name": "Cow Hill",
+      "lat": 56.813052,
+      "lon": -5.094644,
+      "elevationM": 287,
+      "positionSourceId": "outdooractive-cow-hill",
+      "elevationSourceId": "outdooractive-cow-hill",
+      "elevationSourceKind": "unknown",
+      "usedBy": ["fort-william"]
+    }
+  ]
+}
