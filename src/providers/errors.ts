@@ -17,6 +17,10 @@
  *                    payload that does not match the documented schema.
  * - `empty-result`   a well-formed response that contains nothing usable.
  * - `fixture-missing` offline replay was asked for a request that was never recorded.
+ * - `bad-tile`       a local elevation tile exists but cannot be parsed: byte
+ *                    length is not `n × n × 2`, or its name/geometry is malformed.
+ *                    Distinct from `bad-response` because no request was involved —
+ *                    a corrupt or truncated file on disk is a different fix.
  */
 export type ProviderErrorCode =
   | 'network'
@@ -25,7 +29,8 @@ export type ProviderErrorCode =
   | 'rate-limited'
   | 'bad-response'
   | 'empty-result'
-  | 'fixture-missing';
+  | 'fixture-missing'
+  | 'bad-tile';
 
 export interface ProviderErrorDetails {
   /** HTTP status, when the failure came with one. */

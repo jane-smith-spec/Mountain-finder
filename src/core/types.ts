@@ -38,6 +38,26 @@ export interface Observer extends LatLng {
 }
 
 /**
+ * One step of the skyline staircase along a single bearing.
+ *
+ * ADDED (not a rename or repurposing of anything) for the nearer-terrain
+ * occlusion rule — see {@link HorizonPoint.skylineSteps}. Walking outward from
+ * the observer along one bearing and keeping a running maximum of the terrain's
+ * vertical angle, a step is recorded every time a sample beats everything
+ * closer. `maxAltitudeDeg` is therefore the highest angle reached by any terrain
+ * at or nearer than `distanceKm`, and the steps are non-decreasing in both
+ * fields. Naming follows the file header: metres end in `M`, angles in `Deg`.
+ */
+export interface SkylineStep {
+  /** Distance to the sample that set this running maximum. */
+  distanceKm: number;
+  /** Highest terrain angle seen at or nearer than `distanceKm`. */
+  maxAltitudeDeg: number;
+  /** Height above sea level of the terrain that set it. */
+  elevationM: number;
+}
+
+/**
  * One sample of the terrain skyline: at this compass bearing, terrain rises to
  * this vertical angle, and the terrain responsible sits this far away.
  */
@@ -48,6 +68,23 @@ export interface HorizonPoint {
   distanceKm: number;
   /** Height above sea level of that terrain. */
   elevationM: number;
+  /**
+   * The whole running-maximum staircase along this bearing, near → far.
+   *
+   * `altitudeDeg`/`distanceKm`/`elevationM` describe only the single sample
+   * that wins the bearing outright, which is enough to draw a skyline but not
+   * enough to decide occlusion: terrain BEHIND a peak cannot hide it, so the
+   * question "how high does terrain reach *nearer* than this peak?" needs the
+   * angle as a function of distance, not one winning value. The last step
+   * always repeats the winner, so `skylineSteps.at(-1)` agrees with the three
+   * fields above by construction.
+   *
+   * Optional, so that hand-built profiles (tests, callers that only ever knew
+   * the winner) stay valid. Where it is absent the single winning sample is
+   * treated as a one-step staircase — that is exactly the information such a
+   * point carries, no more and no less. `buildHorizonProfile` always fills it.
+   */
+  skylineSteps?: readonly SkylineStep[];
 }
 
 /** A 360°-capable skyline, sorted ascending by bearingDeg. */
@@ -74,7 +111,18 @@ export interface PeakSighting extends Peak {
 
 /** A sighting that survived the horizon occlusion test. */
 export interface VisiblePeak extends PeakSighting {
-  /** Skyline angle at this peak's bearing. */
+  /**
+   * The occluding-terrain angle that actually applies to this peak: the highest
+   * angle reached by terrain at this peak's bearing that is NEARER than the
+   * peak. Terrain farther away is excluded, because it stands behind the peak
+   * and cannot hide it — so this is generally NOT the skyline angle, which is a
+   * maximum over all distances. The two coincide exactly when the peak is
+   * farther out than everything that forms the skyline at its bearing.
+   *
+   * When no terrain at all lies nearer than the peak, nothing can occlude it
+   * and this reports the nadir, −90° (see `NO_NEARER_TERRAIN_ALTITUDE_DEG` in
+   * visibility.ts), which every real peak clears.
+   */
   horizonAltitudeDeg: number;
   /** altitudeDeg − horizonAltitudeDeg. Near zero = only just clearing the ridge. */
   clearanceDeg: number;

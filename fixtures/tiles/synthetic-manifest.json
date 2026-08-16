@@ -1,0 +1,52 @@
+{
+  "generatedBy": "npm run fixtures:tiles (scripts/make-tile-fixtures.ts)",
+  "format": "Plain .hgt: big-endian int16, row-major, row 0 = north, n² samples, n from file length.",
+  "note": "Grid sizes here are not real SRTM sizes (1201/3601) on purpose — the reader must derive n from the file length rather than assume it.",
+  "tiles": [
+    {
+      "file": "N00E000.hgt",
+      "tile": "N00E000",
+      "gridSize": 21,
+      "sampleSpacingDeg": 0.05,
+      "rawBytes": 882,
+      "voidSamples": 0,
+      "formula": "h = 500 + 300·lat + 200·lon + 400·lat·lon (bilinear surface, exact at 0.05° spacing)"
+    },
+    {
+      "file": "N01E000.hgt",
+      "tile": "N01E000",
+      "gridSize": 21,
+      "sampleSpacingDeg": 0.05,
+      "rawBytes": 882,
+      "voidSamples": 0,
+      "formula": "same surface as N00E000 — the two share the lat = 1 boundary line"
+    },
+    {
+      "file": "S01W001.hgt",
+      "tile": "S01W001",
+      "gridSize": 11,
+      "sampleSpacingDeg": 0.1,
+      "rawBytes": 242,
+      "voidSamples": 0,
+      "formula": "h = 1234 everywhere; southern + western hemisphere naming"
+    },
+    {
+      "file": "S02W002.hgt.gz",
+      "tile": "S02W002",
+      "gridSize": 11,
+      "sampleSpacingDeg": 0.1,
+      "rawBytes": 242,
+      "voidSamples": 0,
+      "formula": "h = 777 everywhere, stored gzipped to exercise the .hgt.gz path"
+    },
+    {
+      "file": "N10W010.hgt",
+      "tile": "N10W010",
+      "gridSize": 41,
+      "sampleSpacingDeg": 0.025,
+      "rawBytes": 3362,
+      "voidSamples": 9,
+      "formula": "h = max(500, 3000 − 6000·√((lat−10.5)² + (lon−-9.5)²)), with rows 8…10 × cols 8…10 written as voids (−32768)"
+    }
+  ]
+}

@@ -112,19 +112,69 @@
  * identical under either model, which is the point of quoting both.
  *
  * ───────────────────────────────────────────────────────────────────────────
- * A CAVEAT WORTH READING BEFORE ASSERTING ANYTHING ELSE
+ * THE CAVEAT THAT WAS, AND THE VERDICT THAT REPLACED IT
  * ───────────────────────────────────────────────────────────────────────────
- * In variant A the near crest sits BELOW the skyline (4.554° < 5.349°) but is
- * still physically in plain sight: it is in FRONT of the far ridge, and nothing
- * closer than it blocks it. The naive visibility rule in PLAN.md P1.5 —
- * "visible iff the peak's angle clears the skyline at its bearing" — would call
- * it hidden, which is wrong in the real world.
+ * This fixture originally refused to state a verdict for the near crest in
+ * variant A, and said why: the near crest sits BELOW the skyline (4.554° <
+ * 5.349°) and yet is in plain sight, because it stands in FRONT of the far
+ * ridge and nothing closer blocks it. PLAN.md P1.5's rule as first written —
+ * "visible iff the peak's angle clears the skyline at its bearing" — called it
+ * hidden, which is wrong in the world, so ground truth withheld judgement
+ * rather than bless the simplification.
  *
- * This fixture therefore does NOT assert a verdict for the near crest in
- * variant A; it records it as an acknowledged limitation instead. Ground truth
- * must not quietly bless a known simplification. If P1.5 is later upgraded to
- * compare a peak only against terrain NEARER than the peak, the near crest
- * becomes an unambiguous must-see and should be promoted to a verdict then.
+ * P1.5 has since been corrected: a peak is occluded only by terrain NEARER to
+ * the observer than the peak itself. The verdict is therefore PROMOTED here to
+ * a real expectation, and what has to be derived is one more angle per peak —
+ * the highest angle reached by terrain strictly nearer than that peak.
+ *
+ * ── WHAT STANDS IN FRONT OF THE NEAR CREST (samples nearer than 5 000 m) ────
+ * The plain is 1.6 m below the eye and negative at every range, so only the
+ * near ridge's inner flank can compete. On that flank the angle climbs
+ * monotonically (slope 401.6/1 000 = 0.4016 against tan α ≈ 0.08 — the same
+ * 5× margin proven above), so the maximum is the LAST SAMPLE BEFORE the crest,
+ * at 5 000 − 250 = 4 750 m:
+ *
+ *     E = 498.4 + 401.6 · (1 − 250/1 000) = 498.4 + 301.2 = 799.6 m
+ *     c = 4 750² / 14 645 997.2414 = 22 562 500 / 14 645 997.2414 = 1.540523 m
+ *     tan α = (799.6 − 500 − 1.540523) / 4 750 = 298.059477 / 4 750
+ *           = 0.06274936
+ *     α = 0.06274936 − 0.00008236 + 0.00000019 = 0.06266719 rad
+ *       = 3.590565°        (exact sphere model: 3.590173°)
+ *
+ *     4.554485° − 3.590565° = +0.963920°  ⇒ THE NEAR CREST IS VISIBLE,
+ *     in BOTH variants, since nothing about the far ridge is in front of it.
+ *
+ * ── WHAT STANDS IN FRONT OF THE FAR CREST (samples nearer than 20 000 m) ────
+ * Variant A: the scan contains the near crest (4.554485°) and the far ridge's
+ * own inner flank. The flank's last sample, 19 750 m, wins:
+ *
+ *     E = 498.4 + 1 901.6 · (1 − 250/2 000) = 498.4 + 1 663.9 = 2 162.3 m
+ *     c = 19 750² / 14 645 997.2414 = 390 062 500 / 14 645 997.2414
+ *       = 26.632703 m
+ *     tan α = (2 162.3 − 500 − 26.632703) / 19 750 = 1 635.667297 / 19 750
+ *           = 0.08281859
+ *     α = 0.08281859 − 0.00018933 + 0.00000078 = 0.08263004 rad
+ *       = 4.734353°        (exact sphere model: 4.732944°)
+ *
+ *     5.349262° − 4.734353° = +0.614909°  ⇒ FAR CREST VISIBLE (as before).
+ *
+ * Variant B: the far ridge is lower, so its flank at 19 750 m only reaches
+ * 498.4 + 1 501.6 · 0.875 = 1 812.3 m, i.e.
+ * tan α = (1 812.3 − 500 − 26.632703)/19 750 = 0.06509708 → 3.724533°, which
+ * LOSES to the near crest's 4.554485°. The scan is therefore won by the near
+ * crest — exactly the terrain that formed the skyline — so here the corrected
+ * rule and the old one give the identical number:
+ *
+ *     4.211342° − 4.554485° = −0.343143°  ⇒ FAR CREST HIDDEN (as before).
+ *
+ * That is the backward-compatibility statement in miniature: for a peak beyond
+ * everything that forms its skyline, nothing changes; only peaks with taller
+ * terrain BEHIND them move, and they move from wrong to right.
+ *
+ * Note these three occluding angles depend on the declared 250 m sampling —
+ * they are the angle of a specific sample, not of a continuum — which is why
+ * `SAMPLING.rangeStepM` appears in the derivation. Any pipeline fed this
+ * scene's samples sees precisely these values.
  */
 
 import type { ElevationSample, LatLng, Observer, Peak } from '../../src/core/types';
@@ -208,25 +258,48 @@ function buildVariant(variant: TwinRidgeVariant): SyntheticScene {
   const { farRidgeCrestM, farRidgeWins } = variant;
   const observerPoint: LatLng = { lat: OBSERVER.lat, lon: OBSERVER.lon };
 
-  const elevationAtM = (point: LatLng): number => {
-    const distanceM = greatCircleDistanceM(observerPoint, point);
-    return (
-      PLAIN_ELEVATION_M +
-      Math.max(
-        triangularRidge(
-          distanceM,
-          NEAR_RIDGE_DISTANCE_M,
-          NEAR_RIDGE_CREST_M,
-          NEAR_RIDGE_HALF_WIDTH_M,
-        ),
-        triangularRidge(
-          distanceM,
-          FAR_RIDGE_DISTANCE_M,
-          farRidgeCrestM,
-          FAR_RIDGE_HALF_WIDTH_M,
-        ),
-      )
+  /** Terrain height as a function of ground distance alone (concentric rings). */
+  const terrainAtDistanceM = (distanceM: number): number =>
+    PLAIN_ELEVATION_M +
+    Math.max(
+      triangularRidge(
+        distanceM,
+        NEAR_RIDGE_DISTANCE_M,
+        NEAR_RIDGE_CREST_M,
+        NEAR_RIDGE_HALF_WIDTH_M,
+      ),
+      triangularRidge(distanceM, FAR_RIDGE_DISTANCE_M, farRidgeCrestM, FAR_RIDGE_HALF_WIDTH_M),
     );
+
+  const elevationAtM = (point: LatLng): number =>
+    terrainAtDistanceM(greatCircleDistanceM(observerPoint, point));
+
+  /**
+   * The occluding angle for a peak at `peakDistanceM`: the largest apparent
+   * altitude among this scene's OWN samples that lie strictly nearer than the
+   * peak. Terrain farther out is the backdrop and cannot hide it.
+   *
+   * A direct scan of the sampled ranges rather than a hand-picked sample,
+   * because the winner is not always the nearest neighbour of the peak — in
+   * variant B the far crest's occluder is the near crest at 5 km, not the far
+   * ridge's own flank at 19.75 km (see the header). Uses only scene-geometry;
+   * no pipeline code, so this stays an independent yardstick.
+   */
+  const occludingAltitudeDegNearerThan = (peakDistanceM: number): number => {
+    let highestDeg = Number.NEGATIVE_INFINITY;
+    for (
+      let distanceM = SAMPLING.rangeStepM;
+      distanceM < peakDistanceM;
+      distanceM += SAMPLING.rangeStepM
+    ) {
+      const altitudeDeg = apparentAltitudeDeg(
+        EYE_ELEVATION_M,
+        terrainAtDistanceM(distanceM),
+        distanceM,
+      );
+      if (altitudeDeg > highestDeg) highestDeg = altitudeDeg;
+    }
+    return highestDeg;
   };
 
   const nearAltitudeDeg = apparentAltitudeDeg(
@@ -311,34 +384,54 @@ function buildVariant(variant: TwinRidgeVariant): SyntheticScene {
     },
   ];
 
+  // `skylineAltitudeDeg` on a verdict is the angle the peak is MEASURED
+  // AGAINST, i.e. the occluding terrain that actually applies to it — terrain
+  // strictly nearer than the peak. For a peak beyond everything that forms the
+  // skyline (the far crest in variant B) that is the skyline angle itself; for
+  // a peak with a taller backdrop (the near crest, and the far crest in
+  // variant A) it is lower, and the difference is the bug this scene found.
+  const inFrontOfNearCrestDeg = occludingAltitudeDegNearerThan(NEAR_RIDGE_DISTANCE_M);
+  const inFrontOfFarCrestDeg = occludingAltitudeDegNearerThan(FAR_RIDGE_DISTANCE_M);
+
   const expectedPeakVerdicts: ExpectedPeakVerdict[] = [
     {
       peakId: farPeakId,
       visible: farRidgeWins,
       peakAltitudeDeg: farAltitudeDeg,
-      skylineAltitudeDeg: farRidgeWins ? farAltitudeDeg : nearAltitudeDeg,
-      clearanceDeg: farAltitudeDeg - (farRidgeWins ? farAltitudeDeg : nearAltitudeDeg),
+      skylineAltitudeDeg: inFrontOfFarCrestDeg,
+      clearanceDeg: farAltitudeDeg - inFrontOfFarCrestDeg,
       reason: farRidgeWins
-        ? 'Far crest angle exceeds the near ridge angle by 0.79 deg, so it clears it.'
+        ? 'Far crest angle exceeds everything nearer than it — the highest of ' +
+          "which is the far ridge's own inner flank at 19.75 km (4.73 deg) — by " +
+          '0.61 deg, so it clears. It also owns the skyline outright, beating ' +
+          'the near ridge by 0.79 deg.'
         : 'Far crest stands 1100 m higher than the near ridge yet falls 0.34 deg ' +
-          'short of it in angle, so the near ridge hides it. This is the case ' +
-          'that a height-only visibility test gets wrong.',
+          'short of it in angle, so the near ridge — which is genuinely in ' +
+          'front of it — hides it. This is the case that a height-only ' +
+          'visibility test gets wrong. Here the nearer-terrain maximum IS the ' +
+          'skyline, so the corrected rule and the old one agree exactly.',
     },
-  ];
-
-  if (!farRidgeWins) {
-    // Only assert the near crest when it is itself the skyline. In the other
-    // variant it sits in front of a taller backdrop, where PLAN.md P1.5's
-    // simplified rule and physical reality disagree (see header caveat).
-    expectedPeakVerdicts.push({
+    {
+      // PROMOTED (was withheld while P1.5 compared peaks against the skyline).
+      // In variant A this is the whole point of the scene: a summit BELOW the
+      // skyline that is nevertheless in plain sight, because the only thing
+      // between it and the observer is its own lower flank at 4.75 km.
       peakId: nearPeakId,
       visible: true,
       peakAltitudeDeg: nearAltitudeDeg,
-      skylineAltitudeDeg: nearAltitudeDeg,
-      clearanceDeg: 0,
-      reason: 'The near crest IS the skyline here, so it is visible by construction.',
-    });
-  }
+      skylineAltitudeDeg: inFrontOfNearCrestDeg,
+      clearanceDeg: nearAltitudeDeg - inFrontOfNearCrestDeg,
+      reason: farRidgeWins
+        ? 'The near crest sits 0.79 deg BELOW the skyline and is still visible: ' +
+          'the taller far ridge is BEHIND it and cannot occlude it. Nothing ' +
+          "nearer than 5 km beats its own flank at 4.75 km (3.59 deg), so it " +
+          'clears by 0.96 deg. A rule that compares peaks against the skyline ' +
+          'calls this hidden, which is wrong.'
+        : 'The near crest owns the skyline here, and the highest terrain in ' +
+          'front of it is its own flank at 4.75 km (3.59 deg), so it clears by ' +
+          '0.96 deg.',
+    },
+  ];
 
   return {
     id: variant.id,

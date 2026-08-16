@@ -72,6 +72,10 @@ const HAND_DERIVED_DEG = {
   nearRidge: 4.554485,
   farRidgeVisibleVariant: 5.349262,
   farRidgeHiddenVariant: 4.211342,
+  // The terrain standing in FRONT of each crest — the maximum over samples
+  // strictly nearer than it. Derived longhand in twin-ridges.ts's header.
+  inFrontOfNearCrest: 3.590565,
+  inFrontOfFarCrestVisibleVariant: 4.734353,
   coneApex: 8.481293,
   conePlainDip: -0.042346,
 } as const;
@@ -360,14 +364,110 @@ describe('scene 2 — twin ridges: angle decides visibility, not height', () => 
     expect(hiddenVerdict?.visible).toBe(false);
   });
 
-  it('does NOT assert the near crest in variant A — the known P1.5 limitation', () => {
-    // Documented in twin-ridges.ts: a peak in FRONT of a taller backdrop is
-    // physically visible but fails the simplified "clears the skyline" rule.
-    // Ground truth must not bless that simplification by asserting it.
+  const rangeStepM = twinRidgesFarVisibleScene.sampling.rangeStepM;
+  /** Ground range of the last sample before the near crest: 5 000 − 250 m. */
+  const inFrontOfNearCrestDistanceM = NEAR_RIDGE_DISTANCE_M - rangeStepM;
+  /** Ground range of the last sample before the far crest: 20 000 − 250 m. */
+  const inFrontOfFarCrestDistanceM = FAR_RIDGE_DISTANCE_M - rangeStepM;
+
+  it('generates the flank samples that stand in front of each crest', () => {
+    // Triangular flanks, so the elevations are exact fractions:
+    //   4 750 m: 498.4 + (900 − 498.4)·(1 − 250/1 000) = 498.4 + 301.2 = 799.6
+    //  19 750 m: 498.4 + (2400 − 498.4)·(1 − 250/2 000) = 498.4 + 1663.9 = 2162.3
+    const inFrontOfNearCrest = destinationPoint(
+      observerPoint,
+      TWIN_RIDGES_PRIMARY_BEARING_DEG,
+      inFrontOfNearCrestDistanceM,
+    );
+    const inFrontOfFarCrest = destinationPoint(
+      observerPoint,
+      TWIN_RIDGES_PRIMARY_BEARING_DEG,
+      inFrontOfFarCrestDistanceM,
+    );
+    expect(twinRidgesFarVisibleScene.elevationAtM(inFrontOfNearCrest)).toBeCloseTo(799.6, 6);
+    expect(twinRidgesFarVisibleScene.elevationAtM(inFrontOfFarCrest)).toBeCloseTo(2162.3, 6);
+  });
+
+  it('matches the hand-derived angles of the terrain in front of each crest', () => {
+    expect(
+      apparentAltitudeDegPlaneDrop(eyeM, 799.6, inFrontOfNearCrestDistanceM),
+    ).toBeCloseTo(HAND_DERIVED_DEG.inFrontOfNearCrest, 5);
+    expect(
+      apparentAltitudeDegPlaneDrop(eyeM, 2162.3, inFrontOfFarCrestDistanceM),
+    ).toBeCloseTo(HAND_DERIVED_DEG.inFrontOfFarCrestVisibleVariant, 5);
+    // Both are BELOW the crest they stand in front of, which is what makes the
+    // crests visible at all.
+    expect(HAND_DERIVED_DEG.inFrontOfNearCrest).toBeLessThan(HAND_DERIVED_DEG.nearRidge);
+    expect(HAND_DERIVED_DEG.inFrontOfFarCrestVisibleVariant).toBeLessThan(
+      HAND_DERIVED_DEG.farRidgeVisibleVariant,
+    );
+  });
+
+  it('PROMOTED: variant A asserts the near crest is VISIBLE in front of the taller ridge', () => {
+    // This assertion used to read `expect(nearVerdict).toBeUndefined()`. Ground
+    // truth withheld a verdict here because P1.5 compared every peak against
+    // the skyline — a maximum over ALL distances — and so called a summit
+    // standing in FRONT of a taller ridge hidden. P1.5 now compares a peak only
+    // against terrain NEARER than itself, so the case has an unambiguous
+    // answer and ground truth states it.
     const nearVerdict = twinRidgesFarVisibleScene.expectedPeakVerdicts.find((v) =>
       v.peakId.endsWith('/near-crest'),
     );
-    expect(nearVerdict).toBeUndefined();
+    expect(nearVerdict).toBeDefined();
+    expect(nearVerdict?.visible).toBe(true);
+
+    // It is genuinely below the skyline — that is what made the case hard.
+    const [skyline] = twinRidgesFarVisibleScene.expectedSkyline;
+    expect(nearVerdict?.peakAltitudeDeg ?? Infinity).toBeLessThan(skyline?.altitudeDeg ?? 0);
+    expect(
+      (skyline?.altitudeDeg ?? 0) - (nearVerdict?.peakAltitudeDeg ?? 0),
+    ).toBeCloseTo(0.7936, 3);
+
+    // And it is measured against what actually stands in front of it: the
+    // near ridge's own inner flank, recomputed here from the scene's geometry
+    // kit rather than trusted from the verdict.
+    expect(nearVerdict?.skylineAltitudeDeg).toBeCloseTo(
+      apparentAltitudeDeg(eyeM, 799.6, inFrontOfNearCrestDistanceM),
+      9,
+    );
+    // Cross-checked against the independent longhand (curvature-drop) chain.
+    expect(
+      Math.abs((nearVerdict?.skylineAltitudeDeg ?? NaN) - HAND_DERIVED_DEG.inFrontOfNearCrest),
+    ).toBeLessThan(MODEL_AGREEMENT_TOLERANCE_DEG);
+    expect(nearVerdict?.clearanceDeg ?? 0).toBeGreaterThan(0.96);
+  });
+
+  it('asserts the near crest in variant B too, on the same footing', () => {
+    // Nothing about the far ridge is in front of the near crest, so the verdict
+    // and the occluding angle are identical in both variants.
+    const a = twinRidgesFarVisibleScene.expectedPeakVerdicts.find((v) =>
+      v.peakId.endsWith('/near-crest'),
+    );
+    const b = twinRidgesFarHiddenScene.expectedPeakVerdicts.find((v) =>
+      v.peakId.endsWith('/near-crest'),
+    );
+    expect(b?.visible).toBe(true);
+    expect(b?.skylineAltitudeDeg).toBeCloseTo(a?.skylineAltitudeDeg ?? NaN, 12);
+    expect(b?.clearanceDeg).toBeCloseTo(a?.clearanceDeg ?? NaN, 12);
+  });
+
+  it('leaves the far crest in variant B measured against the skyline, unchanged', () => {
+    // BACKWARD COMPATIBILITY. The far crest is beyond every piece of terrain
+    // that forms the skyline at its bearing, so "highest thing nearer than the
+    // peak" and "the skyline" are the same maximum — the near crest at 5 km.
+    // The corrected rule must not move this verdict by so much as a rounding.
+    const farVerdict = twinRidgesFarHiddenScene.expectedPeakVerdicts.find((v) =>
+      v.peakId.endsWith('/far-crest'),
+    );
+    const [skyline] = twinRidgesFarHiddenScene.expectedSkyline;
+    expect(farVerdict?.visible).toBe(false);
+    expect(skyline?.distanceM).toBe(NEAR_RIDGE_DISTANCE_M);
+    expect(farVerdict?.skylineAltitudeDeg).toBeCloseTo(skyline?.altitudeDeg ?? NaN, 12);
+    expect(farVerdict?.skylineAltitudeDeg).toBeCloseTo(
+      apparentAltitudeDeg(eyeM, NEAR_RIDGE_CREST_M, NEAR_RIDGE_DISTANCE_M),
+      12,
+    );
+    expect(farVerdict?.clearanceDeg ?? 0).toBeCloseTo(-0.3437, 3);
   });
 
   it('generates terrain containing both crests at the assumed ranges', () => {

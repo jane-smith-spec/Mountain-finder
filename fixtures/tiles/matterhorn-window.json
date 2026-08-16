@@ -1,0 +1,43 @@
+{
+  "name": "matterhorn-window",
+  "data": "matterhorn-window.i16be",
+  "format": "int16-be-row-major-north-first",
+  "description": "A 256×256 rectangle of real SRTM1 data around the Matterhorn, cut byte-for-byte out of the source tile. Same format as a .hgt file, but a window rather than a whole degree, so its geometry is written down here instead of derived from the file length.",
+  "source": {
+    "tile": "N45E007",
+    "url": "https://s3.amazonaws.com/elevation-tiles-prod/skadi/N45/N45E007.hgt.gz",
+    "dataset": "SRTM1 (1 arc-second) via the AWS elevation-tiles-prod \"skadi\" mirror",
+    "sourceGridSize": 3601,
+    "extractedFromRow": 64,
+    "extractedFromCol": 2240,
+    "extractedOn": "2026-08-16",
+    "license": "SRTM is public domain (NASA/USGS); the AWS mirror is a public dataset."
+  },
+  "geometry": {
+    "northLat": 45.98222222222222,
+    "westLon": 7.622222222222222,
+    "rows": 256,
+    "cols": 256,
+    "latStepDeg": 0.0002777777777777778,
+    "lonStepDeg": 0.0002777777777777778
+  },
+  "bounds": {
+    "north": 45.98222222222222,
+    "south": 45.91138888888889,
+    "west": 7.622222222222222,
+    "east": 7.6930555555555555
+  },
+  "statistics": {
+    "voidSamples": 0,
+    "minElevationM": 1970,
+    "maxElevationM": 4230,
+    "maxAt": {
+      "row": 24,
+      "col": 117,
+      "lat": 45.97555555555555,
+      "lon": 7.6547222222222215
+    },
+    "note": "voidSamples is 0 because the skadi mirror is void-filled — verified across N45E007, N46E007, N27E086, N28E086 (0 voids in 51 868 804 samples). The void code path is covered by the synthetic fixtures instead."
+  },
+  "accuracyCaveat": "SRTM under-reads AND displaces sharp summits: the highest posting here is 4230 m against the Matterhorn's surveyed 4478 m, and it sits ~320 m WSW of the surveyed summit position (which itself reads 3567 m, already down the east side). Use these tiles for the terrain horizon; take summit heights from the peak database's ele tag."
+}

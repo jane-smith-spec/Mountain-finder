@@ -14,7 +14,9 @@
     "test:e2e": "playwright test",
     "test:acceptance": "vitest run --config vitest.acceptance.config.ts --passWithNoTests",
     "demo": "tsx scripts/demo.ts",
-    "record:fixtures": "tsx scripts/record-fixtures.ts"
+    "record:fixtures": "tsx scripts/record-fixtures.ts",
+    "fetch:tiles": "tsx scripts/fetch-tiles.ts",
+    "fixtures:tiles": "tsx scripts/make-tile-fixtures.ts"
   },
   "dependencies": {
     "exifr": "^7.1.3",

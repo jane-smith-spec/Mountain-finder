@@ -11,12 +11,29 @@
  * from 0° has no sample between 359° and 360°, yet a peak at 359.5° must still
  * get an answer, interpolated across the seam between the last sample and the
  * first. Every function here treats the profile as a closed loop.
+ *
+ * ## Skyline angle vs occluding angle
+ *
+ * Each point also carries its whole `skylineSteps` staircase — the running
+ * maximum angle as a function of distance along that bearing. Two different
+ * questions get asked of a profile and only one of them is the skyline:
+ *
+ *   - *What does the horizon look like here?* → `interpolateHorizonAltitudeDeg`,
+ *     the maximum over ALL distances. This is what a renderer draws.
+ *   - *What can hide a peak at range d?* → `interpolateNearerTerrainAltitudeDeg`,
+ *     the maximum over distances < d only. Terrain behind a peak is still part
+ *     of the skyline, but it cannot occlude the peak, so the visibility filter
+ *     must ask this one instead.
+ *
+ * Both read the same bracketing pair with the same weight, so a peak that is
+ * farther out than everything forming its skyline gets an identical answer from
+ * either.
  */
 
 import { normaliseBearingDeg } from './geodesy';
 import { sweepRay } from './sightline';
 import type { RaySample, SightlineOptions } from './sightline';
-import type { HorizonPoint, HorizonProfile } from './types';
+import type { HorizonPoint, HorizonProfile, SkylineStep } from './types';
 
 /** Terrain samples taken along one compass bearing, ordered near → far. */
 export interface BearingRay {
@@ -86,17 +103,167 @@ export function buildHorizonProfile(
   const points: HorizonPoint[] = [];
 
   for (const ray of rays) {
-    const { horizon } = sweepRay(eyeElevationM, ray.samples, options);
+    const { horizon, skyline } = sweepRay(eyeElevationM, ray.samples, options);
     if (horizon === undefined) continue;
     points.push({
       bearingDeg: ray.bearingDeg,
       altitudeDeg: horizon.altitudeDeg,
       distanceKm: horizon.distanceM / 1000,
       elevationM: horizon.elevationM,
+      // `sweepRay` already computed the running maximum; every hit it kept IS a
+      // step of the staircase, because it only keeps a sample when that sample
+      // beats everything closer. Recording it here is what lets the visibility
+      // filter later ask "how high does terrain reach nearer than X?".
+      skylineSteps: skyline.map((hit) => ({
+        distanceKm: hit.distanceM / 1000,
+        maxAltitudeDeg: hit.altitudeDeg,
+        elevationM: hit.elevationM,
+      })),
     });
   }
 
   return normaliseHorizonProfile(points);
+}
+
+/**
+ * The staircase for a profile point, supplying the one-step fallback for
+ * points that carry no `skylineSteps`.
+ *
+ * A hand-built {@link HorizonPoint} knows exactly one thing: at `distanceKm`
+ * the terrain reached `altitudeDeg`. Treating that as a single step is the
+ * faithful reading — it neither invents nearer terrain that was never recorded
+ * nor discards the one occluder that was.
+ */
+export function skylineStepsOf(point: HorizonPoint): readonly SkylineStep[] {
+  return (
+    point.skylineSteps ?? [
+      {
+        distanceKm: point.distanceKm,
+        maxAltitudeDeg: point.altitudeDeg,
+        elevationM: point.elevationM,
+      },
+    ]
+  );
+}
+
+/**
+ * Highest terrain angle on one bearing among samples STRICTLY nearer than
+ * `cutoffDistanceKm`, or `undefined` when no recorded terrain is nearer.
+ *
+ * Strictly nearer, not "nearer or equal", is deliberate. A summit is normally
+ * the very terrain sample that produced the staircase step at its own distance;
+ * counting that step would have every peak occlude itself and the answer would
+ * hinge on floating-point luck in the distance comparison.
+ *
+ * The scan does not assume the steps are sorted or monotonic — they are, when
+ * built by {@link buildHorizonProfile}, but a hand-assembled profile is under
+ * no such obligation and a `break` on the first far step would silently drop
+ * occluders.
+ */
+export function maxAltitudeNearerThanDeg(
+  point: HorizonPoint,
+  cutoffDistanceKm: number,
+): number | undefined {
+  let highestDeg: number | undefined;
+  for (const step of skylineStepsOf(point)) {
+    if (step.distanceKm >= cutoffDistanceKm) continue;
+    if (highestDeg === undefined || step.maxAltitudeDeg > highestDeg) {
+      highestDeg = step.maxAltitudeDeg;
+    }
+  }
+  return highestDeg;
+}
+
+/** The two profile points bracketing a bearing, and where between them it sits. */
+interface BearingBracket {
+  before: HorizonPoint;
+  after: HorizonPoint;
+  /** 0 at `before`, 1 at `after`. Exactly 0 when the bearing is a sample. */
+  weight: number;
+}
+
+/**
+ * Locate a bearing between two profile samples, wrapping across the 359°→0°
+ * seam. Shared by every interpolating query so they cannot drift apart: the
+ * skyline angle and the nearer-terrain angle are always read off the same pair
+ * of samples with the same weight.
+ *
+ * @throws RangeError if the profile is empty.
+ */
+function bracketAtBearing(profile: HorizonProfile, bearingDeg: number): BearingBracket {
+  if (profile.length === 0) {
+    throw new RangeError('cannot interpolate an empty horizon profile');
+  }
+  const first = pointAt(profile, 0);
+  if (profile.length === 1) return { before: first, after: first, weight: 0 };
+
+  const target = normaliseBearingDeg(bearingDeg);
+  const lastIndex = profile.length - 1;
+  const beforeIndex = lastIndexAtOrBefore(profile, target);
+
+  // Three cases: inside the profile, or off either end — where the bracketing
+  // pair is (last, first) with one of them unwrapped by a full turn so the
+  // interpolation parameter still runs 0→1 across the seam.
+  let before: HorizonPoint;
+  let after: HorizonPoint;
+  let beforeBearing: number;
+  let afterBearing: number;
+
+  if (beforeIndex === -1) {
+    before = pointAt(profile, lastIndex);
+    after = first;
+    beforeBearing = before.bearingDeg - 360;
+    afterBearing = after.bearingDeg;
+  } else if (beforeIndex === lastIndex) {
+    before = pointAt(profile, lastIndex);
+    after = first;
+    beforeBearing = before.bearingDeg;
+    afterBearing = after.bearingDeg + 360;
+  } else {
+    before = pointAt(profile, beforeIndex);
+    after = pointAt(profile, beforeIndex + 1);
+    beforeBearing = before.bearingDeg;
+    afterBearing = after.bearingDeg;
+  }
+
+  const span = afterBearing - beforeBearing;
+  if (span <= 0) return { before, after, weight: 0 };
+  return { before, after, weight: (target - beforeBearing) / span };
+}
+
+/**
+ * Highest angle reached by terrain NEARER than `cutoffDistanceKm` at an
+ * arbitrary bearing — the occlusion question the visibility filter actually
+ * needs to ask. `undefined` means no recorded terrain lies nearer, so nothing
+ * at this bearing can hide something at that range.
+ *
+ * Interpolation across bearings is the same linear-in-bearing rule, on the same
+ * bracketing samples, as {@link interpolateHorizonAltitudeDeg}, seam included.
+ *
+ * When exactly one of the two bracketing bearings has terrain nearer than the
+ * cutoff, that one's value is returned rather than interpolated toward an
+ * invented floor: a ray with no nearer sample is evidence of nothing having
+ * been *sampled* there, not evidence of open air, and halving a real occluder
+ * against a fictitious −90° would let peaks through that a ridge plainly hides.
+ * With the uniform ray sampling `buildHorizonProfile` is fed this case cannot
+ * arise anyway — every ray's first sample sets its first step, so all rays
+ * share the same innermost step distance.
+ *
+ * @throws RangeError if the profile is empty — the same refusal to guess as
+ *   {@link interpolateHorizonAltitudeDeg}.
+ */
+export function interpolateNearerTerrainAltitudeDeg(
+  profile: HorizonProfile,
+  bearingDeg: number,
+  cutoffDistanceKm: number,
+): number | undefined {
+  const { before, after, weight } = bracketAtBearing(profile, bearingDeg);
+  const beforeDeg = maxAltitudeNearerThanDeg(before, cutoffDistanceKm);
+  const afterDeg = maxAltitudeNearerThanDeg(after, cutoffDistanceKm);
+
+  if (beforeDeg === undefined) return afterDeg;
+  if (afterDeg === undefined) return beforeDeg;
+  return beforeDeg + weight * (afterDeg - beforeDeg);
 }
 
 /**
@@ -133,44 +300,6 @@ export function interpolateHorizonAltitudeDeg(
   profile: HorizonProfile,
   bearingDeg: number,
 ): number {
-  if (profile.length === 0) {
-    throw new RangeError('cannot interpolate an empty horizon profile');
-  }
-  const first = pointAt(profile, 0);
-  if (profile.length === 1) return first.altitudeDeg;
-
-  const target = normaliseBearingDeg(bearingDeg);
-  const lastIndex = profile.length - 1;
-  const beforeIndex = lastIndexAtOrBefore(profile, target);
-
-  // Three cases: inside the profile, or off either end — where the bracketing
-  // pair is (last, first) with one of them unwrapped by a full turn so the
-  // interpolation parameter still runs 0→1 across the seam.
-  let before: HorizonPoint;
-  let after: HorizonPoint;
-  let beforeBearing: number;
-  let afterBearing: number;
-
-  if (beforeIndex === -1) {
-    before = pointAt(profile, lastIndex);
-    after = first;
-    beforeBearing = before.bearingDeg - 360;
-    afterBearing = after.bearingDeg;
-  } else if (beforeIndex === lastIndex) {
-    before = pointAt(profile, lastIndex);
-    after = first;
-    beforeBearing = before.bearingDeg;
-    afterBearing = after.bearingDeg + 360;
-  } else {
-    before = pointAt(profile, beforeIndex);
-    after = pointAt(profile, beforeIndex + 1);
-    beforeBearing = before.bearingDeg;
-    afterBearing = after.bearingDeg;
-  }
-
-  const span = afterBearing - beforeBearing;
-  if (span <= 0) return before.altitudeDeg;
-
-  const weight = (target - beforeBearing) / span;
+  const { before, after, weight } = bracketAtBearing(profile, bearingDeg);
   return before.altitudeDeg + weight * (after.altitudeDeg - before.altitudeDeg);
 }

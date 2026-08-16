@@ -3,14 +3,38 @@ import { describe, expect, it } from 'vitest';
 import {
   buildHorizonProfile,
   interpolateHorizonAltitudeDeg,
+  interpolateNearerTerrainAltitudeDeg,
+  maxAltitudeNearerThanDeg,
   normaliseHorizonProfile,
+  skylineStepsOf,
 } from './horizon';
 import type { BearingRay } from './horizon';
-import type { HorizonPoint, HorizonProfile } from './types';
+import type { HorizonPoint, HorizonProfile, SkylineStep } from './types';
 
 /** Terse constructor — distance/elevation are irrelevant to interpolation. */
 function point(bearingDeg: number, altitudeDeg: number): HorizonPoint {
   return { bearingDeg, altitudeDeg, distanceKm: 1, elevationM: 0 };
+}
+
+/** A profile point carrying an explicit staircase, for the nearer-terrain queries. */
+function steppedPoint(
+  bearingDeg: number,
+  steps: readonly (readonly [distanceKm: number, maxAltitudeDeg: number])[],
+): HorizonPoint {
+  const skylineSteps: SkylineStep[] = steps.map(([distanceKm, maxAltitudeDeg]) => ({
+    distanceKm,
+    maxAltitudeDeg,
+    elevationM: 0,
+  }));
+  const last = skylineSteps[skylineSteps.length - 1];
+  if (last === undefined) throw new RangeError('a staircase needs at least one step');
+  return {
+    bearingDeg,
+    altitudeDeg: last.maxAltitudeDeg,
+    distanceKm: last.distanceKm,
+    elevationM: last.elevationM,
+    skylineSteps,
+  };
 }
 
 /**
@@ -219,6 +243,54 @@ describe('buildHorizonProfile', () => {
     expect(buildHorizonProfile(EYE_M, [])).toEqual([]);
   });
 
+  it('records the whole running-maximum staircase, not just the winner', () => {
+    /**
+     * A single ray due north over a sea-level plain, eye 1.6 m, four samples.
+     * Each angle is atan((h − 1.6 − d²/(2·R_eff)) / d) with
+     * R_eff = 6 371 008.8 / 0.87 = 7 322 998.6207 m:
+     *
+     *   d = 2 km,  h =  100 m: c = 0.27311 → atan( 98.12689/2000)  = 2.808876°
+     *   d = 5 km,  h =  120 m: c = 1.70695 → atan(116.69305/5000)  = 1.336961°
+     *   d = 10 km, h =  400 m: c = 6.82780 → atan(391.57220/10000) = 2.242398°
+     *   d = 20 km, h = 1500 m: c = 27.31122 → atan(1471.08878/20000) = 4.206783°
+     *
+     * The 5 km and 10 km samples are TALLER in metres than the 2 km one and
+     * still lose on angle, so the staircase must have exactly two steps —
+     * 2 km and 20 km — and the middle two samples must be absent from it.
+     */
+    const profile = buildHorizonProfile(1.6, [
+      {
+        bearingDeg: 0,
+        samples: [
+          { distanceM: 2_000, elevationM: 100 },
+          { distanceM: 5_000, elevationM: 120 },
+          { distanceM: 10_000, elevationM: 400 },
+          { distanceM: 20_000, elevationM: 1500 },
+        ],
+      },
+    ]);
+
+    const north = profile[0];
+    expect(north).toBeDefined();
+    const steps = north?.skylineSteps;
+    expect(steps).toHaveLength(2);
+    expect(steps?.[0]?.distanceKm).toBe(2);
+    expect(steps?.[0]?.elevationM).toBe(100);
+    expect(steps?.[0]?.maxAltitudeDeg).toBeCloseTo(2.808876, 5);
+    expect(steps?.[1]?.distanceKm).toBe(20);
+    expect(steps?.[1]?.elevationM).toBe(1500);
+    expect(steps?.[1]?.maxAltitudeDeg).toBeCloseTo(4.206783, 5);
+
+    // The last step must repeat the winning sample the three flat fields name.
+    expect(steps?.[1]?.maxAltitudeDeg).toBe(north?.altitudeDeg);
+    expect(steps?.[1]?.distanceKm).toBe(north?.distanceKm);
+    expect(steps?.[1]?.elevationM).toBe(north?.elevationM);
+
+    // Monotonic in both coordinates, which is what makes it a staircase.
+    expect(steps?.[1]?.maxAltitudeDeg ?? 0).toBeGreaterThan(steps?.[0]?.maxAltitudeDeg ?? 0);
+    expect(steps?.[1]?.distanceKm ?? 0).toBeGreaterThan(steps?.[0]?.distanceKm ?? 0);
+  });
+
   it('honours the refraction option end to end', () => {
     // Turning refraction off increases the curvature drop by 1/0.87, which
     // must lower every skyline angle.
@@ -232,5 +304,177 @@ describe('buildHorizonProfile', () => {
       if (a === undefined || b === undefined) return;
       expect(b.altitudeDeg).toBeLessThan(a.altitudeDeg);
     }
+  });
+});
+
+describe('skylineStepsOf — the one-step fallback', () => {
+  it('returns the recorded staircase when there is one', () => {
+    const withSteps = steppedPoint(0, [
+      [1, -2],
+      [4, 3],
+    ]);
+    expect(skylineStepsOf(withSteps)).toEqual([
+      { distanceKm: 1, maxAltitudeDeg: -2, elevationM: 0 },
+      { distanceKm: 4, maxAltitudeDeg: 3, elevationM: 0 },
+    ]);
+  });
+
+  it('reads a staircase-free point as exactly the one fact it carries', () => {
+    // A hand-built point knows only "at 5 km the terrain reached 6°". Anything
+    // more would be invented; anything less would throw away a real occluder.
+    const bare: HorizonPoint = {
+      bearingDeg: 0,
+      altitudeDeg: 6,
+      distanceKm: 5,
+      elevationM: 900,
+    };
+    expect(skylineStepsOf(bare)).toEqual([
+      { distanceKm: 5, maxAltitudeDeg: 6, elevationM: 900 },
+    ]);
+  });
+});
+
+describe('maxAltitudeNearerThanDeg — the cutoff is strict', () => {
+  /**
+   * Staircase along one bearing, in round numbers so every comparison below is
+   * exact rather than epsilon-fudged:
+   *
+   *   1 km → +1°,  5 km → +3°,  10 km → +7°
+   */
+  const staircase = steppedPoint(0, [
+    [1, 1],
+    [5, 3],
+    [10, 7],
+  ]);
+
+  it('reports the running maximum over everything strictly nearer', () => {
+    expect(maxAltitudeNearerThanDeg(staircase, 20)).toBe(7);
+    expect(maxAltitudeNearerThanDeg(staircase, 10.000001)).toBe(7);
+    expect(maxAltitudeNearerThanDeg(staircase, 7)).toBe(3);
+    expect(maxAltitudeNearerThanDeg(staircase, 2)).toBe(1);
+  });
+
+  it('excludes terrain sitting at exactly the cutoff distance', () => {
+    // A summit IS the sample at its own range; counting it would have every
+    // peak occlude itself.
+    expect(maxAltitudeNearerThanDeg(staircase, 10)).toBe(3);
+    expect(maxAltitudeNearerThanDeg(staircase, 5)).toBe(1);
+  });
+
+  it('reports undefined when nothing is nearer than the cutoff', () => {
+    expect(maxAltitudeNearerThanDeg(staircase, 1)).toBeUndefined();
+    expect(maxAltitudeNearerThanDeg(staircase, 0.5)).toBeUndefined();
+  });
+
+  it('does not assume the steps arrived sorted', () => {
+    // Same three steps, shuffled. A scan that stopped at the first far step
+    // would report +1 instead of +3 here.
+    const shuffled: HorizonPoint = {
+      bearingDeg: 0,
+      altitudeDeg: 7,
+      distanceKm: 10,
+      elevationM: 0,
+      skylineSteps: [
+        { distanceKm: 10, maxAltitudeDeg: 7, elevationM: 0 },
+        { distanceKm: 1, maxAltitudeDeg: 1, elevationM: 0 },
+        { distanceKm: 5, maxAltitudeDeg: 3, elevationM: 0 },
+      ],
+    };
+    expect(maxAltitudeNearerThanDeg(shuffled, 7)).toBe(3);
+  });
+});
+
+describe('interpolateNearerTerrainAltitudeDeg', () => {
+  /**
+   * Two bearings with different terrain in front:
+   *
+   *   0°:   1 km → +2°,  8 km → +10°
+   *   180°: 1 km → +6°,  8 km → +12°
+   *
+   * A cutoff of 5 km selects the first step on each bearing (+2 and +6); a
+   * cutoff of 20 km selects the second (+10 and +12).
+   */
+  const profile: HorizonProfile = normaliseHorizonProfile([
+    steppedPoint(0, [
+      [1, 2],
+      [8, 10],
+    ]),
+    steppedPoint(180, [
+      [1, 6],
+      [8, 12],
+    ]),
+  ]);
+
+  it('is exact at a sampled bearing', () => {
+    expect(interpolateNearerTerrainAltitudeDeg(profile, 0, 5)).toBe(2);
+    expect(interpolateNearerTerrainAltitudeDeg(profile, 180, 5)).toBe(6);
+    expect(interpolateNearerTerrainAltitudeDeg(profile, 0, 20)).toBe(10);
+    expect(interpolateNearerTerrainAltitudeDeg(profile, 180, 20)).toBe(12);
+  });
+
+  it('interpolates linearly in bearing, at the cutoff it was asked about', () => {
+    // 90° is halfway 0°→180°: (2 + 6)/2 = 4 at a 5 km cutoff,
+    //                         (10 + 12)/2 = 11 at a 20 km cutoff.
+    expect(interpolateNearerTerrainAltitudeDeg(profile, 90, 5)).toBeCloseTo(4, 12);
+    expect(interpolateNearerTerrainAltitudeDeg(profile, 90, 20)).toBeCloseTo(11, 12);
+    // 45° is a quarter of the way: 2 + 0.25(6 − 2) = 3.
+    expect(interpolateNearerTerrainAltitudeDeg(profile, 45, 5)).toBeCloseTo(3, 12);
+  });
+
+  it('wraps across the 359°→0° seam on the same bracketing pair as the skyline', () => {
+    // 270° is halfway back from 180°(+6) to 0°(+2): (6 + 2)/2 = 4.
+    expect(interpolateNearerTerrainAltitudeDeg(profile, 270, 5)).toBeCloseTo(4, 12);
+    // 315° is three quarters of the way: 6 + 0.75(2 − 6) = 3.
+    expect(interpolateNearerTerrainAltitudeDeg(profile, 315, 5)).toBeCloseTo(3, 12);
+    // 359.5° is 179.5/180 of the way: 6 + (179.5/180)(2 − 6).
+    expect(interpolateNearerTerrainAltitudeDeg(profile, 359.5, 5)).toBeCloseTo(
+      6 - (179.5 / 180) * 4,
+      12,
+    );
+    expect(interpolateNearerTerrainAltitudeDeg(profile, 360, 5)).toBe(2);
+  });
+
+  it('agrees with the skyline query once the cutoff is beyond all the terrain', () => {
+    // With nothing excluded, "highest thing nearer than the cutoff" and
+    // "highest thing at all" are the same maximum, so the two interpolations
+    // must return bit-identical numbers at every bearing.
+    for (const bearingDeg of [0, 17.5, 45, 90, 180, 233.75, 315, 359.9]) {
+      expect(interpolateNearerTerrainAltitudeDeg(profile, bearingDeg, 1000)).toBe(
+        interpolateHorizonAltitudeDeg(profile, bearingDeg),
+      );
+    }
+  });
+
+  it('reports undefined when neither bracketing bearing has anything nearer', () => {
+    expect(interpolateNearerTerrainAltitudeDeg(profile, 90, 1)).toBeUndefined();
+    expect(interpolateNearerTerrainAltitudeDeg(profile, 0, 0.5)).toBeUndefined();
+  });
+
+  it('keeps the one real occluder when only one bracketing bearing has terrain', () => {
+    // 0° has a step at 1 km, 180° has nothing nearer than 8 km. At a 5 km
+    // cutoff the honest answer at any bearing between them is +2°: halving it
+    // against a fictitious open-air value would let a ridge be walked through.
+    const lopsided: HorizonProfile = normaliseHorizonProfile([
+      steppedPoint(0, [
+        [1, 2],
+        [8, 10],
+      ]),
+      steppedPoint(180, [[8, 12]]),
+    ]);
+    expect(interpolateNearerTerrainAltitudeDeg(lopsided, 90, 5)).toBe(2);
+    expect(interpolateNearerTerrainAltitudeDeg(lopsided, 180, 5)).toBe(2);
+    expect(interpolateNearerTerrainAltitudeDeg(lopsided, 0, 5)).toBe(2);
+  });
+
+  it('returns the sole sample everywhere for a one-point profile', () => {
+    const single = normaliseHorizonProfile([steppedPoint(123, [[2, 4.5]])]);
+    for (const bearingDeg of [0, 123, 200, 359.9]) {
+      expect(interpolateNearerTerrainAltitudeDeg(single, bearingDeg, 10)).toBe(4.5);
+      expect(interpolateNearerTerrainAltitudeDeg(single, bearingDeg, 2)).toBeUndefined();
+    }
+  });
+
+  it('refuses to guess on an empty profile rather than clearing every peak', () => {
+    expect(() => interpolateNearerTerrainAltitudeDeg([], 0, 10)).toThrow(RangeError);
   });
 });
