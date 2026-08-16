@@ -15,6 +15,8 @@ export type PipelineErrorCode =
   | 'no-terrain'
   /** A pose field is missing and no override supplied it. */
   | 'incomplete-pose'
+  /** Two routes through the same inputs disagreed — a bug, reported as one. */
+  | 'internal-inconsistency'
   /** The caller's AbortSignal fired. */
   | 'aborted';
 

@@ -1,0 +1,196 @@
+/**
+ * The pipeline: photograph (or a stated viewpoint) → annotated scene.
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * THE WHOLE RUN IN ONE PLACE
+ * ───────────────────────────────────────────────────────────────────────────
+ *   1. resolve the observer          ground height from the terrain if unknown
+ *   2. sweep the terrain             rays of elevation samples, near → far
+ *   3. build the horizon profile     running maximum per ray = the skyline
+ *   4. fetch named peaks             from the peak database, NEVER from the DEM
+ *   5. sight each peak               bearing, range, altitude angle
+ *   6. filter by the NEARER-terrain rule
+ *   7. project each peak to the image
+ *
+ * Every outside dependency is an argument: the elevation source, the peak
+ * source, the tolerances, and the clock. There is no module-level state and no
+ * default provider, so a test run is exactly the production run with fixtures
+ * in place of tiles.
+ *
+ * Step 6 is the one worth restating, because it is the bug this project already
+ * found and fixed once: a peak is occluded ONLY by terrain NEARER than itself.
+ * The far ridge behind a summit is its backdrop, not its lid. `src/core`
+ * implements that with the per-bearing skyline staircase; the pipeline's job is
+ * to feed it a profile that actually carries those steps, which
+ * `buildHorizonProfile` does for every ray it walks.
+ *
+ * Output is data. The renderer (`src/render`, another agent's) takes this
+ * result — horizon profile included, deliberately — and draws it.
+ */
+
+import { buildHorizonProfile } from '../core/horizon.js';
+import { projectToImage } from '../core/projection.js';
+import { sightPeak } from '../core/sightline.js';
+import type { HorizonProfile, PeakSighting } from '../core/types.js';
+import { filterVisiblePeaks, isPeakVisible, resolveAgainstHorizon } from '../core/visibility.js';
+
+import { PipelineError, throwIfAborted } from './errors.js';
+import { describeOccluder } from './occlusion.js';
+import { eyeElevationM, resolveObserver } from './observer.js';
+import { buildTerrainRays, resolveSweep } from './terrain.js';
+import type {
+  AnnotateSceneRequest,
+  AnnotatedPeak,
+  AnnotatedScene,
+  PipelineConfig,
+  ResolvedPipelineConfig,
+} from './types.js';
+
+/** Peaks are looked for this far out unless the caller says otherwise. */
+export const DEFAULT_PEAK_RADIUS_KM = 200;
+
+/**
+ * A peak closer than this counts as "the summit you are standing on".
+ *
+ * 50 m is comfortably larger than the position error of a summit coordinate and
+ * far smaller than any peak worth labelling from another peak. Below it the
+ * geometry stops meaning anything: the bearing is whatever direction the two
+ * rounding errors point, and the altitude angle heads for ±90°.
+ */
+export const DEFAULT_MIN_PEAK_DISTANCE_KM = 0.05;
+
+/** Fill in every default, so the result can report what the run actually used. */
+export function resolveConfig(config: PipelineConfig = {}): ResolvedPipelineConfig {
+  const toleranceDeg = config.toleranceDeg ?? 0;
+  if (toleranceDeg < 0) {
+    throw new RangeError(`toleranceDeg must be >= 0, received ${toleranceDeg}`);
+  }
+  return {
+    sweep: resolveSweep(config.sweep),
+    sightline: config.sightline ?? {},
+    toleranceDeg,
+    peakRadiusKm: config.peakRadiusKm ?? DEFAULT_PEAK_RADIUS_KM,
+    minPeakDistanceKm: config.minPeakDistanceKm ?? DEFAULT_MIN_PEAK_DISTANCE_KM,
+  };
+}
+
+/**
+ * Run the whole pipeline for one viewpoint.
+ *
+ * @throws PipelineError `no-terrain` when the sweep found no usable elevation
+ *   anywhere. That is not a scene with an empty horizon — it is a run with no
+ *   evidence, and answering "everything is visible" would be a fabrication.
+ */
+export async function annotateScene(request: AnnotateSceneRequest): Promise<AnnotatedScene> {
+  const config = resolveConfig(request.config);
+  const clock = request.config?.clock ?? ((): Date => new Date());
+  const warnings: string[] = [];
+
+  throwIfAborted(request.signal);
+  const observerResolution = await resolveObserver(request.observer, request.elevation, {
+    signal: request.signal,
+  });
+  const { observer } = observerResolution;
+  if (observerResolution.groundElevationSource === 'fallback') {
+    warnings.push(
+      `Observer ground elevation fell back to ${observer.groundElevationM} m: ` +
+        `${observerResolution.terrainNote ?? 'no terrain data'}.`,
+    );
+  }
+
+  const { rays, report } = await buildTerrainRays(
+    request.elevation,
+    { lat: observer.lat, lon: observer.lon },
+    config.sweep,
+    { signal: request.signal, earthRadiusM: config.sightline.earthRadiusM },
+  );
+
+  if (rays.length === 0) {
+    throw new PipelineError(
+      'no-terrain',
+      `The terrain sweep around ${observer.lat}, ${observer.lon} returned no usable ` +
+        `elevations in ${report.samplesRequested} samples` +
+        `${report.gaps.length === 0 ? '' : ` (${report.gaps.join(', ')})`}. ` +
+        'Without terrain there is no horizon and no honest visibility verdict.',
+    );
+  }
+  if (report.raysWithTerrain < report.raysRequested) {
+    warnings.push(
+      `${report.raysRequested - report.raysWithTerrain} of ${report.raysRequested} rays had no ` +
+        'terrain data and contribute no horizon point; the profile is interpolated across them.',
+    );
+  }
+  if (report.samplesWithElevation < report.samplesRequested) {
+    warnings.push(
+      `${report.samplesRequested - report.samplesWithElevation} of ${report.samplesRequested} ` +
+        `terrain samples had no elevation (${report.gaps.join(', ') || 'no reason reported'}).`,
+    );
+  }
+
+  const horizon: HorizonProfile = buildHorizonProfile(
+    eyeElevationM(observer),
+    rays,
+    config.sightline,
+  );
+
+  throwIfAborted(request.signal);
+  const found = await request.peaks.peaksWithin(
+    { lat: observer.lat, lon: observer.lon },
+    config.peakRadiusKm,
+  );
+
+  const sightings: PeakSighting[] = [];
+  for (const peak of found) {
+    const sighting = sightPeak(observer, peak, config.sightline);
+    if (sighting.distanceKm < config.minPeakDistanceKm) {
+      warnings.push(
+        `Dropped "${peak.name}" at ${(sighting.distanceKm * 1000).toFixed(0)} m — closer than the ` +
+          `${config.minPeakDistanceKm * 1000} m minimum, i.e. the observer is standing on it.`,
+      );
+      continue;
+    }
+    sightings.push(sighting);
+  }
+  sightings.sort((a, b) => a.distanceKm - b.distanceKm);
+
+  const peaks: AnnotatedPeak[] = sightings.map((sighting) => {
+    const resolved = resolveAgainstHorizon(sighting, horizon);
+    const visible = isPeakVisible(resolved, config.toleranceDeg);
+    const image = projectToImage(request.camera, sighting.bearingDeg, sighting.altitudeDeg);
+    const occludedBy = visible ? undefined : describeOccluder(horizon, sighting);
+    return {
+      ...resolved,
+      visible,
+      image,
+      ...(occludedBy === undefined ? {} : { occludedBy }),
+    };
+  });
+
+  // Cross-check: the annotated verdicts must agree with core's own filter run
+  // over the same inputs. They are computed by the same functions, so a
+  // disagreement means this file grew a second opinion — fail loudly rather
+  // than ship a result whose `visible` list and `visible` flags differ.
+  const filtered = filterVisiblePeaks(sightings, horizon, { toleranceDeg: config.toleranceDeg });
+  const visible = peaks.filter((peak) => peak.visible);
+  if (filtered.length !== visible.length) {
+    throw new PipelineError(
+      'internal-inconsistency',
+      `filterVisiblePeaks kept ${filtered.length} peaks but the ` +
+        `pipeline marked ${visible.length} visible.`,
+    );
+  }
+
+  return {
+    observer,
+    observerResolution,
+    camera: request.camera,
+    horizon,
+    sweep: report,
+    peaks,
+    visible,
+    occluded: peaks.filter((peak) => !peak.visible),
+    warnings,
+    config,
+    generatedAt: clock(),
+  };
+}
