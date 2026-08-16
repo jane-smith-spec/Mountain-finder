@@ -40,6 +40,10 @@
  * from the observer and keeping a running maximum of the angle, a sample joins
  * the skyline only if it out-angles everything closer. Anything that fails
  * that test is, by construction, hidden behind nearer ground.
+ *
+ * One sample is special: the one at the observer's own position, ground
+ * distance 0. See {@link sweepRay} — it carries no information about the
+ * skyline and is skipped, while a NEGATIVE distance is a caller bug and throws.
  */
 
 import { haversineDistanceM, initialBearingDeg, toDegrees, EARTH_RADIUS_M } from './geodesy';
@@ -178,10 +182,48 @@ export interface RaySweepResult {
  * metres. A 1500 m ridge at 20 km loses to a 1000 m ridge at 5 km (4.2° vs
  * 11.3°) and never appears on the skyline.
  *
+ * ## The sample at the observer's own position
+ *
+ * A sample at ground distance 0 is SKIPPED, and this is the one place where
+ * the sweep deliberately parts company with {@link altitudeAngleDeg}.
+ *
+ * `atan2(rise, 0)` is ±90°: correct as an angle (a point 10 m above you and
+ * 0 m away really is 10 m straight up) and meaningless as an occluder, because
+ * *you cannot be hidden by the ground you are standing on*. Left in, a +90°
+ * self-sample becomes the running maximum immediately and every peak on that
+ * bearing is reported hidden, silently and with no error.
+ *
+ * That is not a contrived input. Eye elevation is `groundElevationM +
+ * eyeHeightM`, and `groundElevationM` frequently comes from EXIF GPS altitude,
+ * which `src/exif` documents as routinely tens of metres wrong; a 10 m
+ * disagreement with the DEM is enough. Radial sampling grids (including
+ * `fixtures/scenes`) also emit the observer's own coordinate as their first
+ * sample.
+ *
+ * Three alternatives were considered and rejected:
+ *   - *Throw.* A range-0 sample is a perfectly reasonable thing for a caller to
+ *     hold — it is the elevation of the ground underfoot, a real datum — so
+ *     refusing it would push every caller into filtering that this function can
+ *     do once, correctly.
+ *   - *Clamp to a minimum distance.* Inventing a distance invents an angle;
+ *     the resulting occluder would be an artefact of the clamp constant.
+ *   - *Special-case only `rise > 0`.* The −90° case is equally wrong: it would
+ *     record a skyline step at range 0 and report terrain "seen" straight down
+ *     as the horizon of an otherwise empty ray.
+ *
+ * Anything with a distance greater than zero is kept at its true angle, however
+ * near — a wall 1 mm away genuinely does block the view.
+ *
  * @param eyeElevationM Observer's eye height above sea level.
  * @param samples Terrain samples along the ray, ordered near → far. Distances
  *   must be non-decreasing; anything else means the caller's ray walk is buggy
  *   and would silently corrupt the occlusion result, so it throws.
+ * @throws RangeError on a negative or non-finite distance. A ray runs one way,
+ *   so a negative range is not "behind the observer", it is a broken ray walk —
+ *   and `atan2(rise, −d)` would quietly return a reflected angle rather than
+ *   fail. NaN is rejected for the same reason it must be: it slips through the
+ *   near→far comparison (every comparison with NaN is false) and then loses
+ *   every `>` test, so the sample would silently vanish instead.
  */
 export function sweepRay(
   eyeElevationM: number,
@@ -193,12 +235,21 @@ export function sweepRay(
   let previousDistanceM = Number.NEGATIVE_INFINITY;
 
   for (const sample of samples) {
+    if (!Number.isFinite(sample.distanceM) || sample.distanceM < 0) {
+      throw new RangeError(
+        `ray sample distances must be finite and >= 0 m, received ${sample.distanceM}`,
+      );
+    }
     if (sample.distanceM < previousDistanceM) {
       throw new RangeError(
         `ray samples must be ordered near→far; ${sample.distanceM} m follows ${previousDistanceM} m`,
       );
     }
     previousDistanceM = sample.distanceM;
+
+    // The observer's own position: no information about the skyline. See the
+    // function docs for why this is skipped rather than clamped or rejected.
+    if (sample.distanceM === 0) continue;
 
     const altitudeDeg = altitudeAngleDeg(
       eyeElevationM,

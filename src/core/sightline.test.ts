@@ -348,6 +348,90 @@ describe('sweepRay — bookkeeping', () => {
   });
 });
 
+/**
+ * THE SAMPLE AT THE OBSERVER'S OWN POSITION (range 0).
+ *
+ * `altitudeAngleDeg` is `atan2(rise, d)`, which at d = 0 is ±90° — a vertical
+ * wall in both directions. That is the right answer to the question it is
+ * asked ("what angle is a point 10 m above me, 0 m away?") and the wrong
+ * answer to the question the sweep is asking ("what can hide the skyline?"),
+ * because you cannot be occluded by the ground you are standing on. The two
+ * questions only diverge at exactly d = 0, so that is where the sweep parts
+ * company with the angle function: it SKIPS a range-0 sample and keeps every
+ * non-zero one, however small.
+ *
+ * The trigger is mundane. Eye elevation is `groundElevationM + eyeHeightM`
+ * where `groundElevationM` often comes from EXIF GPS altitude, which is
+ * "routinely tens of metres wrong" (src/exif/types.ts). Let it disagree with
+ * the DEM by 10 m and the terrain under the observer's feet sits 10 m above
+ * (or below) the eye — enough to turn the whole bearing into a +90° wall that
+ * silently hides every peak on it.
+ *
+ * Expectations here are the closed form α = atan2(Δh − d²/(2·R_eff), d),
+ * written out independently in `closedFormAltitudeDeg` at the top of this file.
+ */
+describe('sweepRay — the sample at the observer’s own position', () => {
+  /** A 900 m ridge at 5 km, seen from an eye at 500 m: the honest answer. */
+  const RIDGE: RaySample = { distanceM: 5_000, elevationM: 900 };
+  const EYE_M = 500;
+  const RIDGE_DEG = closedFormAltitudeDeg(900 - EYE_M, 5_000);
+
+  it('ignores ground under the observer that sits ABOVE the eye', () => {
+    // EXIF said the camera was at 500 m; the DEM says the ground under it is
+    // 510 m. atan2(+10, 0) = +90°, which would out-angle everything forever.
+    const { skyline, horizon } = sweepRay(EYE_M, [{ distanceM: 0, elevationM: 510 }, RIDGE]);
+
+    expect(skyline.map((hit) => hit.distanceM)).toEqual([5_000]);
+    expect(horizon?.altitudeDeg).toBeCloseTo(RIDGE_DEG, 12);
+    expect(horizon?.altitudeDeg).toBeCloseTo(4.554485, 5);
+  });
+
+  it('ignores ground under the observer that sits BELOW the eye', () => {
+    // atan2(−10, 0) = −90°. Harmless as a running maximum, but it would still
+    // be recorded as a skyline step at range 0 and reported as the horizon of
+    // an otherwise empty ray — terrain "seen" straight down.
+    const { skyline, horizon } = sweepRay(EYE_M, [{ distanceM: 0, elevationM: 490 }, RIDGE]);
+
+    expect(skyline.map((hit) => hit.distanceM)).toEqual([5_000]);
+    expect(horizon?.distanceM).toBe(5_000);
+  });
+
+  it('leaves a ray of nothing but the observer’s own position empty', () => {
+    const { skyline, horizon } = sweepRay(EYE_M, [{ distanceM: 0, elevationM: 510 }]);
+
+    expect(skyline).toEqual([]);
+    expect(horizon).toBeUndefined();
+  });
+
+  it('keeps a tiny-but-nonzero distance, at its true near-vertical angle', () => {
+    // 1 mm away and 10 m up is a wall, and it really does block the view:
+    // atan2(10 − 1e-3²/(2 R_eff), 1e-3) = 89.99427°. Nothing is clamped, and
+    // the boundary sits at exactly zero rather than at some invented minimum.
+    const { skyline, horizon } = sweepRay(EYE_M, [{ distanceM: 1e-3, elevationM: 510 }, RIDGE]);
+
+    expect(skyline.map((hit) => hit.distanceM)).toEqual([1e-3]);
+    expect(horizon?.altitudeDeg).toBeCloseTo(closedFormAltitudeDeg(10, 1e-3), 12);
+    expect(horizon?.altitudeDeg).toBeCloseTo(89.994269, 5);
+  });
+
+  it('rejects a NEGATIVE distance instead of quietly folding it', () => {
+    // A negative range is not "behind the observer" — a ray only runs one way.
+    // It is a caller whose ray walk is buggy, exactly like a mis-ordered
+    // sample, and atan2(rise, −d) would silently return a reflected angle.
+    expect(() => sweepRay(EYE_M, [{ distanceM: -1, elevationM: 510 }, RIDGE])).toThrow(RangeError);
+    expect(() => sweepRay(EYE_M, [{ distanceM: -0.001, elevationM: 400 }])).toThrow(/-0.001/);
+  });
+
+  it('rejects a non-finite distance, which the ordering check cannot see', () => {
+    // NaN fails every comparison, so it slips past the near→far check and then
+    // produces a NaN angle that loses every `>` test — a sample that vanishes.
+    expect(() => sweepRay(EYE_M, [{ distanceM: Number.NaN, elevationM: 900 }])).toThrow(RangeError);
+    expect(() =>
+      sweepRay(EYE_M, [{ distanceM: Number.POSITIVE_INFINITY, elevationM: 900 }]),
+    ).toThrow(RangeError);
+  });
+});
+
 describe('sightPeak', () => {
   const observer: Observer = {
     lat: 46.0,

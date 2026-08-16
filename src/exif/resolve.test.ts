@@ -331,11 +331,12 @@ describe('resolvePose — override precedence', () => {
     expectResolved(resolvePose(stripped, { headingDeg: -45 }).fields.headingDeg, 315, 'user');
   });
 
-  it('ignores impossible overrides rather than corrupting the pose', () => {
-    const resolution = resolvePose(chamonix, { lat: 120, lon: Number.NaN }, { defaults });
+  it('treats a NaN override as no value at all, and falls through', () => {
+    // NaN is what an empty (or half-typed) input box parses to, i.e. "nothing
+    // supplied yet" — distinct from a number that was supplied and cannot be
+    // true. Falling through to EXIF is right for the former only.
+    const resolution = resolvePose(chamonix, { lon: Number.NaN }, { defaults });
 
-    // Out-of-range latitude and NaN longitude both fall through to EXIF.
-    expectResolved(resolution.fields.lat, 45.9237, 'exif');
     expectResolved(resolution.fields.lon, 6.8694, 'exif');
   });
 

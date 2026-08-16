@@ -67,6 +67,26 @@ Live checklist. Check items only after their self-check has been run and passed 
   samples. The void code path is real and tested, but on SYNTHETIC tiles — no honest real
   fixture from this source can contain a void.
 
+## Phase 2c — Offline peak database + the pipeline (D7) ✅ 62 tests
+- [x] **P2.9 Local peak store** — `src/providers/peak-store.ts`: a committed JSON dataset
+      (`fixtures/peaks/`) queried by radius or bbox, implementing the same `PeaksProvider`
+      seam as the Overpass client, which is KEPT as the importer for when egress opens.
+      Every coordinate and height copied from the cited ground-truth case files; the parser
+      refuses a dataset whose citations do not resolve. Summit heights come from here and
+      **never** from SRTM (Matterhorn 4478 m, not the tile's 4230 m, 320 m out of position).
+- [x] **P2.10 Pipeline** — `src/pipeline/`: `annotateScene` (stated viewpoint) and
+      `annotatePhoto` (EXIF + overrides, ground height filled from the terrain). Elevation
+      source, peak source, tolerances and clock all injected; returns an `AnnotatedScene`
+      (observer, horizon profile with staircases, peak verdicts, per-peak `ImagePoint`,
+      named occluders, sweep report, warnings) — data, never pixels. Refuses rather than
+      guesses: `observer-elevation-unknown`, `no-terrain`.
+- [x] **Case terrain fixtures** — `fixtures/tiles/cases/*.i16be` + sidecars, cut byte-for-byte
+      from real SRTM1 tiles by `npm run fixtures:case-tiles`. The acceptance suite is offline
+      and does NOT read `data/tiles/`. Each window records what it can and cannot prove.
+- [x] **Demo** — `npm run demo -- <case>` runs a case end to end and prints observer, horizon
+      extent, visible peaks with bearings/altitudes/clearances, and occluded peaks with the
+      terrain that hides them. PNG output still belongs to P4.2 (clean seam, stated in-script).
+
 ## Phase 3 — Photo ingestion (group C) ✅ 69 tests
 - [x] P3.1 EXIF extraction — real JPEGs authored byte-wise; `GPSImgDirectionRef` honoured
 - [x] P3.2 Fallback + override merge — 9 pose fields, each resolved or explicitly needs-manual
@@ -105,6 +125,49 @@ Live checklist. Check items only after their self-check has been run and passed 
       re-verified against live pages before these gate a release.
 - [x] P6.3 Acceptance harness — green, with a banner stating a pass proves the yardstick
       is sound, NOT that the pipeline is correct. 26 pipeline assertions are `it.todo`.
+- [~] **P6.3 hooks switched on — 25 of the 26 `it.todo`s are now real assertions** against
+      the real pipeline, offline. 1 remains a `todo`: the SVG overlay hook, which waits on
+      P4.1 (`src/render`, being built in parallel — writing that assertion before the module
+      exists is the failure MISSION.md describes). Confidence policy respected exactly:
+      `high` gates, `medium` reports, `disputed` informs. **One hard gate is FAILING and was
+      left failing** — see below.
+
+## ⚠ Open findings from switching on the acceptance hooks (2026-08-16)
+- [ ] **fort-william: HIGH-confidence must-see "Cow Hill" comes out HIDDEN.** Not weakened,
+      not skipped. Diagnosis: the quoted coordinate (56.813052, −5.094644, from a walking-route
+      aggregator — the case file already calls it the least authoritative position in the set)
+      reads **261 m** in SRTM against the quoted 287 m, and the DEM's local maximum is
+      **293.6 m some 476 m SSE of it**. Along bearing 139.45° the ground crests at 840–900 m
+      range and subtends **15.81°**, while the quoted summit point subtends 15.60° at 990 m —
+      so the marked point sits just BEHIND the crest of its own hill. That is also true of the
+      DEM's own local max from this viewpoint: standing at the foot of a smooth convex hill,
+      the shoulder hides the summit. The case's claim ("the hill immediately behind the town")
+      is about seeing the HILL — which dominates the computed skyline at +17.0° — not about
+      its summit point clearing the foreground. Decide one of: replace the coordinate with the
+      Ordnance Survey grid reference, or restate the expectation as "Cow Hill's mass forms the
+      skyline at this bearing". Do NOT relax the visibility rule to fix it.
+- [ ] **kerry-park-seattle: the Mount Baker gate is NOT insensitive to the observer height**,
+      contrary to that case file's header. SRTM reads Kerry Park at **103.8 m**; the case cites
+      an estimated 113 ± 15 m. With the DEM value Baker is correctly HIDDEN (clearance −1.67°);
+      with the cited 113 m it comes out VISIBLE (+0.31°) and the gate fails. The verdict flips
+      INSIDE the case's own stated uncertainty band. The suite therefore takes the observer's
+      ground height from the DEM (which that case file itself recommends) and reports the
+      comparison. Worth a note in the case file.
+- [ ] **Occluding-angle report is unreliable at an exact tie (both twin-ridges scenes).** A
+      summit normally IS the terrain sample at its own range; `src/core` excludes terrain at
+      exactly the peak's distance (strict `<`) so a peak cannot hide itself, but the peak's
+      range comes from a haversine and the sample's from the requested step, so the two differ
+      in the last bits and the tie-break is luck. When the sample counts, `horizonAltitudeDeg`
+      becomes the peak's own angle and `clearanceDeg` collapses to ~0 (twin-ridges near-crest:
+      4.554485° reported vs 3.590173° expected). **The verdict is unaffected** — an equal angle
+      still clears — so the gates stand, but any UI sorting or thresholding on `clearanceDeg`
+      would be misled. Suggested fix (src/core, not touched here): compare distances with an
+      explicit epsilon, or have the sighting carry the sample it coincides with.
+      All three scene peaks that sit on a sampled range show it, the corrected conical-peak
+      fixture included: apex expected 7.976826 deg (its own flank one sample in), pipeline
+      reports 8.481293 deg — the apex measured against ITSELF. The acceptance suite prints
+      every instance under "REPORT-ONLY AND INFORMATIONAL OUTPUT" rather than gating on it,
+      because the visible/hidden verdicts are unaffected.
 
 ## ✅ Correctness bug found by Group F — FIXED
 - [x] **P1.5 over-occluded near peaks.** Fixed: a peak is now occluded only by terrain with

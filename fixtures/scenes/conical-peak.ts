@@ -78,6 +78,64 @@
  * the 8.48° apex come out right will not also land 0.042° on the nose.
  *
  * ───────────────────────────────────────────────────────────────────────────
+ * DERIVATION 4 — WHAT OCCLUDES THE APEX (the P1.5 nearer-terrain rule)
+ * ───────────────────────────────────────────────────────────────────────────
+ * CORRECTED 2026-08-16. This fixture previously stated the apex's verdict as
+ * `skylineAltitudeDeg = 8.479576, clearanceDeg = 0` — the apex measured against
+ * ITSELF. That is the superseded pre-P1.5 rule ("a peak is visible iff it
+ * clears the skyline at its bearing"), which twin-ridges.ts was migrated off
+ * when P1.5 was fixed and this scene was missed. It passed only because the
+ * self-consistency check is `visible === (clearance >= 0)` and `0 >= 0` holds.
+ *
+ * The rule is: a peak is occluded only by terrain NEARER to the observer than
+ * the peak itself. Terrain behind it is backdrop and cannot hide it. So the
+ * number a verdict must carry is the highest angle reached by terrain strictly
+ * nearer than the apex — and the apex has terrain in front of it: its own
+ * near flank.
+ *
+ * On that flank the angle climbs monotonically to the apex (DERIVATION 2:
+ * flank slope 0.5 against tan α ≈ 0.15), so the maximum over samples strictly
+ * nearer is the LAST SAMPLE BEFORE the apex, at 10 000 − 250 = 9 750 m. That
+ * sample sits 250 m from the cone axis, so the analytic terrain gives it
+ *
+ *     E = 1 500 · (1 − 250/3 000) = 1 500 − 125 = 1 375 m   (exact)
+ *
+ *     c = 9 750² / (2 × 7 322 998.6207)
+ *       = 95 062 500 / 14 645 997.2414
+ *       = 6.490681 m
+ *
+ *     apparent rise = 1 375 − 2 − 6.490681 = 1 366.509319 m
+ *
+ *     tan α = 1 366.509319 / 9 750 = 0.140154802
+ *
+ *     α = x − x³/3 + x⁵/5 − x⁷/7 + x⁹/9 …            (x = 0.140154802)
+ *       = 0.140154802 − 0.000917704 + 0.000010816 − 0.000000152 + 0.000000002
+ *       = 0.139247764 rad
+ *       = 0.139247764 × 57.29577951
+ *       = 7.978309°
+ *
+ * The exact sphere model gives 7.976826° — the two differ by 0.0015°, the same
+ * order as everywhere else in this directory, and 6× inside the 0.01°
+ * tolerance. So:
+ *
+ *     apex          8.479576°   (exact model; 8.481293° drop model)
+ *     its occluder  7.976826°   (exact model; 7.978309° drop model)
+ *     clearance    +0.502750°   (exact model; +0.502983° drop model)
+ *
+ * ⇒ THE APEX IS VISIBLE, and by half a degree rather than by exactly nothing.
+ * The old figure was 0.503° adrift — 50× this scene's own declared tolerance —
+ * and, being pinned to zero clearance, it was a knife-edge that any sign error
+ * could flip. The corrected margin is 50× the tolerance in the safe direction.
+ *
+ * Like twin-ridges.ts, this occluding angle depends on the declared 250 m
+ * sampling: it is the angle of a specific sample, not of the continuum. A
+ * finer grid would put the occluder closer to the apex and shrink the
+ * clearance (in the limit of a continuous flank it tends to 0, which is why
+ * the pre-P1.5 number looked plausible). `SAMPLING.rangeStepM` therefore
+ * appears in the derivation, and the value below is obtained by scanning this
+ * scene's OWN samples with this scene's OWN geometry kit — no pipeline code.
+ *
+ * ───────────────────────────────────────────────────────────────────────────
  * SAMPLING NOTE
  * ───────────────────────────────────────────────────────────────────────────
  * 250 m range steps divide 10 000 m exactly, so bearing 045° has a sample
@@ -179,6 +237,54 @@ export const EXPECTED_PLAIN_HORIZON_DISTANCE_M = horizonArcDistanceM(
 export const CONE_ANGULAR_HALF_WIDTH_DEG =
   (Math.asin(BASE_RADIUS_M / APEX_DISTANCE_M) * 180) / Math.PI;
 
+/**
+ * The highest apparent altitude among this scene's OWN samples that lie
+ * strictly nearer than `cutoffDistanceM` along one bearing — the occluding
+ * angle the corrected P1.5 rule asks for (see DERIVATION 4).
+ *
+ * A scan rather than a hand-picked sample, for the same reason twin-ridges.ts
+ * scans: the winner is not always the peak's nearest neighbour, and a scan
+ * cannot quietly disagree with the sampling the scene actually generates.
+ * Uses only `scene-geometry`, so this stays an independent yardstick.
+ */
+export function occludingSampleNearerThan(
+  bearingDeg: number,
+  cutoffDistanceM: number,
+): { altitudeDeg: number; distanceM: number; elevationM: number } {
+  let best = {
+    altitudeDeg: Number.NEGATIVE_INFINITY,
+    distanceM: 0,
+    elevationM: PLAIN_ELEVATION_M,
+  };
+  for (
+    let distanceM = SAMPLING.rangeStepM;
+    distanceM < cutoffDistanceM;
+    distanceM += SAMPLING.rangeStepM
+  ) {
+    const elevationM = elevationAtM(destinationPoint(OBSERVER_POINT, bearingDeg, distanceM));
+    const altitudeDeg = apparentAltitudeDeg(EYE_ELEVATION_M, elevationM, distanceM);
+    if (altitudeDeg > best.altitudeDeg) best = { altitudeDeg, distanceM, elevationM };
+  }
+  return best;
+}
+
+/**
+ * The terrain that stands in front of the apex: the cone's own flank at
+ * 9 750 m, 1 375 m high, subtending 7.976826° (exact model). Derived by
+ * scanning; DERIVATION 4 works the same number out longhand.
+ */
+export const APEX_OCCLUDER = occludingSampleNearerThan(APEX_BEARING_DEG, APEX_DISTANCE_M);
+
+/** Closed-form angle of the terrain occluding the apex. See DERIVATION 4. */
+export const EXPECTED_APEX_OCCLUDING_ALTITUDE_DEG = APEX_OCCLUDER.altitudeDeg;
+
+/** Same angle under the independent curvature-drop model: 7.978309°. */
+export const EXPECTED_APEX_OCCLUDING_ALTITUDE_PLANE_DROP_DEG = apparentAltitudeDegPlaneDrop(
+  EYE_ELEVATION_M,
+  APEX_OCCLUDER.elevationM,
+  APEX_OCCLUDER.distanceM,
+);
+
 const APEX_PEAK_ID = 'conical-peak/apex';
 
 const peaks: readonly Peak[] = [
@@ -224,11 +330,17 @@ const expectedPeakVerdicts: readonly ExpectedPeakVerdict[] = [
     peakId: APEX_PEAK_ID,
     visible: true,
     peakAltitudeDeg: EXPECTED_APEX_ALTITUDE_DEG,
-    skylineAltitudeDeg: EXPECTED_APEX_ALTITUDE_DEG,
-    clearanceDeg: 0,
+    // The OCCLUDING angle — terrain strictly nearer than the apex — not the
+    // skyline, which the apex forms itself. See DERIVATION 4.
+    skylineAltitudeDeg: EXPECTED_APEX_OCCLUDING_ALTITUDE_DEG,
+    clearanceDeg: EXPECTED_APEX_ALTITUDE_DEG - EXPECTED_APEX_OCCLUDING_ALTITUDE_DEG,
     reason:
-      'The apex IS the skyline on its bearing; nothing in the scene can occlude ' +
-      'it. A pipeline that reports it hidden has an inverted comparison.',
+      'The apex IS the skyline on its bearing, and the only terrain in front of ' +
+      'it is its own flank: the sample at 9750 m, 1375 m high, reaching ' +
+      '7.976826 deg. The apex clears that by 0.502750 deg. Measuring the apex ' +
+      'against the skyline instead makes it its own occluder and pins the ' +
+      'clearance at exactly zero — the superseded pre-P1.5 rule, and a ' +
+      'knife-edge any sign error would flip.',
   },
 ];
 
@@ -238,7 +350,9 @@ export const conicalPeakScene: SyntheticScene = {
   derivation:
     'Apex altitude = atan((1500 - 2 - 10000^2/(2 R_eff)) / 10000) = 8.481293 deg ' +
     'by the curvature-drop model, 8.479576 deg by the exact sphere model. Away ' +
-    'from the cone the skyline is the plain horizon at -0.042346 deg, 5412 m out.',
+    'from the cone the skyline is the plain horizon at -0.042346 deg, 5412 m out. ' +
+    'The apex is occluded only by its own flank at 9750 m (1375 m high, ' +
+    '7.976826 deg exact / 7.978309 deg drop model), which it clears by 0.502750 deg.',
   observer: OBSERVER,
   sampling: SAMPLING,
   elevationAtM,

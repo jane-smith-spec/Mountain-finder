@@ -79,6 +79,148 @@ describe('normaliseHorizonProfile', () => {
   });
 });
 
+/**
+ * MERGING TWO POINTS ON ONE BEARING KEEPS THE UNION OF THEIR STAIRCASES.
+ *
+ * Keeping the higher `altitudeDeg` answers "what does the horizon look like
+ * here?" and is right for drawing. It is NOT enough for occlusion, which asks
+ * "what stands in front of range d?" — and the discarded point's staircase can
+ * hold the only occluder at that range. Dropping it turns a peak hidden behind
+ * a near wall into a labelled peak, which is the failure mode this project
+ * exists to prevent.
+ *
+ * A staircase is a running maximum over distance, so the union of two is the
+ * merge by distance with the running maximum taken: at any range d the answer
+ * must be the higher of the two rays' answers at d.
+ *
+ * Angles here are round numbers rather than terrain-derived ones on purpose —
+ * the property under test is the merge algebra, not the geometry.
+ */
+describe('normaliseHorizonProfile — merged staircases', () => {
+  it('keeps the discarded point’s occluder, which the skyline hides', () => {
+    // Same bearing, two rays:
+    //   near wall  — one step: 1 km reaching +4°
+    //   far skyline — one step: 10 km reaching +6°
+    // The skyline is +6° (the far one wins on angle), but a peak at 5 km is
+    // occluded by the +4° wall at 1 km, which the far ray knows nothing about.
+    const merged = normaliseHorizonProfile([
+      steppedPoint(0, [[10, 6]]),
+      steppedPoint(0, [[1, 4]]),
+    ]);
+
+    expect(merged).toHaveLength(1);
+    const point = merged[0];
+    expect(point).toBeDefined();
+    if (point === undefined) return;
+
+    // The skyline is still the higher of the two.
+    expect(point.altitudeDeg).toBe(6);
+    expect(point.distanceKm).toBe(10);
+
+    // …and the staircase is the union, in distance order, running maximum.
+    expect(skylineStepsOf(point).map((step) => [step.distanceKm, step.maxAltitudeDeg])).toEqual([
+      [1, 4],
+      [10, 6],
+    ]);
+
+    // The occlusion question a peak at 5 km asks: +4°, not "nothing nearer".
+    expect(maxAltitudeNearerThanDeg(point, 5)).toBe(4);
+    expect(interpolateNearerTerrainAltitudeDeg(merged, 0, 5)).toBe(4);
+    // A peak at +1° behind that wall is hidden by 3°, not visible.
+    expect(1 - (interpolateNearerTerrainAltitudeDeg(merged, 0, 5) ?? -90)).toBe(-3);
+  });
+
+  it('interleaves two multi-step staircases by distance', () => {
+    //   A: 1 km +1°, 4 km +5°   (skyline +5°)
+    //   B: 2 km +3°, 8 km +7°   (skyline +7°, so B is the point kept)
+    // Union: every step sets a new running maximum, so all four survive.
+    const merged = normaliseHorizonProfile([
+      steppedPoint(0, [
+        [1, 1],
+        [4, 5],
+      ]),
+      steppedPoint(0, [
+        [2, 3],
+        [8, 7],
+      ]),
+    ]);
+
+    const point = merged[0];
+    expect(point).toBeDefined();
+    if (point === undefined) return;
+    expect(point.altitudeDeg).toBe(7);
+    expect(skylineStepsOf(point).map((step) => [step.distanceKm, step.maxAltitudeDeg])).toEqual([
+      [1, 1],
+      [2, 3],
+      [4, 5],
+      [8, 7],
+    ]);
+
+    // Read back at four cutoffs, each answer independently obvious.
+    expect(maxAltitudeNearerThanDeg(point, 1.5)).toBe(1);
+    expect(maxAltitudeNearerThanDeg(point, 3)).toBe(3);
+    expect(maxAltitudeNearerThanDeg(point, 5)).toBe(5);
+    expect(maxAltitudeNearerThanDeg(point, 100)).toBe(7);
+  });
+
+  it('drops steps the union has already out-climbed, staying a staircase', () => {
+    //   A: 1 km +9°            (skyline +9°, the point kept)
+    //   B: 2 km +3°, 8 km +7°  — both below +9°, so neither is ever the
+    //                            running maximum at their range.
+    const merged = normaliseHorizonProfile([
+      steppedPoint(0, [[1, 9]]),
+      steppedPoint(0, [
+        [2, 3],
+        [8, 7],
+      ]),
+    ]);
+
+    const point = merged[0];
+    expect(point).toBeDefined();
+    if (point === undefined) return;
+    expect(point.altitudeDeg).toBe(9);
+    expect(skylineStepsOf(point).map((step) => [step.distanceKm, step.maxAltitudeDeg])).toEqual([
+      [1, 9],
+    ]);
+    expect(maxAltitudeNearerThanDeg(point, 9)).toBe(9);
+  });
+
+  it('collapses steps at an identical distance to the higher one', () => {
+    const merged = normaliseHorizonProfile([
+      steppedPoint(0, [[3, 2]]),
+      steppedPoint(0, [[3, 5]]),
+    ]);
+
+    const point = merged[0];
+    expect(point).toBeDefined();
+    if (point === undefined) return;
+    expect(skylineStepsOf(point).map((step) => [step.distanceKm, step.maxAltitudeDeg])).toEqual([
+      [3, 5],
+    ]);
+  });
+
+  it('gives a staircase-free point its one honest step in the union', () => {
+    // `point()` carries no `skylineSteps`; its implicit staircase is the single
+    // fact it does carry — at distanceKm 1 the terrain reached altitudeDeg.
+    const merged = normaliseHorizonProfile([point(0, 2), steppedPoint(0, [[10, 6]])]);
+
+    const merged0 = merged[0];
+    expect(merged0).toBeDefined();
+    if (merged0 === undefined) return;
+    expect(merged0.altitudeDeg).toBe(6);
+    expect(skylineStepsOf(merged0).map((step) => [step.distanceKm, step.maxAltitudeDeg])).toEqual([
+      [1, 2],
+      [10, 6],
+    ]);
+    expect(maxAltitudeNearerThanDeg(merged0, 5)).toBe(2);
+  });
+
+  it('leaves a lone point’s staircase exactly as it was', () => {
+    const [only] = normaliseHorizonProfile([steppedPoint(12, [[1, 1], [2, 2]])]);
+    expect(only?.skylineSteps?.map((step) => step.maxAltitudeDeg)).toEqual([1, 2]);
+  });
+});
+
 describe('interpolateHorizonAltitudeDeg — exact at samples', () => {
   it('returns each sample altitude unchanged at its own bearing', () => {
     expect(interpolateHorizonAltitudeDeg(QUARTERS, 0)).toBe(10);
@@ -289,6 +431,46 @@ describe('buildHorizonProfile', () => {
     // Monotonic in both coordinates, which is what makes it a staircase.
     expect(steps?.[1]?.maxAltitudeDeg ?? 0).toBeGreaterThan(steps?.[0]?.maxAltitudeDeg ?? 0);
     expect(steps?.[1]?.distanceKm ?? 0).toBeGreaterThan(steps?.[0]?.distanceKm ?? 0);
+  });
+
+  it('is not walled off by the ground under the observer’s own feet', () => {
+    /**
+     * The review's scenario, at profile level. EXIF put the camera at 500 m;
+     * the DEM says the ground under it is 510 m — a 10 m disagreement, which
+     * is unremarkable for GPS altitude — and the ray walk hands the sample at
+     * the observer's own position (range 0) to the sweep as `samples[0]`.
+     *
+     * Every angle below is atan((h − 500 − d²/(2·R_eff)) / d),
+     * R_eff = 6 371 008.8 / 0.87 = 7 322 998.6207 m:
+     *
+     *   ridge  d = 5 km,  h = 900 m:  c =  1.70695 → atan( 398.29305/5000)
+     *                                                = 4.554485°
+     *   peak   d = 20 km, h = 2400 m: c = 27.31122 → atan(1872.68878/20000)
+     *                                                = 5.349262°
+     *
+     * so the peak clears the only thing in front of it by 0.794777°. With the
+     * range-0 sample admitted, the profile's innermost step is atan2(+10, 0)
+     * = +90° and the peak is reported hidden by 84.65°.
+     */
+    const profile = buildHorizonProfile(500, [
+      {
+        bearingDeg: 0,
+        samples: [
+          { distanceM: 0, elevationM: 510 },
+          { distanceM: 5_000, elevationM: 900 },
+        ],
+      },
+    ]);
+
+    const north = profile[0];
+    expect(north?.altitudeDeg).toBeCloseTo(4.554485, 5);
+    expect(north?.distanceKm).toBe(5);
+    expect(north?.skylineSteps?.map((step) => step.distanceKm)).toEqual([5]);
+
+    // The occlusion question a 2400 m peak at 20 km asks of this bearing.
+    const occluderDeg = interpolateNearerTerrainAltitudeDeg(profile, 0, 20);
+    expect(occluderDeg).toBeCloseTo(4.554485, 5);
+    expect(5.349262 - (occluderDeg ?? 0)).toBeCloseTo(0.794777, 5);
   });
 
   it('honours the refraction option end to end', () => {

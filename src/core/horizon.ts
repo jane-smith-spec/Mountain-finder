@@ -59,12 +59,63 @@ function pointAt(profile: HorizonProfile, index: number): HorizonPoint {
 }
 
 /**
+ * Union of two running-maximum staircases: the answer, at every distance, is
+ * the higher of the two rays' answers at that distance.
+ *
+ * Each input step says "everything out to `distanceKm` reaches at most
+ * `maxAltitudeDeg`". Concatenating both lists, sorting by distance and keeping
+ * only the steps that set a new running maximum reproduces exactly that: at any
+ * range d the running maximum of the merged list is the maximum over all steps
+ * with `distanceKm ≤ d`, which is the larger of the two individual running
+ * maxima there. Steps that never lead are dropped — they are already implied by
+ * a nearer, higher one — so the result stays a staircase: strictly increasing
+ * in distance and in angle, which is the invariant `buildHorizonProfile`
+ * produces and `maxAltitudeNearerThanDeg` is happiest with.
+ */
+function unionSkylineSteps(
+  a: readonly SkylineStep[],
+  b: readonly SkylineStep[],
+): SkylineStep[] {
+  const combined = [...a, ...b].sort((left, right) => left.distanceKm - right.distanceKm);
+
+  const merged: SkylineStep[] = [];
+  let runningMaxDeg = Number.NEGATIVE_INFINITY;
+  for (const step of combined) {
+    if (step.maxAltitudeDeg <= runningMaxDeg) continue;
+    runningMaxDeg = step.maxAltitudeDeg;
+    // Two rays can put a step at the very same distance; the lower one carries
+    // no information, so it is replaced rather than appended.
+    const last = merged[merged.length - 1];
+    if (last !== undefined && last.distanceKm === step.distanceKm) {
+      merged[merged.length - 1] = step;
+    } else {
+      merged.push(step);
+    }
+  }
+  return merged;
+}
+
+/**
  * Put arbitrary horizon points into canonical profile form: bearings folded
  * onto [0, 360), sorted ascending, and duplicates collapsed.
  *
  * Two rays can land on the same bearing (e.g. a caller sampling both 0° and
- * 360°). Keeping the higher of the two is the physically correct merge: the
- * skyline at a bearing is the highest thing seen in that direction.
+ * 360°, or two profiles being stitched together). The merge answers the two
+ * questions a profile gets asked separately, because one answer will not do:
+ *
+ *   - **Skyline** (`altitudeDeg`, `distanceKm`, `elevationM`): the higher of
+ *     the two points wins outright. The skyline at a bearing is the highest
+ *     thing seen in that direction.
+ *   - **Occlusion** (`skylineSteps`): the UNION of both staircases, never just
+ *     the winner's. A peak is hidden by whatever stands in front of it, and
+ *     that occluder can perfectly well live on the ray whose skyline lost —
+ *     a near wall at +4° loses the skyline to a far ridge at +6° and still
+ *     hides everything behind it. Discarding it silently labels hidden peaks.
+ *
+ * For self-consistent points (every staircase's highest step equals its own
+ * `altitudeDeg`, which is what {@link buildHorizonProfile} emits) the union's
+ * highest step still equals the merged point's `altitudeDeg`, so the two halves
+ * of the merge cannot disagree.
  */
 export function normaliseHorizonProfile(points: readonly HorizonPoint[]): HorizonProfile {
   const sorted = points
@@ -75,9 +126,9 @@ export function normaliseHorizonProfile(points: readonly HorizonPoint[]): Horizo
   for (const point of sorted) {
     const previous = merged[merged.length - 1];
     if (previous !== undefined && previous.bearingDeg === point.bearingDeg) {
-      if (point.altitudeDeg > previous.altitudeDeg) {
-        merged[merged.length - 1] = point;
-      }
+      const skylineSteps = unionSkylineSteps(skylineStepsOf(previous), skylineStepsOf(point));
+      const higher = point.altitudeDeg > previous.altitudeDeg ? point : previous;
+      merged[merged.length - 1] = { ...higher, skylineSteps };
       continue;
     }
     merged.push(point);

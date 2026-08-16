@@ -118,3 +118,12 @@ export type {
   PeaksRequestOptions,
   ResolvedPeaks,
 } from './peaks.js';
+
+export { LocalPeakStore, parsePeakDataset, toPeak, toPeakCandidate } from './peak-store.js';
+export type {
+  PeakDataset,
+  PeakRecord,
+  PeakRecordSighting,
+  PeakSourceAccess,
+  PeakSourceRecord,
+} from './peak-store.js';

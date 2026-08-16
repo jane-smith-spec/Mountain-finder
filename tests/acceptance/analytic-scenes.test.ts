@@ -47,6 +47,11 @@ import {
   CONE_APEX_BEARING_DEG,
   CONE_APEX_DISTANCE_M,
   CONE_APEX_ELEVATION_M,
+  CONE_APEX_OCCLUDER,
+  CONE_BASE_RADIUS_M,
+  CONE_EXPECTED_APEX_ALTITUDE_DEG,
+  CONE_EXPECTED_APEX_OCCLUDING_ALTITUDE_DEG,
+  CONE_EXPECTED_APEX_OCCLUDING_PLANE_DROP_DEG,
   CONE_PLAIN_BEARING_DEG,
   FAR_RIDGE_CREST_HIDDEN_M,
   FAR_RIDGE_CREST_VISIBLE_M,
@@ -78,6 +83,9 @@ const HAND_DERIVED_DEG = {
   inFrontOfFarCrestVisibleVariant: 4.734353,
   coneApex: 8.481293,
   conePlainDip: -0.042346,
+  // The cone's own flank at 9750 m — the only terrain in front of the apex.
+  // Derived longhand in conical-peak.ts's DERIVATION 4.
+  inFrontOfConeApex: 7.978309,
 } as const;
 
 /** How far the two Earth models may disagree before a scene is untrustworthy. */
@@ -564,6 +572,49 @@ describe('scene 3 — conical peak: the apex angle is closed form', () => {
     expect(
       Math.abs(found.distanceM - (plainExpectation?.distanceM ?? 0)),
     ).toBeLessThanOrEqual(conicalPeakScene.distanceToleranceM);
+  });
+
+  it('measures the apex against the terrain in FRONT of it, not against itself', () => {
+    /**
+     * The corrected P1.5 rule (see conical-peak.ts DERIVATION 4 and
+     * twin-ridges.ts): a peak is occluded only by terrain strictly NEARER than
+     * itself. The apex forms the skyline, so measuring it against the skyline
+     * makes it its own occluder and pins the clearance at exactly zero — the
+     * superseded rule this fixture used to encode.
+     *
+     * What is actually in front of the apex is the cone's own flank at
+     * 10 000 − 250 = 9 750 m, whose height the analytic terrain fixes exactly:
+     *   E = 1500 · (1 − 250/3000) = 1375 m
+     *   c = 9750² / (2 × 7 322 998.6207) = 6.490681 m
+     *   tan α = (1375 − 2 − 6.490681)/9750 = 0.140154802 → α = 7.978309°
+     * (drop model, longhand; 7.976826° under the exact sphere model).
+     */
+    expect(CONE_APEX_OCCLUDER.distanceM).toBe(CONE_APEX_DISTANCE_M - conicalPeakScene.sampling.rangeStepM);
+    expect(CONE_APEX_OCCLUDER.elevationM).toBeCloseTo(
+      CONE_APEX_ELEVATION_M * (1 - conicalPeakScene.sampling.rangeStepM / CONE_BASE_RADIUS_M),
+      9,
+    );
+    expect(CONE_APEX_OCCLUDER.elevationM).toBeCloseTo(1375, 9);
+
+    // Both Earth models, against the hand-derived figures.
+    expect(CONE_EXPECTED_APEX_OCCLUDING_PLANE_DROP_DEG).toBeCloseTo(
+      HAND_DERIVED_DEG.inFrontOfConeApex,
+      5,
+    );
+    expect(CONE_EXPECTED_APEX_OCCLUDING_ALTITUDE_DEG).toBeCloseTo(7.976826, 5);
+
+    const verdict = conicalPeakScene.expectedPeakVerdicts.find((v) =>
+      v.peakId.endsWith('/apex'),
+    );
+    expect(verdict).toBeDefined();
+    expect(verdict?.visible).toBe(true);
+    expect(verdict?.skylineAltitudeDeg).toBeCloseTo(CONE_EXPECTED_APEX_OCCLUDING_ALTITUDE_DEG, 12);
+
+    // The apex is NOT its own occluder, and the clearance is not zero.
+    expect(verdict?.skylineAltitudeDeg).not.toBeCloseTo(CONE_EXPECTED_APEX_ALTITUDE_DEG, 3);
+    expect(verdict?.clearanceDeg ?? 0).toBeCloseTo(0.50275, 5);
+    // 50x the scene's own declared tolerance, in the safe direction.
+    expect(verdict?.clearanceDeg ?? 0).toBeGreaterThan(conicalPeakScene.toleranceDeg * 50);
   });
 
   it('separates the two expectations by three orders of magnitude in angle', () => {

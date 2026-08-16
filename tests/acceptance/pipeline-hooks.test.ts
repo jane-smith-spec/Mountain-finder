@@ -344,16 +344,18 @@ describe('P6.3 hooks — synthetic scenes through the real pipeline', () => {
           //     unaffected (an equal angle still clears), which is why the
           //     gates above stand; the reported clearance is not trustworthy at
           //     this exact coincidence, and that is worth knowing.
-          //  2. STALE FIXTURE (found by the adversarial review, 2026-08-16).
-          //     fixtures/scenes/conical-peak.ts still states this field under
-          //     the SUPERSEDED "compare against the skyline" rule. src/core is
-          //     RIGHT and the fixture is stale; a separate task fixes it. It is
-          //     NOT worked around here and NOT copied into src/core.
+          //  2. A stale conical-peak fixture used to be the second cause —
+          //     it stated this field under the SUPERSEDED "compare against the
+          //     skyline" rule. That fixture has since been corrected (it now
+          //     says 7.976826 deg, the cone's own flank one sample in), and the
+          //     cone's remaining gap is cause 1 above: 8.481293 deg, which is
+          //     the apex measured against ITSELF. Nothing here was worked
+          //     around and nothing was copied into src/core.
           const occluderGapDeg = Math.abs(peak.horizonAltitudeDeg - verdict.skylineAltitudeDeg);
           const selfTie = Math.abs(peak.horizonAltitudeDeg - peak.altitudeDeg) < scene.toleranceDeg;
           if (occluderGapDeg >= scene.toleranceDeg) {
             report(
-              `  ${scene.id}/${verdict.peakId} [occluding angle, not gated] pipeline ` +
+              `  ${verdict.peakId} [occluding angle, not gated] pipeline ` +
                 `${peak.horizonAltitudeDeg.toFixed(6)} deg vs fixture ` +
                 `${verdict.skylineAltitudeDeg.toFixed(6)} deg (gap ` +
                 `${occluderGapDeg.toFixed(6)} deg)` +
@@ -500,6 +502,15 @@ describe('P6.3 hooks — real viewpoints end to end (committed SRTM windows, off
           // Summit height comes from the peak database, NEVER from the DEM.
           expect(peak.elevationM).toBe(expectation.elevationM);
 
+          if (!peak.visible) {
+            // Report before asserting, so the finding survives in the summary
+            // even though the assertion below stops this test.
+            report(
+              `  ${testCase.id} [HIGH, must-see] ${expectation.name}: ${describeVerdict(peak)}` +
+                '\n      *** HARD GATE FAILING — the pipeline contradicts a high-confidence ' +
+                'claim. Not weakened, not skipped: see the hand-off findings. ***',
+            );
+          }
           expect(
             peak.visible,
             `${testCase.id}: HIGH-confidence must-see "${expectation.name}" came out ` +
