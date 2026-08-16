@@ -61,7 +61,6 @@ export function crowdingNote(layout: OverlayLayout): string | undefined {
   const dropped = layout.crowdedOutSummits;
   if (dropped.length === 0) return undefined;
   const total = layout.markers.length + dropped.length;
-  const plural = dropped.length === 1 ? '' : 's';
   return (
     `${String(dropped.length)} of the ${String(total)} named summits in this frame ` +
     `${dropped.length === 1 ? 'is' : 'are'} marked with a dot but not labelled: there is no ` +

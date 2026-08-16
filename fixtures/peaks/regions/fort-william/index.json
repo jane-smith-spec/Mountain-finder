@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "description": "Named summits imported from Overture Maps for \"fort-william\". Lochaber: the Fort William acceptance case, Ben Nevis and Cow Hill. Heights are OpenStreetMap `ele` tags carried through Overture, never DEM samples.",
+  "release": "2026-06-17.0",
+  "generatedBy": "npm run fetch:peaks -- --region fort-william",
+  "bounds": {
+    "south": 56.3,
+    "west": -5.7,
+    "north": 57.2,
+    "east": -4.5
+  },
+  "sources": [
+    {
+      "id": "overture-2026-06-17.0-base-land",
+      "title": "Overture Maps Foundation, base theme, type=land, release 2026-06-17.0 — summit features (subtype=physical, class=peak|volcano), © OpenStreetMap contributors, ODbL-1.0",
+      "url": "https://overturemaps-us-west-2.s3.amazonaws.com/release/2026-06-17.0/theme=base/type=land/",
+      "retrieved": "2026-08-16",
+      "access": "fetched",
+      "note": "Position is the midpoint of Overture's float32-rounded `bbox` (sub-metre for a point feature); height is the `elevation` column, which carries the OpenStreetMap `ele` tag unchanged — verified row-by-row against the same rows' `source_tags.ele`. Heights are therefore tagged/surveyed values, NEVER DEM samples (MISSION.md: SRTM under-reads sharp summits by 250–350 m). Area imported: 56.3,-5.7 … 57.2,-4.5."
+    }
+  ],
+  "cells": [
+    {
+      "name": "N56W005",
+      "peaks": 268,
+      "file": "cells/N56W005.json"
+    },
+    {
+      "name": "N56W006",
+      "peaks": 271,
+      "file": "cells/N56W006.json"
+    },
+    {
+      "name": "N57W005",
+      "peaks": 29,
+      "file": "cells/N57W005.json"
+    },
+    {
+      "name": "N57W006",
+      "peaks": 116,
+      "file": "cells/N57W006.json"
+    }
+  ],
+  "peakCount": 684
+}

@@ -129,21 +129,32 @@ describe('extractSkyline refuses where there is no evidence', () => {
 });
 
 describe('the neighbour-agreement factor', () => {
-  it('demotes a single column that locked onto a cloud far above the ridge', () => {
+  it('demotes a single column that locked onto a dark cloud bank above the ridge', () => {
     const WIDTH = 128;
     const HEIGHT = 200;
     const ROGUE = 64;
     const RIDGE_ROW = 150;
-    const CLOUD_ROW = 40;
-    // Every column is sky over rock at row 150. In the rogue column the sky
-    // above row 40 is dark, so the strongest step there is the cloud edge —
-    // 110 rows (55 % of the frame) from where its neighbours put the skyline.
+    const CLOUD_TOP = 40;
+    // Every column is sky over rock at row 150. In the rogue column a dark
+    // storm bank fills rows 40–149, so its strongest ordered step is the TOP OF
+    // THE CLOUD, not the ridge. That is not a bug in the step fit — with sky
+    // affinity 0.752 above, 0.320 in the cloud and 0.287 in the rock, the split
+    // at row 40 scores w₁w₂(μ₁−μ₂)² = 0.16 · 0.442² = 0.0313 against the
+    // ridge's 0.1875 · 0.148² = 0.0041, so the cloud genuinely is the strongest
+    // step in that column. It is exactly the wrong answer the extractor cannot
+    // see on its own, and the neighbours are the only evidence against it.
     const image = imageFrom(WIDTH, HEIGHT, (x, y) => {
       if (y >= RIDGE_ROW) return ROCK;
-      if (x === ROGUE && y < CLOUD_ROW) return [70, 78, 95];
+      if (x === ROGUE && y >= CLOUD_TOP) return [50, 52, 60];
       return SKY;
     });
     const skyline = extractSkyline(image, { columnCount: WIDTH });
+
+    // First: the step fit really did land on the cloud top, not the ridge.
+    const rogueRow = skyline.columns[ROGUE]?.rowNorm;
+    if (rogueRow !== undefined) {
+      expect(Math.abs(rogueRow * HEIGHT - (CLOUD_TOP + 0.5))).toBeLessThanOrEqual(1.5);
+    }
 
     const rogue = skyline.columns[ROGUE];
     const neighbour = skyline.columns[ROGUE + 8];

@@ -80,12 +80,22 @@
             canvasHeightPx: canvas.height,
             markerCount: layout.markers.length,
             offFrameCount: layout.offFramePeaks.length,
+            foregroundOccludedNames: layout.foregroundOccludedPeaks.map((peak) => peak.name),
+            crowdedOut: layout.crowdedOutSummits.map((entry) => ({
+              name: entry.peak.name,
+              summitPx: entry.summitPx,
+              obscured: entry.obscured,
+            })),
+            options: layout.options,
             markers: layout.markers.map((marker) => ({
               name: marker.peak.name,
               summitPx: marker.summitPx,
+              poleTipPx: marker.poleTipPx,
+              labelBoxPx: marker.labelBoxPx,
               stackLevel: marker.stackLevel,
               direction: marker.direction,
               overlapped: marker.overlapped,
+              obscured: marker.obscured,
             })),
             samples,
           };

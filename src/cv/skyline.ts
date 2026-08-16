@@ -76,8 +76,20 @@ export const SNR_FLOOR = 1;
 /** …and where that factor saturates. A real sky gradient alone puts a good column near 3–4. */
 export const SNR_REFERENCE = 4;
 
-/** Confidence below which no row is reported at all. */
-export const READABLE_FLOOR = 0.03;
+/**
+ * Confidence below which no row is reported at all.
+ *
+ * The confidence is a product of factors each in [0,1], so 0.10 is roughly
+ * "every factor at least half decent, or one weak one carried by two strong
+ * ones". The number is set by the case it has to exclude rather than by taste:
+ * a cloudless graded sky with no terrain in the column at all scores a full
+ * contrast and a healthy SNR, and is caught *only* by the edge factor, which
+ * for a linear ramp comes out near 0.03–0.10 depending on frame height. A floor
+ * of 0.10 puts that case out; a floor of 0.03 lets it through with a row
+ * planted halfway down the sky, which is precisely the confident fabrication
+ * this module exists to avoid.
+ */
+export const READABLE_FLOOR = 0.1;
 
 /** How far a column may sit from its neighbours' median before agreement halves. */
 export const AGREEMENT_TOLERANCE_NORM = 0.12;
@@ -88,7 +100,7 @@ export interface SkylineOptions {
   /** Vertical box-blur radius in rows applied before the step fit. Default 1. */
   readonly smoothingRadiusRows?: number;
   /**
-   * Half-width, in rows, of the bands compared across the chosen row to measure
+   * Height, in rows, of the two bands compared across the chosen row to measure
    * a *local* edge. Default `max(2, round(0.015 · height))`.
    */
   readonly edgeBandRows?: number;
@@ -154,11 +166,16 @@ function fitStep(column: Float64Array, marginRows: number): StepFit | undefined 
   return { row: bestRow, contrast: bestContrast, withinStd: Math.sqrt(withinVariance) };
 }
 
-/** Mean of `values` over `[from, to)`, clamped to the array. 0 for an empty range. */
-function meanOver(values: Float64Array, from: number, to: number): number {
+/**
+ * Mean of `values` over `[from, to)`, clamped to the array — `undefined` when
+ * the clamped range is empty. Undefined rather than 0, so a band that ran off
+ * the top or bottom of the frame cannot masquerade as a measurement of zero
+ * brightness and turn a split at the frame edge into a confident edge.
+ */
+function meanOver(values: Float64Array, from: number, to: number): number | undefined {
   const low = Math.max(0, from);
   const high = Math.min(values.length, to);
-  if (high <= low) return 0;
+  if (high <= low) return undefined;
   let total = 0;
   for (let index = low; index < high; index += 1) total += values[index] ?? 0;
   return total / (high - low);
@@ -216,9 +233,18 @@ export function extractSkyline(image: RgbaImage, options: SkylineOptions = {}): 
       continue;
     }
 
-    const localAbove = meanOver(smoothed, fit.row - edgeBand, fit.row);
-    const localBelow = meanOver(smoothed, fit.row, fit.row + edgeBand);
-    const edge01 = clamp01((localAbove - localBelow) / Math.max(fit.contrast, 1e-9));
+    // The two bands are held `guard` rows clear of the split itself, because
+    // the pre-blur has already spread a one-row step over `2·radius + 1` rows:
+    // measuring right up against the boundary would sample that ramp and
+    // report a perfectly sharp edge as a soft one. Clear of it, a true step
+    // gives `localAbove − localBelow` equal to the global contrast, i.e. 1.
+    const guard = smoothingRadius + 1;
+    const localAbove = meanOver(smoothed, fit.row - guard - edgeBand, fit.row - guard);
+    const localBelow = meanOver(smoothed, fit.row + guard, fit.row + guard + edgeBand);
+    const edge01 =
+      localAbove === undefined || localBelow === undefined
+        ? 0
+        : clamp01((localAbove - localBelow) / Math.max(fit.contrast, 1e-9));
 
     // withinStd of exactly 0 means a noiseless step — an infinite SNR, which
     // saturates the factor rather than producing a NaN.

@@ -75,6 +75,15 @@
  *    dotted-and-reported, off-frame-and-reported, or refused by D8 and
  *    reported, and the four lists partition the input exactly.
  *
+ * Rule 5 — place it anyway and flag `overlapped` — is untouched **below**
+ * capacity. Above it, a marker that finds no free candidate is moved to
+ * `crowdedOutSummits` instead. That is not a reversal of rule 5 but its
+ * extension: rule 5 exists because losing a name silently is a lie, and above
+ * capacity the name is not lost silently — the frame is already saying, on its
+ * own face, that it is withholding names. What an overlapping label would buy
+ * at that point is one unreadable name at the cost of the readable one
+ * underneath it.
+ *
  * The ranking (see {@link compareLabelPriority}) is **apparent height** — the
  * altitude angle the summit rides at, which is the one quantity that combines
  * height and distance the way an eye does, and which is already computed for
@@ -135,6 +144,23 @@ const HORIZON_SWEEP_MAX_HALF_DEG = 85;
  * length the association is gone.
  */
 const MAX_POLE_HEIGHT_FRACTION = 0.3;
+
+/**
+ * Fraction of the frame's theoretical label slots that are actually usable.
+ *
+ * **Calibrated, not derived, and the calibration is the argument for it.** A
+ * label is centred on its summit, and summits sit where the mountains are, so
+ * the slots never tile: a busy column exhausts its rungs while the column
+ * beside it stands empty. At 1.0 the measured Gornergrat scene still produced
+ * 2–9 mutually colliding labels at headings 40°, 45° and 115°–170° — frames
+ * holding 19–30 summits, where the budget did not bind and the placement search
+ * ran out of room anyway. At 0.75 the budget binds on those frames and they
+ * come out clean. Frames of 15 or fewer summits never needed it either way.
+ *
+ * It errs toward naming fewer summits and counting the rest, which is the safe
+ * side: an unnamed dot is reported, an illegible label is not.
+ */
+const LABEL_PACKING_RATIO = 0.75;
 
 /** Height of a label's reserved box for the given fonts and padding. */
 export function labelBlockHeightPx(
@@ -267,12 +293,12 @@ export function reachableStackLevels(options: ResolvedOverlayOptions): number {
  * gets fewer slots than one full of short ones — which is the truth about how
  * much room there is.
  *
- * Two known inaccuracies, in opposite directions, stated rather than hidden:
- * the count ignores downward placements, which roughly halves it, and it
- * assumes labels tile perfectly, which they never do. The residual is a
- * deliberately conservative number — the failure this exists to prevent is an
- * unreadable frame, and erring toward "name fewer, count the rest" is the safe
- * side of that.
+ * Two known inaccuracies pull in opposite directions and are stated rather than
+ * hidden: the count ignores downward placements, which roughly halves it, and a
+ * grid of slots is never fully usable, which {@link LABEL_PACKING_RATIO}
+ * allows for. The residual is a deliberately conservative number — the failure
+ * this exists to prevent is an unreadable frame, and erring toward "name fewer,
+ * count the rest" is the safe side of that.
  */
 export function labelSlotCapacity(
   frameWidthPx: number,
@@ -282,7 +308,8 @@ export function labelSlotCapacity(
   const usableWidthPx = frameWidthPx - 2 * options.frameMarginPx;
   if (!(meanLabelWidthPx > 0) || !(usableWidthPx > 0)) return 1;
   const columns = Math.max(1, Math.floor(usableWidthPx / meanLabelWidthPx));
-  return Math.max(1, columns * reachableStackLevels(options));
+  const slots = columns * reachableStackLevels(options);
+  return Math.max(1, Math.floor(LABEL_PACKING_RATIO * slots));
 }
 
 /** Strict rectangle intersection: rectangles that merely touch do not overlap. */
@@ -504,7 +531,8 @@ export function layoutOverlay(
 
   const crowdedOutSummits: UnlabelledSummit[] = [];
   let labelled = sightings;
-  if (sightings.length > budget) {
+  const overCapacity = sightings.length > budget;
+  if (overCapacity) {
     const ranked = [...sightings].sort((a, b) => compareLabelPriority(a.peak, b.peak));
     labelled = ranked.slice(0, budget);
     for (const sighting of ranked.slice(budget)) {
@@ -548,6 +576,20 @@ export function layoutOverlay(
       if (chosen !== undefined) break;
     }
 
+    if (chosen === undefined && overCapacity) {
+      // Over capacity the frame has already said on its own face that it is
+      // withholding names, so one more unnamed dot costs nothing that is not
+      // already paid for — whereas drawing this label would take a legible
+      // neighbour down with it. Under capacity no such admission exists and the
+      // older rule stands: the marker is drawn anyway and flagged `overlapped`.
+      crowdedOutSummits.push({
+        peak: sighting.peak,
+        summitPx: sighting.summitPx,
+        obscured: isPeakObscured(sighting.peak),
+      });
+      continue;
+    }
+
     // Nothing fitted in the frame at all (a label taller than the photo, or
     // margins that swallow it): fall back to the clamped level-0 placement,
     // which is always defined.
@@ -556,6 +598,11 @@ export function layoutOverlay(
     markers.push(markerFromCandidate(sighting, candidate, chosen === undefined, resolved));
     placed.push(candidate.boxPx);
   }
+
+  // One order for the whole withheld list, whether a summit lost at selection
+  // or at placement: highest-riding first, so a caller naming a few names the
+  // ones a viewer is most likely to be pointing at.
+  crowdedOutSummits.sort((a, b) => compareLabelPriority(a.peak, b.peak));
 
   return {
     widthPx: scene.widthPx,

@@ -637,3 +637,101 @@ describe('annotateScene — bearings the sweep asked about and lost', () => {
     expect(scene.visible.map((peak) => peak.id)).toEqual(['test/high']);
   });
 });
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * A LOW BANK IN FRONT OF A TALLER MOUNTAIN (adversarial review 2, finding 1)
+ * ══════════════════════════════════════════════════════════════════════════
+ *
+ * The same terrain as `classifyOcclusion — a taller crest standing behind the
+ * first blocker` in src/core/visibility.test.ts, run end to end so the outcome
+ * the review actually complained about — a greyed LABEL planted on a different
+ * mountain's face, below the skyline — is the thing being asserted.
+ *
+ *   0.95–1.15 km   150 m   a low bank; the first thing in the way, 2.887°
+ *   1.15–14.5 km   150→749 m  a foreslope that never dips
+ *   14.5–15.5 km   900 m   a DIFFERENT mountain; the skyline here, 3.084°
+ *   15.5–19.8 km   500 m   a 400 m col
+ *   19.8–20 km     500→1000 m  the summit's own flank
+ *   Mount Ghost    1000 m at 20 km, 2.499° — below both of them
+ *
+ * Measured from the bank, the foreslope never falls below 150 m, so the col
+ * reads 0 and Mount Ghost is called self-occluded: labelled, greyed, drawn on
+ * the 900 m mountain 5 km short of the summit it names. Measured from the
+ * crest that is actually in view, the col is 400 m deep and the peak is a
+ * different landform — foreground-occluded, never drawn. Sweeping a 60° sector
+ * keeps the run to 60 rays; the peak is due east, in the middle of it.
+ */
+const GHOST_DISTANCE_M = 20_000;
+const GHOST_ELEVATION_M = 1000;
+
+/** The review's profile as a function of ground distance from the observer. */
+function reviewProfileM(distanceM: number): number {
+  if (distanceM < 950) return 0;
+  if (distanceM <= 1150) return 150;
+  if (distanceM < 14_500) return 150 + ((distanceM - 1150) * (749 - 150)) / (14_500 - 1150);
+  if (distanceM <= 15_500) return 900;
+  if (distanceM <= 19_800) return 500;
+  return 500 + ((distanceM - 19_800) * (GHOST_ELEVATION_M - 500)) / 200;
+}
+
+const bankThenMountain: TerrainFunctionM = (point) =>
+  reviewProfileM(greatCircleDistanceM(ORIGIN, point));
+
+const ghostRequest: AnnotateSceneRequest = {
+  observer: { lat: 0, lon: 0, eyeHeightM: EYE_HEIGHT_M },
+  camera,
+  elevation: new FunctionElevationSource(bankThenMountain, 'bank-then-mountain'),
+  peaks: new StaticPeakSource([
+    {
+      id: 'test/ghost',
+      name: 'Mount Ghost',
+      ...east(GHOST_DISTANCE_M),
+      elevationM: GHOST_ELEVATION_M,
+      elevationSource: 'unknown',
+    },
+  ]),
+  config: {
+    sweep: {
+      startBearingDeg: 60,
+      spanDeg: 60,
+      bearingStepDeg: 1,
+      rangeStepM: 90,
+      maxRangeKm: 21,
+    },
+    peakRadiusKm: 50,
+    clock: () => FIXED_CLOCK,
+  },
+};
+
+describe('annotateScene — a summit across a col behind a low near bank', () => {
+  it('has the geometry the case turns on', async () => {
+    const scene = await annotateScene(ghostRequest);
+    const ghost = byId(scene.peaks, 'test/ghost');
+
+    // Hand arithmetic, drop model, eye at 100 m — see the header above.
+    expect(ghost.altitudeDeg).toBeCloseTo(expectedAltitudeDeg(GHOST_ELEVATION_M, 20_000), 9);
+    expect(ghost.altitudeDeg).toBeCloseTo(2.4985, 3);
+    // The 900 m mountain at 14.58 km is the highest thing in front of it …
+    expect(expectedAltitudeDeg(900, 14_580)).toBeCloseTo(3.0838, 3);
+    // … and the 150 m bank at 0.99 km, which gets in the way first, is lower.
+    expect(expectedAltitudeDeg(150, 990)).toBeCloseTo(2.8874, 3);
+    expect(ghost.occludingAltitudeDeg).toBeCloseTo(3.0838, 3);
+    expect(ghost.visible).toBe(false);
+  });
+
+  it('does not plant a label on the mountain in front of it', async () => {
+    const scene = await annotateScene(ghostRequest);
+    const ghost = byId(scene.peaks, 'test/ghost');
+
+    expect(ghost.visibility).toBe('foreground-occluded');
+    expect(ghost.occlusion?.evidence).toBe('col-between-occluder-and-summit');
+    expect(ghost.occlusion?.crestElevationM).toBe(900);
+    expect(ghost.occlusion?.crestDistanceKm).toBeCloseTo(14.58, 6);
+    // 900 m crest, 500 m col floor. Ground distances round-trip through the
+    // destination-point formula, so the floor is 500 m to within a nanometre.
+    expect(ghost.occlusion?.colDepthM ?? Number.NaN).toBeCloseTo(400, 6);
+
+    expect(scene.labelled.map((peak) => peak.name)).not.toContain('Mount Ghost');
+    expect(scene.foregroundOccluded.map((peak) => peak.name)).toContain('Mount Ghost');
+  });
+});

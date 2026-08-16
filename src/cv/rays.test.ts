@@ -133,15 +133,28 @@ describe('applyPoseOffset', () => {
     expect(rotated.altitudeDeg).toBeCloseTo(expected.altitudeDeg, 9);
   });
 
-  it('is NOT the same as applying the rotations in the other order', () => {
-    // Recorded so nobody "simplifies" the order later: the two compositions
-    // differ at O(Δh·Δp), which at 20°/8° is far above the 0.5° target.
+  it('is NOT the same as pitching about the NOMINAL axis after the heading turn', () => {
+    // Recorded so nobody "simplifies" the composition later.
+    //
+    // Note which swap is and is not a mistake. Turning first and then pitching
+    // about `levelRight(h₀ + Δh)` is the SAME rotation — conjugation gives
+    // R_up(Δh)·R_{r(h₀)}(Δp) = R_{r(h₀+Δh)}(Δp)·R_up(Δh) — and the aligner
+    // could legitimately be written either way. What is wrong is turning first
+    // and then pitching about the axis that has not been turned with it, which
+    // is the easy mistake to make, and at 20°/8° it is off by degrees.
     const direction = unprojectFromImage(POSE, 0.9, 0.3);
     const correct = directionToSky(applyPoseOffset(direction, POSE.headingDeg, 20, 8));
-    const swapped = directionToSky(
+
+    const conjugated = directionToSky(
       applyPoseOffset(rotateAboutVertical(direction, 20), POSE.headingDeg + 20, 0, 8),
     );
-    expect(Math.abs(correct.altitudeDeg - swapped.altitudeDeg)).toBeGreaterThan(0.1);
+    expect(conjugated.altitudeDeg).toBeCloseTo(correct.altitudeDeg, 9);
+    expect(conjugated.bearingDeg).toBeCloseTo(correct.bearingDeg, 9);
+
+    const stale = directionToSky(
+      applyPoseOffset(rotateAboutVertical(direction, 20), POSE.headingDeg, 0, 8),
+    );
+    expect(Math.abs(stale.altitudeDeg - correct.altitudeDeg)).toBeGreaterThan(1);
   });
 });
 

@@ -864,14 +864,24 @@ describe('classifyOcclusion', () => {
     // A 6 m dip past the crest. At the default zero allowance that is a col and
     // the peak is not labelled; a caller who states a 10 m DEM noise budget
     // gets the other answer. Nothing is tuned silently.
+    //
+    // The terrain here was rebuilt when the crest became the HIGHEST nearer
+    // sample rather than the first one (review 2, finding 1). It used to put
+    // the dip at 200 m, BEHIND the 130 m sample at 400 m that actually forms
+    // the skyline — under the corrected rule that scene is genuinely one
+    // landform (the ground climbs 130 → 140 m from the crest to the summit
+    // with nothing in between), so it no longer exercises the allowance at all.
+    // The dip now sits where the rule looks: between the crest and the summit.
     const dippedHill: RaySample[] = [
       { distanceM: 100, elevationM: 30 },
-      { distanceM: 200, elevationM: 24 },
-      { distanceM: 300, elevationM: 90 },
-      { distanceM: 400, elevationM: 130 },
+      { distanceM: 200, elevationM: 60 },
+      { distanceM: 300, elevationM: 100 },
+      { distanceM: 400, elevationM: 94 },
     ];
-    // atan(30/100) = 16.70 deg beats the summit's atan(140/500) = 15.64 deg, so
-    // the 100 m shoulder is the crest and the 24 m sample is a col behind it.
+    // atan(100/300) = 18.43 deg is the highest angle in front of the summit and
+    // beats its atan(140/500) = 15.64 deg, so the 300 m sample is the crest —
+    // clear of the 16.70 deg the 100 m and 200 m samples reach — and the 94 m
+    // sample behind it is a 6 m col between that crest and the summit.
     const target = { distanceKm: 0.5, altitudeDeg: altitudeAngleDeg(0, 140, 500) };
 
     expect(classifyOcclusion(0, target, dippedHill, { sampleSpacingM: 100 }).kind).toBe(
@@ -896,6 +906,108 @@ describe('classifyOcclusion', () => {
       expect(classification.evidence.length).toBeGreaterThan(0);
     }
     expect(kinds.size).toBeGreaterThan(0);
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * THE CREST IS THE ONE THE VIEWER CAN SEE (adversarial review 2, finding 1)
+ * ══════════════════════════════════════════════════════════════════════════
+ *
+ * Terrain copied from the review, sampled at the 90 m default step, observer's
+ * eye at 100 m above sea level:
+ *
+ *   0.95–1.15 km   150 m   a low bank — the FIRST thing in the way
+ *   1.15–14.5 km   150→749 m  a foreslope that never dips
+ *   14.5–15.5 km   900 m   a DIFFERENT mountain — the actual skyline
+ *   15.5–19.8 km   500 m   a 400 m col
+ *   19.8–20 km     500→1000 m  the target summit's own flank
+ *   20 km          1000 m  the target summit
+ *
+ * Angles from the documented drop model (R_eff = 6 371 008.8/0.87 =
+ * 7 322 998.6207 m, drop = d²/(2·R_eff), α = atan((Δh − drop)/d)), worked out
+ * by hand and asserted below so the shape of the argument is checkable:
+ *
+ *   bank    150 m @   990 m: drop 0.0669  → atan(49.9331/990)    = 2.8874°
+ *   skyline 900 m @ 14580 m: drop 14.5143 → atan(785.4857/14580) = 3.0838°
+ *   summit 1000 m @ 20000 m: drop 27.3129 → atan(872.6871/20000) = 2.4985°
+ *
+ * Both nearer pieces of ground out-angle the summit, so both "block" it. Only
+ * the 900 m mountain forms the skyline. Measuring continuity from the bank
+ * gives colDepthM 0 — the foreslope never drops below 150 m — and calls a
+ * summit across a 400 m col SELF-occluded, which plants a greyed label on a
+ * different mountain's face, 5 km short of the summit it names. Measuring from
+ * the crest that is actually in view gives 900 − 500 = 400 m of col.
+ */
+describe('classifyOcclusion — a taller crest standing behind the first blocker', () => {
+  const EYE_ELEVATION_M = 100;
+  const SUMMIT_DISTANCE_M = 20_000;
+  const SUMMIT_ELEVATION_M = 1000;
+  const STEP_M = 90;
+
+  /** The review's profile as a function of ground distance. */
+  function reviewTerrainM(distanceM: number): number {
+    if (distanceM < 950) return 0;
+    if (distanceM <= 1150) return 150;
+    if (distanceM < 14_500) return 150 + ((distanceM - 1150) * (749 - 150)) / (14_500 - 1150);
+    if (distanceM <= 15_500) return 900;
+    if (distanceM <= 19_800) return 500;
+    return 500 + ((distanceM - 19_800) * (SUMMIT_ELEVATION_M - 500)) / 200;
+  }
+
+  const ray: RaySample[] = Array.from({ length: 233 }, (_, index) => {
+    const distanceM = (index + 1) * STEP_M;
+    return { distanceM, elevationM: reviewTerrainM(distanceM) };
+  });
+
+  const target = {
+    distanceKm: SUMMIT_DISTANCE_M / 1000,
+    altitudeDeg: altitudeAngleDeg(EYE_ELEVATION_M, SUMMIT_ELEVATION_M, SUMMIT_DISTANCE_M),
+  };
+
+  it('has the shape the argument depends on: two blockers, the farther one higher', () => {
+    // Hand-derived above; asserted here so the scene cannot drift silently.
+    expect(altitudeAngleDeg(EYE_ELEVATION_M, 150, 990)).toBeCloseTo(2.8874, 3);
+    expect(altitudeAngleDeg(EYE_ELEVATION_M, 900, 14_580)).toBeCloseTo(3.0838, 3);
+    expect(target.altitudeDeg).toBeCloseTo(2.4985, 3);
+
+    // The first sample that gets in the way is the 150 m bank at 990 m …
+    const firstBlocker = ray.find(
+      (sample) =>
+        sample.distanceM < SUMMIT_DISTANCE_M &&
+        altitudeAngleDeg(EYE_ELEVATION_M, sample.elevationM, sample.distanceM) >
+          target.altitudeDeg,
+    );
+    expect(firstBlocker).toEqual({ distanceM: 990, elevationM: 150 });
+
+    // … and it is NOT the highest thing in front of the summit.
+    expect(altitudeAngleDeg(EYE_ELEVATION_M, 900, 14_580)).toBeGreaterThan(
+      altitudeAngleDeg(EYE_ELEVATION_M, 150, 990),
+    );
+  });
+
+  it('measures the col against the crest that forms the skyline, not the first blocker', () => {
+    const classification = classifyOcclusion(EYE_ELEVATION_M, target, ray, {
+      sampleSpacingM: STEP_M,
+    });
+
+    // The 900 m mountain at 14.58 km is what the viewer sees at this bearing.
+    expect(classification.crestElevationM).toBe(900);
+    expect(classification.crestDistanceKm).toBeCloseTo(14.58, 9);
+    // 900 m of crest, 500 m of col floor: 400 m, exact integer arithmetic.
+    expect(classification.colDepthM).toBe(400);
+    expect(classification.kind).toBe('foreground-occluded');
+    expect(classification.evidence).toBe('col-between-occluder-and-summit');
+  });
+
+  it('does not report the 150 m bank, whose foreslope hides the col entirely', () => {
+    const classification = classifyOcclusion(EYE_ELEVATION_M, target, ray, {
+      sampleSpacingM: STEP_M,
+    });
+
+    // The bug's signature: crest 150 m at 0.99 km, colDepthM 0, self-occluded.
+    expect(classification.crestElevationM).not.toBe(150);
+    expect(classification.colDepthM).not.toBe(0);
+    expect(classification.kind).not.toBe('self-occluded');
   });
 });
 

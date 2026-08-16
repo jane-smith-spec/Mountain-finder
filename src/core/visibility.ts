@@ -152,9 +152,10 @@ export function filterVisiblePeaks(
  * it lost to, and a peak that IS labelled had to earn it with terrain evidence.
  *
  *   `'unbroken-rise-to-summit'`
- *     Self-occlusion. From the first piece of ground that gets in the way out
- *     to the summit's own range, no sampled terrain drops below the height of
- *     that first piece: one continuous mass, no col, one landform.
+ *     Self-occlusion. From the crest the viewer actually sees — the highest
+ *     ground in front of the summit — out to the summit's own range, no
+ *     sampled terrain drops below that crest: one continuous mass, no col, one
+ *     landform.
  *
  *   `'col-between-occluder-and-summit'`
  *     Foreground occlusion, proven. The ground between the two descends below
@@ -195,7 +196,10 @@ export type OccludedVisibility = Exclude<PeakVisibility, 'visible'>;
 export interface OcclusionClassification {
   readonly kind: OccludedVisibility;
   readonly evidence: OcclusionEvidence;
-  /** Ground distance to the first terrain sample that gets in the way. */
+  /**
+   * Ground distance to the crest: the HIGHEST-ANGLE terrain sample in front of
+   * the summit, i.e. the one that forms the skyline at this bearing.
+   */
   readonly crestDistanceKm?: number;
   /** Height above sea level of that sample. */
   readonly crestElevationM?: number;
@@ -269,13 +273,40 @@ export interface OccludedTarget {
  *
  * ## The rule, and why it is this one
  *
- * Walk the peak's own bearing outward. Let the **crest** be the first terrain
- * sample nearer than the peak whose angle beats the peak's (that is where the
- * sightline enters the ground; anything before it is irrelevant, and starting
- * from the *tallest* nearer sample instead would be a weaker test, over a
- * shorter span). The summit is **self-occluded** when, from the crest out to
- * the peak's own range, no sampled ground falls below the crest — and
- * **foreground-occluded** when it does.
+ * Walk the peak's own bearing outward. Let the **crest** be the terrain sample
+ * nearer than the peak that reaches the HIGHEST ANGLE — the one that forms the
+ * skyline at this bearing, and therefore the one the viewer can actually see.
+ * The summit is **self-occluded** when, from the crest out to the peak's own
+ * range, no sampled ground falls below the crest — and **foreground-occluded**
+ * when it does.
+ *
+ * ## Why the highest crest and not the first one (review 2, finding 1)
+ *
+ * This function used to take the FIRST nearer sample that out-angled the peak,
+ * defended in these comments as "a stronger test over a longer span". That
+ * reasoning is backwards, and the case that shows it is ordinary terrain: a low
+ * bank at 1 km, a foreslope behind it that never dips, a 900 m mountain at
+ * 14.5 km, a 400 m col, and the target summit at 20 km. The bank gets in the
+ * way first, the foreslope never falls below the bank, so the col reads **0**
+ * and a summit across four hundred metres of saddle is called self-occluded —
+ * greyed label, planted on the 900 m mountain's face, five kilometres short of
+ * the summit it names. That is the exact outcome D8 exists to prevent.
+ *
+ * The span is longer, but the BAR is lower, and the bar is what the test is:
+ * the ground between only has to stay above the crest, so the lower the crest,
+ * the easier "no col" is to satisfy, and first-blocker selection therefore
+ * MAXIMISES false self-occlusion — the labelling direction, the one that can
+ * invent a mountain. The highest crest is also the only choice that matches
+ * what the label has to be true of: the greyed label lands on the skyline the
+ * viewer sees, so continuity must be proven from THAT crest to the summit, not
+ * from some lower shoulder hidden behind it. And it is the same terrain the
+ * visibility verdict was taken against — `occludingAltitudeDeg` is the maximum
+ * angle over nearer terrain — so the classifier and the filter now name the
+ * same piece of ground.
+ *
+ * Ties keep the nearer sample, which is the conservative half of a tie: a
+ * nearer crest of equal angle leaves a longer span of ground to prove
+ * continuous.
  *
  * That criterion is the topographic definition of "the same landform", not a
  * proxy for it. Summits are separated by **cols**: the saddle between two hills
@@ -344,29 +375,40 @@ export function classifyOcclusion(
   const nearerLimitM = targetDistanceM * (1 - COINCIDENT_DISTANCE_TOLERANCE);
   const blockingAboveDeg = target.altitudeDeg + toleranceDeg;
 
+  // Pass one: the crest is the highest-angle sample in front of the summit —
+  // the skyline at this bearing. Strict `>` keeps the NEARER of two samples at
+  // the same angle (see the tie note in the doc comment). The ray is not
+  // assumed sorted, so this is a scan rather than a walk with an early exit.
   let crest: { readonly sample: RaySample; readonly altitudeDeg: number } | undefined;
-  const beyondCrest: RaySample[] = [];
-
   for (const sample of ray) {
     if (sample.distanceM <= 0 || sample.distanceM >= nearerLimitM) continue;
-    if (crest === undefined) {
-      const sampleAltitudeDeg = altitudeAngleDeg(
-        eyeElevationM,
-        sample.elevationM,
-        sample.distanceM,
-        options.sightline,
-      );
-      if (sampleAltitudeDeg > blockingAboveDeg) {
-        crest = { sample, altitudeDeg: sampleAltitudeDeg };
-      }
-      continue;
+    const sampleAltitudeDeg = altitudeAngleDeg(
+      eyeElevationM,
+      sample.elevationM,
+      sample.distanceM,
+      options.sightline,
+    );
+    if (crest === undefined || sampleAltitudeDeg > crest.altitudeDeg) {
+      crest = { sample, altitudeDeg: sampleAltitudeDeg };
     }
-    beyondCrest.push(sample);
   }
 
-  if (crest === undefined) {
+  // Nothing on this ray out-angles the summit: the verdict came from the
+  // interpolated pair of neighbouring rays, and there is no crest here to
+  // measure continuity from. Since the crest is the MAXIMUM, this one test
+  // settles it for the whole ray.
+  if (crest === undefined || crest.altitudeDeg <= blockingAboveDeg) {
     return { kind: 'foreground-occluded', evidence: 'occluder-not-on-this-ray' };
   }
+
+  // Pass two: the ground between the crest and the summit — the span whose
+  // continuity decides which landform the summit belongs to.
+  const beyondCrest: RaySample[] = [];
+  for (const sample of ray) {
+    if (sample.distanceM <= crest.sample.distanceM || sample.distanceM >= nearerLimitM) continue;
+    beyondCrest.push(sample);
+  }
+  beyondCrest.sort((a, b) => a.distanceM - b.distanceM);
 
   const found = {
     crestDistanceKm: crest.sample.distanceM / 1000,
