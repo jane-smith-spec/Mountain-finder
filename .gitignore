@@ -1,27 +1,13 @@
 node_modules/
-.expo/
 dist/
-web-build/
-expo-env.d.ts
+out/
+coverage/
+test-results/
+playwright-report/
 
-# Native build artefacts
-android/
-ios/
-*.jks
-*.p8
-*.p12
-*.key
-*.mobileprovision
-
-# Environment files — never commit secrets
 .env
-.env.local
-.env.*.local
+.env.*
 
-# Editor
+.DS_Store
 .vscode/
 .idea/
-*.orig.*
-
-# macOS
-.DS_Store
