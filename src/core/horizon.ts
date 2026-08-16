@@ -28,6 +28,25 @@
  * Both read the same bracketing pair with the same weight, so a peak that is
  * farther out than everything forming its skyline gets an identical answer from
  * either.
+ *
+ * ## Bridging, and the one thing a profile cannot tell you
+ *
+ * Interpolating between neighbouring samples is right when the samples are
+ * neighbours. It is a fabrication when they are the two lips of a HOLE — a run
+ * of rays that returned no terrain at all, because the tiles were never fetched
+ * or the DEM is void there. Nothing in a `HorizonPoint[]` distinguishes the two:
+ * a profile that jumps 100° → 140° looks identical whether 39 rays failed in
+ * between or the sweep only ever asked for those two bearings.
+ *
+ * The missing fact is *what the sweep asked for*, and it lives with the caller,
+ * so it is passed back in as {@link HorizonCoverage}. With it,
+ * {@link hasTerrainAtBearing} separates the two cases exactly:
+ *
+ *   - a **hole** is a bearing the sweep asked about and got nothing back for —
+ *     the bridge across it is an invention and no verdict may rest on it;
+ *   - the **edge** of a bounded sweep is a bearing nobody ever asked about.
+ *     A 60° sector is not "missing" the other 300°, and treating it as such
+ *     would have every single-photo run refuse on three quarters of the compass.
  */
 
 import { normaliseBearingDeg } from './geodesy';
@@ -140,9 +159,12 @@ export function normaliseHorizonProfile(points: readonly HorizonPoint[]): Horizo
  * Build a horizon profile by sweeping each bearing ray outward and taking the
  * terrain that wins the occlusion contest on that ray.
  *
- * Rays with no samples contribute nothing — a gap in the profile is honest,
- * and interpolation will bridge it linearly from the neighbours rather than
- * inventing a zero-altitude horizon that would let hidden peaks through.
+ * Rays with no samples contribute nothing: a bearing with no terrain data gets
+ * no point rather than a zero-altitude horizon, which would let hidden peaks
+ * through. But the resulting profile no longer records that the ray was ever
+ * attempted, and the interpolating queries will happily BRIDGE the hole — see
+ * {@link hasTerrainAtBearing}, which the caller must consult with the list of
+ * bearings it swept before trusting an answer inside one.
  *
  * @param eyeElevationM Observer's eye height above sea level, metres.
  */
@@ -174,6 +196,125 @@ export function buildHorizonProfile(
   }
 
   return normaliseHorizonProfile(points);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * Coverage: which bearings were actually looked at
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * What a sweep asked for but did not get: the bearings whose rays returned no
+ * terrain at all.
+ *
+ * A profile is a list of successes. It cannot say whether the space between two
+ * of its points is one sampling step, or a wedge of unfetched tiles that
+ * swallowed forty rays, or the far side of a sector the sweep never entered.
+ * Only the caller knows which bearings it asked about, so that is the one fact
+ * this carries, and {@link hasTerrainAtBearing} is the query it answers.
+ *
+ * This is the same judgement `classifyOcclusion` makes along a ray, where
+ * `sampleSpacingM` is required precisely so that "no col recorded" can be told
+ * apart from "no col", one bearing at a time. Absence of evidence must never
+ * become evidence of continuity — along a ray or across one.
+ */
+export interface HorizonCoverage {
+  /**
+   * Swept bearings that produced no profile point, folded onto [0, 360) and
+   * sorted ascending. Empty means the sweep lost nothing: every ray it asked
+   * for came back with terrain on it.
+   */
+  readonly unmeasuredBearingsDeg: readonly number[];
+}
+
+/**
+ * Work out what a sweep lost, by comparing the bearings it asked for against
+ * the profile it produced.
+ *
+ * `sweptBearingsDeg` is the sweep's OWN list — every ray it intended to walk,
+ * failures included — not the rays that came back. Bearings are matched after
+ * folding onto [0, 360), so 360° and 0° are the same ray. A caller that hands
+ * in bearings which merely round to the profile's own (rather than being the
+ * same numbers) will see them reported as unmeasured, which errs toward
+ * refusing to answer rather than toward answering from terrain that is not
+ * there.
+ */
+export function horizonCoverage(
+  profile: HorizonProfile,
+  sweptBearingsDeg: readonly number[],
+): HorizonCoverage {
+  const measured = new Set(profile.map((point) => normaliseBearingDeg(point.bearingDeg)));
+  const unmeasured = new Set<number>();
+  for (const bearingDeg of sweptBearingsDeg) {
+    const folded = normaliseBearingDeg(bearingDeg);
+    if (!measured.has(folded)) unmeasured.add(folded);
+  }
+  return { unmeasuredBearingsDeg: [...unmeasured].sort((a, b) => a - b) };
+}
+
+/**
+ * Length of the arc from `fromDeg` forward (clockwise) to `toDeg`, in degrees.
+ * A full turn rather than 0 when the two coincide, which is the arc a
+ * single-point profile's bracket spans.
+ */
+function forwardArcDeg(fromDeg: number, toDeg: number): number {
+  const deltaDeg = normaliseBearingDeg(toDeg - fromDeg);
+  return deltaDeg === 0 ? 360 : deltaDeg;
+}
+
+/**
+ * Whether an answer at this bearing rests on terrain that was actually
+ * measured, or on a bridge across a hole.
+ *
+ * `true` means the bearing either IS a profile sample or lies between two
+ * samples with no failed ray between them — ordinary interpolation, which is
+ * the assumption the whole profile is built on. `false` means the sweep asked
+ * about the ground here and got nothing back, so both
+ * {@link interpolateHorizonAltitudeDeg} and
+ * {@link interpolateNearerTerrainAltitudeDeg} would answer with a number
+ * invented from the terrain either side of the hole. A peak judged against that
+ * number is called visible or hidden by terrain nobody ever looked at, and both
+ * verdicts are fabrications. The honest move is to report that there is no
+ * answer here and let the caller decide what to do about it — exactly as the
+ * tile layer reports a void instead of substituting a height.
+ *
+ * ## A hole is not an edge
+ *
+ * The un-swept remainder of a bounded sweep is NOT a hole. A 60° sector that
+ * walked all sixty of its rays lost nothing; bearing 200° was never asked
+ * about, no ray failed there, and the profile simply ends. Calling that a data
+ * gap would make every single-photo run — which sweeps roughly twice the
+ * horizontal field of view — refuse on most of the compass. The two cases are
+ * separated exactly, not heuristically: a hole contains a bearing the sweep
+ * asked about and lost, and an edge does not. (What such a sector profile
+ * should say about a peak behind the camera is a different question, and one
+ * the caller answers by choosing what to sweep.)
+ *
+ * An empty profile has measured nothing, so every bearing is unanswerable.
+ */
+export function hasTerrainAtBearing(
+  profile: HorizonProfile,
+  bearingDeg: number,
+  coverage: HorizonCoverage,
+): boolean {
+  if (profile.length === 0) return false;
+  if (coverage.unmeasuredBearingsDeg.length === 0) return true;
+
+  const target = normaliseBearingDeg(bearingDeg);
+  const { before, after } = bracketAtBearing(profile, bearingDeg);
+  const beforeDeg = normaliseBearingDeg(before.bearingDeg);
+  const afterDeg = normaliseBearingDeg(after.bearingDeg);
+  // Landing exactly on a sample reads that sample, bridging nothing.
+  if (target === beforeDeg || target === afterDeg) return true;
+
+  // Everything strictly inside the arc the bridge spans. For a one-point
+  // profile the bracket is that point twice and the arc is the whole circle,
+  // which is the honest reading of "one ray measured one bearing".
+  const spanDeg = forwardArcDeg(beforeDeg, afterDeg);
+  for (const unmeasuredDeg of coverage.unmeasuredBearingsDeg) {
+    const offsetDeg = normaliseBearingDeg(unmeasuredDeg - beforeDeg);
+    if (offsetDeg > 0 && offsetDeg < spanDeg) return false;
+  }
+  return true;
 }
 
 /**

@@ -148,3 +148,41 @@ export type {
   PeakSourceAccess,
   PeakSourceRecord,
 } from './peak-store.js';
+
+export {
+  TiledPeakStore,
+  boundingBoxAround,
+  cellNameForPeak,
+  parsePeakCell,
+  parsePeakCellIndex,
+} from './peak-tile-store.js';
+export type { PeakCellEntry, PeakCellIndex, PeakCellLoader } from './peak-tile-store.js';
+
+// The pure half of the Overture importer only. `overture-parquet.js` (hyparquet
+// + zstd), `parquet-slice.js` and `peak-directory.js` are deliberately NOT
+// re-exported here: they belong to the acquisition path and to tests, and
+// hanging a parquet decoder off the barrel every app module imports would put
+// it in the browser bundle for nothing. Import them by path, like
+// `fixture-store.js` and `tile-directory.js`.
+export {
+  DEFAULT_SUMMIT_CLASSES,
+  OVERTURE_ELEVATION_SOURCE,
+  OVERTURE_ID_PREFIX,
+  OVERTURE_LANDFORM_SUBTYPE,
+  OVERTURE_LAND_COLUMNS,
+  POINT_BBOX_TOLERANCE_DEG,
+  boxContains,
+  boxesIntersect,
+  classifyOvertureRow,
+  importOvertureRows,
+  pointFromBbox,
+  readOvertureLandRow,
+} from './overture-peaks.js';
+export type {
+  DegreeBox,
+  OvertureBbox,
+  OvertureImportOptions,
+  OvertureLandFeature,
+  OvertureRejection,
+  OvertureRowOutcome,
+} from './overture-peaks.js';

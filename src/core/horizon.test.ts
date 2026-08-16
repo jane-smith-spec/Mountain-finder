@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildHorizonProfile,
+  hasTerrainAtBearing,
+  horizonCoverage,
   interpolateHorizonAltitudeDeg,
   interpolateNearerTerrainAltitudeDeg,
   maxAltitudeNearerThanDeg,
@@ -692,5 +694,158 @@ describe('interpolateNearerTerrainAltitudeDeg', () => {
 
   it('refuses to guess on an empty profile rather than clearing every peak', () => {
     expect(() => interpolateNearerTerrainAltitudeDeg([], 0, 10)).toThrow(RangeError);
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * Coverage — telling a HOLE in a profile from its EDGE
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/** The bearings a sweep of `spanDeg` from `startDeg` at `stepDeg` asks for. */
+function sweptBearings(startDeg: number, spanDeg: number, stepDeg: number): number[] {
+  const bearings: number[] = [];
+  for (let index = 0; index < Math.round(spanDeg / stepDeg); index += 1) {
+    bearings.push(startDeg + index * stepDeg);
+  }
+  return bearings;
+}
+
+/**
+ * A FULL 360° sweep, 1° apart, whose rays over bearings 101°–139° came back
+ * with no terrain at all — a wedge of tiles that was never fetched. Everything
+ * west of the wedge stands at +30°, everything east of it at 0°, so the linear
+ * bridge across the hole is arithmetic anyone can do in their head:
+ *
+ *   bearing 100° = +30°, bearing 140° = 0°, hole 40° wide
+ *   → the bridge at 120° is exactly halfway: +15°.
+ *
+ * That +15° is the fabrication. No ray ever looked at bearing 120°.
+ */
+const WEDGE_SWEPT = sweptBearings(0, 360, 1);
+const WEDGE_PROFILE = normaliseHorizonProfile(
+  WEDGE_SWEPT.filter((bearingDeg) => bearingDeg <= 100 || bearingDeg >= 140).map((bearingDeg) =>
+    point(bearingDeg, bearingDeg <= 100 ? 30 : 0),
+  ),
+);
+const WEDGE_COVERAGE = horizonCoverage(WEDGE_PROFILE, WEDGE_SWEPT);
+
+/** A 60° sector sweep, 1° apart, every ray of which DID return terrain. */
+const SECTOR_SWEPT = sweptBearings(60, 60, 1);
+const SECTOR_PROFILE = normaliseHorizonProfile(
+  SECTOR_SWEPT.map((bearingDeg) => point(bearingDeg, 10)),
+);
+const SECTOR_COVERAGE = horizonCoverage(SECTOR_PROFILE, SECTOR_SWEPT);
+
+describe('horizonCoverage', () => {
+  it('reports nothing unmeasured when every swept ray produced a point', () => {
+    expect(SECTOR_COVERAGE.unmeasuredBearingsDeg).toEqual([]);
+  });
+
+  it('names exactly the swept bearings that came back empty', () => {
+    // 101 … 139 inclusive: 139 − 101 + 1 = 39 bearings.
+    expect(WEDGE_COVERAGE.unmeasuredBearingsDeg).toHaveLength(39);
+    expect(WEDGE_COVERAGE.unmeasuredBearingsDeg[0]).toBe(101);
+    expect(WEDGE_COVERAGE.unmeasuredBearingsDeg.at(-1)).toBe(139);
+  });
+
+  it('folds the swept bearings onto [0, 360) and de-duplicates the seam', () => {
+    // 360 and 0 are the same ray; −5 is 355. Only 350 was measured.
+    const coverage = horizonCoverage(normaliseHorizonProfile([point(350, 1)]), [
+      350, 355, 360, 0, -5,
+    ]);
+    expect(coverage.unmeasuredBearingsDeg).toEqual([0, 355]);
+  });
+
+  it('reports every swept bearing unmeasured when the profile is empty', () => {
+    expect(horizonCoverage([], [0, 90, 180]).unmeasuredBearingsDeg).toEqual([0, 90, 180]);
+  });
+});
+
+describe('the bridge across a hole, and what the coverage says about it', () => {
+  it('interpolates a confident skyline angle where no ray ever looked', () => {
+    // The demonstration, not the fix: both queries answer +15° at bearing 120°,
+    // halfway between the +30° wall at 100° and the 0° ground at 140°, with no
+    // terrain data anywhere between them.
+    expect(interpolateHorizonAltitudeDeg(WEDGE_PROFILE, 120)).toBeCloseTo(15, 12);
+    expect(interpolateNearerTerrainAltitudeDeg(WEDGE_PROFILE, 120, 20)).toBeCloseTo(15, 12);
+  });
+
+  it('says there is no terrain data at that bearing', () => {
+    expect(hasTerrainAtBearing(WEDGE_PROFILE, 120, WEDGE_COVERAGE)).toBe(false);
+  });
+
+  it('says so across the whole hole, and only the hole', () => {
+    for (const bearingDeg of [100.5, 101, 120, 139, 139.5]) {
+      expect(hasTerrainAtBearing(WEDGE_PROFILE, bearingDeg, WEDGE_COVERAGE)).toBe(false);
+    }
+    // The rays either side of the hole measured terrain, so they keep it.
+    for (const bearingDeg of [100, 140]) {
+      expect(hasTerrainAtBearing(WEDGE_PROFILE, bearingDeg, WEDGE_COVERAGE)).toBe(true);
+    }
+  });
+
+  it('leaves ordinary interpolation between two adjacent rays alone', () => {
+    for (const bearingDeg of [0, 50, 50.5, 99.75, 200, 359.5]) {
+      expect(hasTerrainAtBearing(WEDGE_PROFILE, bearingDeg, WEDGE_COVERAGE)).toBe(true);
+    }
+  });
+});
+
+describe('hasTerrainAtBearing — a bounded sweep is not a hole', () => {
+  it('keeps every bearing inside a complete sector', () => {
+    for (const bearingDeg of [60, 90, 90.5, 119]) {
+      expect(hasTerrainAtBearing(SECTOR_PROFILE, bearingDeg, SECTOR_COVERAGE)).toBe(true);
+    }
+  });
+
+  it('does not call the 300° the sweep never asked about a data gap', () => {
+    // The sector ran 60°–119°. Bearing 200° was never swept, so no ray failed
+    // there and nothing was lost; the profile simply ENDS. Reporting a hole
+    // here would make every sector sweep — which the app runs routinely —
+    // refuse on three quarters of the compass.
+    for (const bearingDeg of [180, 200, 300, 0, 59]) {
+      expect(hasTerrainAtBearing(SECTOR_PROFILE, bearingDeg, SECTOR_COVERAGE)).toBe(true);
+    }
+  });
+
+  it('still finds a hole INSIDE a sector sweep', () => {
+    const measured = SECTOR_SWEPT.filter((bearingDeg) => bearingDeg < 80 || bearingDeg > 89);
+    const profile = normaliseHorizonProfile(measured.map((bearingDeg) => point(bearingDeg, 10)));
+    const coverage = horizonCoverage(profile, SECTOR_SWEPT);
+
+    expect(coverage.unmeasuredBearingsDeg).toHaveLength(10);
+    expect(hasTerrainAtBearing(profile, 85, coverage)).toBe(false);
+    expect(hasTerrainAtBearing(profile, 79.5, coverage)).toBe(false);
+    expect(hasTerrainAtBearing(profile, 70, coverage)).toBe(true);
+    expect(hasTerrainAtBearing(profile, 200, coverage)).toBe(true);
+  });
+});
+
+describe('hasTerrainAtBearing — degenerate profiles', () => {
+  it('refuses everywhere on an empty profile instead of throwing', () => {
+    expect(hasTerrainAtBearing([], 0, horizonCoverage([], [0, 1, 2]))).toBe(false);
+    expect(hasTerrainAtBearing([], 123, { unmeasuredBearingsDeg: [] })).toBe(false);
+  });
+
+  it('answers only at its own bearing when the rest of the sweep came back empty', () => {
+    const profile = normaliseHorizonProfile([point(0, 5)]);
+    const coverage = horizonCoverage(profile, sweptBearings(0, 360, 1));
+    expect(coverage.unmeasuredBearingsDeg).toHaveLength(359);
+    expect(hasTerrainAtBearing(profile, 0, coverage)).toBe(true);
+    expect(hasTerrainAtBearing(profile, 180, coverage)).toBe(false);
+    expect(hasTerrainAtBearing(profile, 0.5, coverage)).toBe(false);
+  });
+
+  it('treats a one-ray sweep as a sweep that covered one bearing, not as a hole', () => {
+    // Nothing failed: the caller asked for one ray and got it. Everything else
+    // is outside the sweep, which is the sector case above taken to its limit.
+    const profile = normaliseHorizonProfile([point(0, 5)]);
+    const coverage = horizonCoverage(profile, [0]);
+    expect(coverage.unmeasuredBearingsDeg).toEqual([]);
+    expect(hasTerrainAtBearing(profile, 180, coverage)).toBe(true);
+  });
+
+  it('reports data everywhere when the caller states no coverage loss', () => {
+    expect(hasTerrainAtBearing(QUARTERS, 45, { unmeasuredBearingsDeg: [] })).toBe(true);
   });
 });

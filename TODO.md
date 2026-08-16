@@ -102,6 +102,29 @@
       it matches the existing architecture exactly: an acquisition step that writes a local
       dataset, never a runtime dependency, like `fetch:tiles`.
 
+      **DONE (2026-08-16). The design works and Overture carries summit heights.**
+      `npm run fetch:peaks -- --region zermatt` imported **1 786 named summits** (61 above
+      4 000 m) for **42.17 MB of a 29.47 GB release — 0.1431%**; a re-run with the footer
+      cache warm costs 10.77 MB. 14 row groups of 5 056 were read, and only six of thirteen
+      columns from those, because `geometry` is ~96% of the bytes. Gates after: `npm run check`
+      **41 files / 809 tests**, `npm run test:acceptance` **148**, `npx playwright test` **13**,
+      `npm run build` clean (299.49 kB bundle, no parquet decoder in it).
+
+      **The open question of P9.4 is answered: Overture DOES carry elevations.** The
+      `elevation` INT32 column is the OpenStreetMap `ele` tag carried through unchanged —
+      checked row-by-row against the same rows' `source_tags.ele` (Matterhorn `"4478"` → 4478,
+      Weisshorn `"4505"` → 4505). So imported records declare `elevationSourceKind: 'osm'`
+      honestly, and **nothing is ever sampled from the DEM**: a summit with no `ele` is
+      dropped and counted (285 in the Zermatt area), never filled in.
+
+      **Overture agrees with the cited ground truth**: 13 of 15 heights exact or within 2 m.
+      Two real conflicts, reported and NOT resolved in favour of Overture — the disagreement
+      table is in `fixtures/peaks/README.md`. Mount Hamilton 1300 m cited vs 1279 m OSM
+      (−21 m), and **Mount Tamalpais East Peak's two coordinates are 1 754 m apart**, which
+      needs re-checking before that summit backs any assertion. Also: "Breithorn" is
+      ambiguous once real coverage is on — OSM calls the cited 4 164 m summit
+      `Breithorn Occidentale / Westgipfel` and the Valais holds three other `Breithorn`s.
+
 **Deferred by decision, not forgotten:** Phase 7 CV skyline alignment (v2.1, decision D3) and
 Phase 8 live view (v3, decision D5). Neither starts before v2.0 ships.
 
@@ -166,6 +189,45 @@ Live checklist. Check items only after their self-check has been run and passed 
 - [x] **Demo** — `npm run demo -- <case>` runs a case end to end and prints observer, horizon
       extent, visible peaks with bearings/altitudes/clearances, and occluded peaks with the
       terrain that hides them. PNG output still belongs to P4.2 (clean seam, stated in-script).
+
+## Phase 9 — Peak coverage from Overture Maps (Q5) ✅ +63 tests
+- [x] **P9.1 Parquet range reader** — `src/providers/overture-parquet.ts`. Reads a remote
+      Parquet footer through an INJECTED `AsyncBuffer` (the same seam as `Transport` and
+      `TileStore`, so the module itself does no I/O): 512 KiB of a 424 MB part = 0.12%.
+      `rowGroupExtents` exposes each row group's `bbox.xmin/xmax/ymin/ymax` statistics, its
+      row span, and what the six selected columns cost. Self-check met against
+      `fixtures/parquet/overture-zermatt-rowgroup/` **offline**: 128 row groups, 2 337 243
+      rows, group 21 at rows 372 344…392 973 spanning lon 7.2808…7.7877, lat 45.6124…46.1577
+      — every figure re-derived from the committed bytes and compared with the sidecar's,
+      recorded from the live file.
+- [x] **P9.2 Spatial pruning** — `planParquetRead` keeps only intersecting row groups, and the
+      importer prints the ratio that proves it: **42.17 MB fetched of 29.47 GB = 0.1431%**
+      (10.77 MB warm). A box over the Southern Alps of New Zealand prunes all 128 groups of the
+      European part to zero, tested offline. Column selection is the second half: `geometry` is
+      21.9 MB of one group's 22.7 MB and is never requested.
+- [x] **P9.3 Peak extraction** — `src/providers/overture-peaks.ts`, pure. A summit is
+      `subtype='physical'` with `class` in `peak`/`volcano` (volcano matters: Rainier, Baker,
+      Hood and Lassen are all `natural=volcano`); the name is `names.primary` under a nested
+      struct; the position is the midpoint of the float32-rounded `bbox`, which brackets the
+      true point to 0.3 m and avoids reading `geometry` at 30× the bytes.
+- [x] **P9.4 Elevation provenance — RESOLVED, elevations exist.** `elevation` (INT32, metres)
+      is OSM's `ele` carried through unchanged, verified against the rows' own `source_tags`.
+      Records declare `elevationSourceKind: 'osm'`. A summit with no height is **dropped and
+      counted**, never DEM-filled — MISSION.md's rule survives contact with real data.
+- [x] **P9.5 Scalable peak store** — `src/providers/peak-tile-store.ts`: the dataset is cut into
+      1° cells named with the SAME rule as the SRTM tiles (`tileNameFor`), and a query loads only
+      the cells its radius touches, through an injected loader (`peak-directory.ts` is the node
+      edge). `boundingBoxAround` uses the exact `asin(sin δ / cos φ)` bound, not `δ/cos φ`, which
+      under-covers by 0.0003° at 60°N and would silently lose summits in the sliver. Implements
+      `PeaksProvider` unchanged, so the pipeline is untouched; the cited
+      `ground-truth-peaks.json` still backs all 148 acceptance assertions.
+- [x] **P9.6 Conflict reporting** — the table in `fixtures/peaks/README.md`. 13 of 15 heights
+      agree exactly or within 2 m. Reported, not resolved: Mount Hamilton −21 m, Mount Tamalpais
+      East Peak 1 754 m out of position, and the `Breithorn` name ambiguity.
+- [x] **Real-bytes fixture** — `fixtures/parquet/overture-zermatt-rowgroup/` (1.36 MB = 0.32% of
+      the part) + sidecar, via `npm run fixtures:peak-parquet`. Replayed at the ORIGINAL file
+      offsets; an unrecorded byte **throws** rather than zero-filling.
+- [x] **Committed region** — `fixtures/peaks/regions/zermatt/`, 1 786 summits in 4 cells.
 
 ## Phase 3 — Photo ingestion (group C) ✅ 69 tests
 - [x] P3.1 EXIF extraction — real JPEGs authored byte-wise; `GPSImgDirectionRef` honoured
