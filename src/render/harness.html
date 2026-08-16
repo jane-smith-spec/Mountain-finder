@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Mountain Finder — render harness</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #101214;
+      }
+      canvas {
+        display: block;
+        max-width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      Test harness for P4.2, served by the Vite dev server that Playwright
+      already starts. It exists so the compositor is exercised as a real ES
+      module in a real browser — the same code path the app will use — rather
+      than as a string injected into a blank page. It is not part of the app and
+      nothing links to it.
+    -->
+    <div id="mount"></div>
+    <script type="module">
+      import { layoutOverlay, buildOverlaySvgFromLayout } from '/src/render/index.ts';
+      import { compositeToCanvas } from '/src/render/composite.ts';
+      import { drawSyntheticMountainPhoto } from '/src/render/testing/synthetic-photo.ts';
+
+      /**
+       * Parse the overlay as XML and report any error the browser finds.
+       * `drawImage` on a malformed SVG fails silently — a blank overlay with no
+       * exception anywhere — so it is checked explicitly before compositing.
+       */
+      function svgParseError(svg) {
+        const document_ = new DOMParser().parseFromString(svg, 'image/svg+xml');
+        const error = document_.querySelector('parsererror');
+        return error === null ? null : error.textContent.trim().slice(0, 300);
+      }
+
+      window.mfRenderHarness = {
+        async render({ scene, options, probesPx }) {
+          const layout = layoutOverlay(scene, options ?? {});
+          const overlaySvg = buildOverlaySvgFromLayout(layout);
+
+          const photoSrc = drawSyntheticMountainPhoto({
+            widthPx: scene.widthPx,
+            heightPx: scene.heightPx,
+            ridgePolylinesPx: layout.horizonPolylinesPx,
+          });
+
+          const canvas = await compositeToCanvas({
+            photoSrc,
+            overlaySvg,
+            widthPx: scene.widthPx,
+            heightPx: scene.heightPx,
+          });
+
+          const context = canvas.getContext('2d');
+          const samples = (probesPx ?? []).map((probe) => {
+            const data = context.getImageData(Math.floor(probe.xPx), Math.floor(probe.yPx), 1, 1)
+              .data;
+            return {
+              label: probe.label,
+              xPx: probe.xPx,
+              yPx: probe.yPx,
+              rgba: [data[0], data[1], data[2], data[3]],
+            };
+          });
+
+          document.getElementById('mount').replaceChildren(canvas);
+
+          return {
+            pngDataUrl: canvas.toDataURL('image/png'),
+            overlaySvg,
+            svgParseError: svgParseError(overlaySvg),
+            canvasWidthPx: canvas.width,
+            canvasHeightPx: canvas.height,
+            markerCount: layout.markers.length,
+            offFrameCount: layout.offFramePeaks.length,
+            markers: layout.markers.map((marker) => ({
+              name: marker.peak.name,
+              summitPx: marker.summitPx,
+              stackLevel: marker.stackLevel,
+              direction: marker.direction,
+              overlapped: marker.overlapped,
+            })),
+            samples,
+          };
+        },
+      };
+
+      window.mfRenderHarnessReady = true;
+    </script>
+  </body>
+</html>

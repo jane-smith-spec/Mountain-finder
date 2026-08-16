@@ -141,14 +141,27 @@ export function clipPolylineToFrame(
     }
 
     const [from, to] = clipped;
+
+    // A segment that only grazes the frame — one that starts exactly on an
+    // edge and leaves immediately — clips down to a single point. Emitting it
+    // would append a duplicate coordinate to the run, or open a run consisting
+    // of the same point twice. Neither draws anything; both are noise in the
+    // output and in every snapshot of it.
+    const degenerate =
+      Math.abs(to.xPx - from.xPx) <= JOIN_EPSILON_PX &&
+      Math.abs(to.yPx - from.yPx) <= JOIN_EPSILON_PX;
+
     const tail = current?.[current.length - 1];
-    if (
+    const joinsCurrent =
       current !== undefined &&
       tail !== undefined &&
       Math.abs(tail.xPx - from.xPx) <= JOIN_EPSILON_PX &&
-      Math.abs(tail.yPx - from.yPx) <= JOIN_EPSILON_PX
-    ) {
-      current.push(to);
+      Math.abs(tail.yPx - from.yPx) <= JOIN_EPSILON_PX;
+
+    if (joinsCurrent) {
+      if (!degenerate) current?.push(to);
+    } else if (degenerate) {
+      current = undefined;
     } else {
       startRun(from, to);
     }

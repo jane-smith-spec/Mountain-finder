@@ -1,0 +1,599 @@
+import { describe, expect, it } from 'vitest';
+
+import type { CameraPose, HorizonPoint, HorizonProfile, VisiblePeak } from '../core/types';
+import {
+  formatPeakDetail,
+  labelBlockHeightPx,
+  layoutOverlay,
+  rectsOverlap,
+  resolveOverlayOptions,
+} from './layout';
+import type { OverlayOptions, OverlayScene, PeakMarker } from './types';
+
+/**
+ * ## How the expectations in this file are derived
+ *
+ * Independently of the renderer, from the projection model documented in
+ * `src/core/projection.ts`. With pitch = 0 and roll = 0 the camera's `right`
+ * axis is horizontal and its `up` axis is world-up, so for a target at bearing
+ * offset Δ = bearing − heading and altitude α the perspective divide collapses
+ * to a closed form:
+ *
+ *     across / depth = tan Δ
+ *     up     / depth = tan α / cos Δ
+ *
+ *     x = 0.5 + tan Δ        / (2 · tan(hFOV/2))
+ *     y = 0.5 − tan α / cosΔ / (2 · tan(vFOV/2))
+ *
+ * and the vertical field of view follows the aspect ratio through the tangents:
+ * tan(vFOV/2) = tan(hFOV/2) · height / width.
+ *
+ * The fixture below is chosen so the horizontal answer is exact in closed form.
+ * With hFOV = 60° and Δ = 15°:
+ *
+ *     x = 0.5 + tan15° / (2·tan30°)
+ *       = 0.5 + (2 − √3) · (√3/2)
+ *       = 0.5 + (2√3 − 3)/2
+ *       = √3 − 1
+ *       = 0.7320508075688772…
+ *
+ * so on a 1600 px-wide frame the flag stands at **1600·(√3 − 1) =
+ * 1171.28129 px**. The vertical one, with α = 3°, is
+ *
+ *     y = 0.5 − (tan3° / cos15°) / (2 · tan30° · 3/4)
+ *       = 0.5 − 0.05425652… / 0.86602540…
+ *       = 0.43734996…
+ *
+ * → **524.81995 px** on a 1200 px-high frame.
+ *
+ * Neither number was produced by running the renderer.
+ */
+const WIDTH_PX = 1600;
+const HEIGHT_PX = 1200;
+const HFOV_DEG = 60;
+
+/** tan(vFOV/2) = tan(hFOV/2) · height/width — the documented aspect relation. */
+const TAN_HALF_V = Math.tan((HFOV_DEG / 2) * (Math.PI / 180)) * (HEIGHT_PX / WIDTH_PX);
+const VFOV_DEG = 2 * Math.atan(TAN_HALF_V) * (180 / Math.PI);
+
+const POSE: CameraPose = {
+  headingDeg: 90,
+  pitchDeg: 0,
+  rollDeg: 0,
+  hFovDeg: HFOV_DEG,
+  vFovDeg: VFOV_DEG,
+};
+
+/** Hand-computed pixel position of a target at bearing offset Δ, altitude α. */
+function expectedPx(deltaBearingDeg: number, altitudeDeg: number): { xPx: number; yPx: number } {
+  const rad = (deg: number): number => (deg * Math.PI) / 180;
+  const tanHalfH = Math.tan(rad(HFOV_DEG / 2));
+  const x = 0.5 + Math.tan(rad(deltaBearingDeg)) / (2 * tanHalfH);
+  const y = 0.5 - Math.tan(rad(altitudeDeg)) / Math.cos(rad(deltaBearingDeg)) / (2 * TAN_HALF_V);
+  return { xPx: x * WIDTH_PX, yPx: y * HEIGHT_PX };
+}
+
+function peak(overrides: Partial<VisiblePeak> & Pick<VisiblePeak, 'id' | 'name'>): VisiblePeak {
+  return {
+    lat: 46,
+    lon: 7.5,
+    elevationM: 4478,
+    elevationSource: 'osm',
+    bearingDeg: 105,
+    altitudeDeg: 3,
+    distanceKm: 12.3,
+    horizonAltitudeDeg: 1,
+    clearanceDeg: 2,
+    ...overrides,
+  };
+}
+
+/** A skyline sitting at a constant altitude everywhere, sampled every 45°. */
+function flatHorizon(altitudeDeg: number): HorizonProfile {
+  const points: HorizonPoint[] = [];
+  for (let bearingDeg = 0; bearingDeg < 360; bearingDeg += 45) {
+    points.push({ bearingDeg, altitudeDeg, distanceKm: 20, elevationM: 2000 });
+  }
+  return points;
+}
+
+function scene(overrides: Partial<OverlayScene> = {}): OverlayScene {
+  return {
+    widthPx: WIDTH_PX,
+    heightPx: HEIGHT_PX,
+    pose: POSE,
+    horizon: flatHorizon(0),
+    peaks: [],
+    ...overrides,
+  };
+}
+
+/** Options pinned so a default tweak cannot silently change a layout assertion. */
+const PINNED: OverlayOptions = {
+  nameFontPx: 20,
+  detailFontPx: 14,
+  labelPaddingPx: 4,
+  labelGapPx: 3,
+  basePoleLengthPx: 60,
+  frameMarginPx: 10,
+  maxStackLevels: 6,
+  summitDotRadiusPx: 5,
+};
+
+function markerNamed(markers: readonly PeakMarker[], name: string): PeakMarker {
+  const found = markers.find((marker) => marker.peak.name === name);
+  if (found === undefined) throw new Error(`no marker for ${name}`);
+  return found;
+}
+
+describe('layoutOverlay — flag geometry', () => {
+  it('plants the flag at the hand-computed pixel position', () => {
+    const layout = layoutOverlay(
+      scene({ peaks: [peak({ id: 'node/1', name: 'Matterhorn' })] }),
+      PINNED,
+    );
+    const marker = markerNamed(layout.markers, 'Matterhorn');
+
+    // The literals are the derivation at the top of this file, carried out to
+    // five decimals. P4.1's stated tolerance is ±0.5 % of the position; the
+    // agreement is in fact better than a hundredth of a pixel.
+    expect(marker.summitPx.xPx).toBeCloseTo(1171.28129, 4);
+    expect(marker.summitPx.yPx).toBeCloseTo(524.81995, 4);
+
+    // …and the same numbers again from the closed form, so a transcription
+    // slip in the literals above cannot pass unnoticed.
+    const expected = expectedPx(15, 3);
+    expect(marker.summitPx.xPx).toBeCloseTo(expected.xPx, 9);
+    expect(marker.summitPx.yPx).toBeCloseTo(expected.yPx, 9);
+
+    // The ±0.5 % gate from PLAN.md, stated explicitly.
+    expect(Math.abs(marker.summitPx.xPx - 1171.28129)).toBeLessThan(0.005 * 1171.28129);
+    expect(Math.abs(marker.summitPx.yPx - 524.81995)).toBeLessThan(0.005 * 524.81995);
+  });
+
+  it('puts a peak dead ahead in the exact centre of the frame', () => {
+    const layout = layoutOverlay(
+      scene({
+        peaks: [peak({ id: 'node/1', name: 'Ahead', bearingDeg: 90, altitudeDeg: 0 })],
+      }),
+      PINNED,
+    );
+    const marker = markerNamed(layout.markers, 'Ahead');
+    expect(marker.summitPx.xPx).toBeCloseTo(WIDTH_PX / 2, 9);
+    expect(marker.summitPx.yPx).toBeCloseTo(HEIGHT_PX / 2, 9);
+  });
+
+  it('puts a peak at exactly half the hFOV on the frame edge', () => {
+    // Δ = 30° = hFOV/2 → x = 0.5 + tan30/(2·tan30) = 1.0 → 1600 px, the very
+    // last column. `inFrame` includes the boundary, so it is still drawn.
+    const layout = layoutOverlay(
+      scene({
+        peaks: [peak({ id: 'node/1', name: 'Edge', bearingDeg: 120, altitudeDeg: 0 })],
+      }),
+      PINNED,
+    );
+    const marker = markerNamed(layout.markers, 'Edge');
+    expect(marker.summitPx.xPx).toBeCloseTo(WIDTH_PX, 9);
+  });
+
+  it('raises the pole by exactly basePoleLengthPx for an unstacked marker', () => {
+    const layout = layoutOverlay(
+      scene({ peaks: [peak({ id: 'node/1', name: 'Matterhorn' })] }),
+      PINNED,
+    );
+    const marker = markerNamed(layout.markers, 'Matterhorn');
+    expect(marker.direction).toBe('up');
+    expect(marker.stackLevel).toBe(0);
+    expect(marker.summitPx.yPx - marker.poleTipPx.yPx).toBeCloseTo(60, 9);
+    expect(marker.poleTipPx.xPx).toBeCloseTo(marker.summitPx.xPx, 9);
+  });
+});
+
+describe('layoutOverlay — peaks outside the frame', () => {
+  it('drops a peak beyond the horizontal field of view', () => {
+    // Δ = 40° → x = 0.5 + tan40/(2·tan30) = 1.2267, off the right edge.
+    const off = peak({ id: 'node/2', name: 'Offscreen', bearingDeg: 130 });
+    const layout = layoutOverlay(scene({ peaks: [off] }), PINNED);
+    expect(layout.markers).toHaveLength(0);
+    expect(layout.offFramePeaks.map((p) => p.name)).toEqual(['Offscreen']);
+  });
+
+  it('drops a peak behind the camera rather than mirroring it into frame', () => {
+    // Δ = 180°: the perspective divide by a negative depth would land this at
+    // x = 0.5 again — dead centre — if the sign were not checked.
+    const behind = peak({ id: 'node/3', name: 'Behind', bearingDeg: 270, altitudeDeg: 0 });
+    const layout = layoutOverlay(scene({ peaks: [behind] }), PINNED);
+    expect(layout.markers).toHaveLength(0);
+    expect(layout.offFramePeaks.map((p) => p.name)).toEqual(['Behind']);
+  });
+
+  it('drops a peak above the top of the frame', () => {
+    // tan(vFOV/2) = 0.4330127 → the top edge is at α = atan(0.4330127) =
+    // 23.4132°. 25° is above it.
+    const above = peak({ id: 'node/4', name: 'Zenith', bearingDeg: 90, altitudeDeg: 25 });
+    const layout = layoutOverlay(scene({ peaks: [above] }), PINNED);
+    expect(layout.markers).toHaveLength(0);
+    expect(layout.offFramePeaks.map((p) => p.name)).toEqual(['Zenith']);
+  });
+
+  it('keeps an in-frame peak and drops its off-frame neighbour in one pass', () => {
+    const layout = layoutOverlay(
+      scene({
+        peaks: [
+          peak({ id: 'node/1', name: 'Keep' }),
+          peak({ id: 'node/2', name: 'Drop', bearingDeg: 130 }),
+        ],
+      }),
+      PINNED,
+    );
+    expect(layout.markers.map((m) => m.peak.name)).toEqual(['Keep']);
+    expect(layout.offFramePeaks.map((p) => p.name)).toEqual(['Drop']);
+  });
+});
+
+describe('layoutOverlay — label collision avoidance', () => {
+  const blockHeightPx = labelBlockHeightPx(20, 14, 4);
+
+  it('reserves a box one label high', () => {
+    // 2·4 padding + 1.15·(20 + 14) = 8 + 39.1 = 47.1 px.
+    expect(blockHeightPx).toBeCloseTo(47.1, 9);
+  });
+
+  it('leaves two well-separated peaks both unstacked', () => {
+    const layout = layoutOverlay(
+      scene({
+        peaks: [
+          peak({ id: 'node/1', name: 'Left', bearingDeg: 75 }),
+          peak({ id: 'node/2', name: 'Right', bearingDeg: 105 }),
+        ],
+      }),
+      PINNED,
+    );
+    expect(layout.markers.map((m) => m.stackLevel)).toEqual([0, 0]);
+    expect(
+      rectsOverlap(
+        markerNamed(layout.markers, 'Left').labelBoxPx,
+        markerNamed(layout.markers, 'Right').labelBoxPx,
+      ),
+    ).toBe(false);
+  });
+
+  it('stacks a cluster of coincident peaks, skipping levels that are not free', () => {
+    // Four peaks within 0.3° of bearing and 0.3° of altitude — the tight
+    // clustering a real skyline produces. Their labels are ~122 px wide and
+    // their summits only ~2.6 px apart in x, so every box overlaps every other
+    // horizontally: the whole problem is vertical.
+    //
+    // Summit y from the closed form at the top of this file:
+    //     Alpha  (Δ15.0°, α3.0°) → 524.820
+    //     Bravo  (Δ15.1°, α3.2°) → 519.760
+    //     Charlie(Δ15.2°, α2.9°) → 527.262
+    //     Delta  (Δ15.3°, α3.1°) → 522.199
+    //
+    // A candidate box at level L spans, top to bottom:
+    //     top = summitY − 60 (pole) − 51·L (stack) − 3 (gap) − 47.1 (height)
+    //
+    //     Alpha   L0 → 414.72…461.82   free            → level 0
+    //     Bravo   L0 → 409.66…456.76   hits Alpha
+    //             L1 → 358.66…405.76   free            → level 1
+    //     Charlie L0 → 417.16…464.26   hits Alpha
+    //             L1 → 366.16…413.26   hits Bravo
+    //             L2 → 315.16…362.26   hits Bravo by 3.6 px
+    //             L3 → 264.16…311.26   free            → level 3
+    //     Delta   L3 → 259.10…306.20   hits Charlie
+    //             L4 → 208.10…255.20   free            → level 4
+    //
+    // Level 2 is *skipped*, and that is the point of this test: because each
+    // pole is measured from its own summit and summits differ in height, a
+    // step of one label height clears a same-height neighbour but not always a
+    // lower one. The algorithm tests the actual boxes rather than incrementing
+    // a counter, so it finds that out instead of stacking labels on top of
+    // each other.
+    const layout = layoutOverlay(
+      scene({
+        peaks: [
+          peak({ id: 'node/1', name: 'Alpha', bearingDeg: 105.0, altitudeDeg: 3.0 }),
+          peak({ id: 'node/2', name: 'Bravo', bearingDeg: 105.1, altitudeDeg: 3.2 }),
+          peak({ id: 'node/3', name: 'Charlie', bearingDeg: 105.2, altitudeDeg: 2.9 }),
+          peak({ id: 'node/4', name: 'Delta', bearingDeg: 105.3, altitudeDeg: 3.1 }),
+        ],
+      }),
+      PINNED,
+    );
+
+    expect(layout.markers).toHaveLength(4);
+    // Left-to-right placement order, each finding the next free level.
+    expect(layout.markers.map((m) => m.peak.name)).toEqual([
+      'Alpha',
+      'Bravo',
+      'Charlie',
+      'Delta',
+    ]);
+    expect(layout.markers.map((m) => m.stackLevel)).toEqual([0, 1, 3, 4]);
+    expect(layout.markers.every((m) => m.overlapped)).toBe(false);
+    expect(layout.markers.map((m) => Math.round(m.labelBoxPx.yPx * 100) / 100)).toEqual([
+      414.72, 358.66, 264.16, 208.1,
+    ]);
+
+    // The behaviour that matters, whatever the levels turn out to be: no two
+    // reserved boxes intersect.
+    for (let i = 0; i < layout.markers.length; i += 1) {
+      for (let j = i + 1; j < layout.markers.length; j += 1) {
+        const a = layout.markers[i];
+        const b = layout.markers[j];
+        if (a === undefined || b === undefined) throw new Error('missing marker');
+        expect(rectsOverlap(a.labelBoxPx, b.labelBoxPx)).toBe(false);
+      }
+    }
+  });
+
+  it('lengthens the pole by exactly one stackStepPx per level', () => {
+    const options = { ...PINNED, stackStepPx: 55 };
+    const layout = layoutOverlay(
+      scene({
+        peaks: [
+          peak({ id: 'node/1', name: 'Alpha', bearingDeg: 105.0 }),
+          peak({ id: 'node/2', name: 'Bravo', bearingDeg: 105.1 }),
+        ],
+      }),
+      options,
+    );
+    const alpha = markerNamed(layout.markers, 'Alpha');
+    const bravo = markerNamed(layout.markers, 'Bravo');
+    expect(alpha.stackLevel).toBe(0);
+    expect(bravo.stackLevel).toBe(1);
+    expect(alpha.summitPx.yPx - alpha.poleTipPx.yPx).toBeCloseTo(60, 9);
+    expect(bravo.summitPx.yPx - bravo.poleTipPx.yPx).toBeCloseTo(60 + 55, 9);
+  });
+
+  it('is independent of the order the peaks arrive in', () => {
+    const peaks = [
+      peak({ id: 'node/1', name: 'Alpha', bearingDeg: 105.0 }),
+      peak({ id: 'node/2', name: 'Bravo', bearingDeg: 105.1 }),
+      peak({ id: 'node/3', name: 'Charlie', bearingDeg: 105.2 }),
+    ];
+    const forward = layoutOverlay(scene({ peaks }), PINNED);
+    const reversed = layoutOverlay(scene({ peaks: [...peaks].reverse() }), PINNED);
+    expect(reversed.markers).toEqual(forward.markers);
+  });
+
+  it('breaks an exact x tie by peak id, not by input order', () => {
+    // Identical bearings: the tie-break is the only thing deciding who gets
+    // level 0, and it must not be "whoever the provider listed first".
+    const layout = layoutOverlay(
+      scene({
+        peaks: [
+          peak({ id: 'node/9', name: 'Nine', altitudeDeg: 3.0 }),
+          peak({ id: 'node/2', name: 'Two', altitudeDeg: 3.05 }),
+        ],
+      }),
+      PINNED,
+    );
+    expect(markerNamed(layout.markers, 'Two').stackLevel).toBe(0);
+    expect(markerNamed(layout.markers, 'Nine').stackLevel).toBe(1);
+  });
+
+  it('hangs a blocked label below its summit when nothing above is free', () => {
+    // Only one level up is allowed, and Alpha has taken it, so Bravo's search
+    // moves on to the downward candidates rather than giving up: its label
+    // ends up under its own summit, well clear of Alpha's box above.
+    const layout = layoutOverlay(
+      scene({
+        peaks: [
+          peak({ id: 'node/1', name: 'Alpha', bearingDeg: 105.0 }),
+          peak({ id: 'node/2', name: 'Bravo', bearingDeg: 105.05 }),
+        ],
+      }),
+      { ...PINNED, maxStackLevels: 1 },
+    );
+    const alpha = markerNamed(layout.markers, 'Alpha');
+    const bravo = markerNamed(layout.markers, 'Bravo');
+    expect(alpha.direction).toBe('up');
+    expect(bravo.direction).toBe('down');
+    expect(bravo.overlapped).toBe(false);
+    expect(bravo.poleTipPx.yPx - bravo.summitPx.yPx).toBeCloseTo(60, 9);
+    expect(rectsOverlap(alpha.labelBoxPx, bravo.labelBoxPx)).toBe(false);
+  });
+
+  it('flags overlap rather than dropping a peak when nothing is free', () => {
+    // Three coincident peaks with one level in each direction: the third has
+    // nowhere left to go. It is still drawn — losing a summit to keep the
+    // overlay tidy would be a lie about what is in the photograph — and the
+    // crowding is reported instead.
+    const layout = layoutOverlay(
+      scene({
+        peaks: [
+          peak({ id: 'node/1', name: 'Alpha', bearingDeg: 105.0 }),
+          peak({ id: 'node/2', name: 'Bravo', bearingDeg: 105.05 }),
+          peak({ id: 'node/3', name: 'Charlie', bearingDeg: 105.1 }),
+        ],
+      }),
+      { ...PINNED, maxStackLevels: 1 },
+    );
+    expect(layout.markers).toHaveLength(3);
+    expect(markerNamed(layout.markers, 'Alpha').overlapped).toBe(false);
+    expect(markerNamed(layout.markers, 'Bravo').overlapped).toBe(false);
+    expect(markerNamed(layout.markers, 'Charlie').overlapped).toBe(true);
+  });
+
+  it('hangs the label below a summit that sits too near the top edge', () => {
+    // α = 22.7° → y = 0.5 − tan22.7°/0.8660254 = 0.016978 → 20.37 px. A
+    // level-0 label above it would start at 20.37 − 60 − 3 − 47.1 = −89.7 px,
+    // outside the frame, so the placement flips downward.
+    const layout = layoutOverlay(
+      scene({
+        peaks: [peak({ id: 'node/1', name: 'HighUp', bearingDeg: 90, altitudeDeg: 22.7 })],
+      }),
+      PINNED,
+    );
+    const marker = markerNamed(layout.markers, 'HighUp');
+    expect(marker.summitPx.yPx).toBeCloseTo(20.374, 3);
+    expect(marker.direction).toBe('down');
+    expect(marker.stackLevel).toBe(0);
+    expect(marker.poleTipPx.yPx - marker.summitPx.yPx).toBeCloseTo(60, 9);
+    expect(marker.labelBoxPx.yPx).toBeGreaterThan(marker.summitPx.yPx);
+  });
+
+  it('keeps every label box inside the frame margins', () => {
+    const layout = layoutOverlay(
+      scene({
+        peaks: [
+          // Hard against the left and right edges of the frame.
+          peak({ id: 'node/1', name: 'Westmost', bearingDeg: 60.2, altitudeDeg: 0 }),
+          peak({ id: 'node/2', name: 'Eastmost', bearingDeg: 119.8, altitudeDeg: 0 }),
+        ],
+      }),
+      PINNED,
+    );
+    for (const marker of layout.markers) {
+      expect(marker.labelBoxPx.xPx).toBeGreaterThanOrEqual(10);
+      expect(marker.labelBoxPx.xPx + marker.labelBoxPx.widthPx).toBeLessThanOrEqual(
+        WIDTH_PX - 10 + 1e-9,
+      );
+      expect(marker.labelBoxPx.yPx).toBeGreaterThanOrEqual(10);
+    }
+  });
+
+  it('centres the label on its pole when there is room on both sides', () => {
+    const layout = layoutOverlay(
+      scene({ peaks: [peak({ id: 'node/1', name: 'Matterhorn' })] }),
+      PINNED,
+    );
+    const marker = markerNamed(layout.markers, 'Matterhorn');
+    expect(marker.labelCentreXPx).toBeCloseTo(marker.summitPx.xPx, 9);
+  });
+});
+
+describe('layoutOverlay — horizon polyline', () => {
+  it('draws a flat 0° skyline as a level line across the middle of the frame', () => {
+    // α = 0 makes the up-component of every sample exactly zero, so y = 0.5
+    // for every bearing regardless of Δ: the line is exactly horizontal at
+    // 600 px. Nothing about that depends on the sampling density.
+    const layout = layoutOverlay(scene({ horizon: flatHorizon(0) }), PINNED);
+    expect(layout.horizonPolylinesPx).toHaveLength(1);
+    const polyline = layout.horizonPolylinesPx[0];
+    if (polyline === undefined) throw new Error('missing polyline');
+    for (const point of polyline) {
+      expect(point.yPx).toBeCloseTo(600, 9);
+    }
+  });
+
+  it('clips the skyline exactly to the frame edges', () => {
+    const layout = layoutOverlay(scene({ horizon: flatHorizon(0) }), PINNED);
+    const polyline = layout.horizonPolylinesPx[0];
+    if (polyline === undefined) throw new Error('missing polyline');
+    const first = polyline[0];
+    const last = polyline[polyline.length - 1];
+    if (first === undefined || last === undefined) throw new Error('empty polyline');
+    expect(first.xPx).toBeCloseTo(0, 9);
+    expect(last.xPx).toBeCloseTo(WIDTH_PX, 9);
+    // Monotonic left to right, so nothing doubles back across the frame.
+    for (let i = 1; i < polyline.length; i += 1) {
+      const previous = polyline[i - 1];
+      const current = polyline[i];
+      if (previous === undefined || current === undefined) throw new Error('gap');
+      expect(current.xPx).toBeGreaterThan(previous.xPx);
+    }
+  });
+
+  it('bows a constant non-zero skyline upward toward the frame edges', () => {
+    // A circle of constant altitude is not a straight line under gnomonic
+    // projection: up/depth = tanα/cosΔ grows with |Δ|, so y falls (the line
+    // rises) toward the edges. Hand-computed with α = 2°:
+    //
+    //   Δ = 0°:  y = 0.5 − (tan2°/1)      / 0.8660254 = 0.4596770 → 551.613 px
+    //   Δ = 30°: y = 0.5 − (tan2°/cos30°) / 0.8660254 = 0.4534390 → 544.127 px
+    //
+    // and cos30° happens to equal 2·tan(vFOV/2) here, which is a coincidence of
+    // this fixture's numbers, not a relationship.
+    const layout = layoutOverlay(scene({ horizon: flatHorizon(2) }), PINNED);
+    const polyline = layout.horizonPolylinesPx[0];
+    if (polyline === undefined) throw new Error('missing polyline');
+
+    expect(expectedPx(0, 2).yPx).toBeCloseTo(551.6124, 3);
+    expect(expectedPx(30, 2).yPx).toBeCloseTo(544.1268, 3);
+
+    // The clipped ends sit exactly on the frame edges, so they are exactly the
+    // Δ = ±30° samples.
+    const first = polyline[0];
+    const last = polyline[polyline.length - 1];
+    if (first === undefined || last === undefined) throw new Error('empty polyline');
+    expect(first.xPx).toBeCloseTo(0, 9);
+    expect(last.xPx).toBeCloseTo(WIDTH_PX, 9);
+    expect(first.yPx).toBeCloseTo(544.1268, 3);
+    expect(last.yPx).toBeCloseTo(544.1268, 3);
+
+    // The lowest point of the drawn line (largest y) is the Δ = 0 sample. The
+    // curve is flat there, so the nearest sample is within a thousandth of a
+    // pixel of the exact value.
+    const lowestYPx = polyline.reduce((max, point) => Math.max(max, point.yPx), -Infinity);
+    expect(lowestYPx).toBeCloseTo(551.6124, 2);
+  });
+
+  it('draws nothing when the profile is empty', () => {
+    expect(layoutOverlay(scene({ horizon: [] }), PINNED).horizonPolylinesPx).toEqual([]);
+  });
+
+  it('draws nothing when the horizon is switched off', () => {
+    const layout = layoutOverlay(scene(), { ...PINNED, showHorizon: false });
+    expect(layout.horizonPolylinesPx).toEqual([]);
+  });
+
+  it('honours the sample count', () => {
+    const sparse = layoutOverlay(scene(), { ...PINNED, horizonSampleCount: 8 });
+    const dense = layoutOverlay(scene(), { ...PINNED, horizonSampleCount: 400 });
+    const sparseLine = sparse.horizonPolylinesPx[0];
+    const denseLine = dense.horizonPolylinesPx[0];
+    if (sparseLine === undefined || denseLine === undefined) throw new Error('no polyline');
+    expect(denseLine.length).toBeGreaterThan(sparseLine.length);
+  });
+});
+
+describe('resolveOverlayOptions', () => {
+  it('scales the defaults with the image height', () => {
+    const small = resolveOverlayOptions(scene({ widthPx: 800, heightPx: 600 }));
+    const large = resolveOverlayOptions(scene({ widthPx: 3200, heightPx: 2400 }));
+    // 0.022 × height, rounded: 13 px at 600, 53 px at 2400.
+    expect(small.nameFontPx).toBe(13);
+    expect(large.nameFontPx).toBe(53);
+    // 0.06 × height: 36 px at 600, 144 px at 2400.
+    expect(small.basePoleLengthPx).toBe(36);
+    expect(large.basePoleLengthPx).toBe(144);
+  });
+
+  it('never drops the name font below the legibility floor', () => {
+    expect(resolveOverlayOptions(scene({ widthPx: 160, heightPx: 120 })).nameFontPx).toBe(12);
+  });
+
+  it('defaults the stack step to a whole label plus padding', () => {
+    const resolved = resolveOverlayOptions(scene(), {
+      nameFontPx: 20,
+      detailFontPx: 14,
+      labelPaddingPx: 4,
+    });
+    // 47.1 + 4 = 51.1 → 51. A step at least one label high is what guarantees
+    // that going up a level clears a same-column neighbour.
+    expect(resolved.stackStepPx).toBe(51);
+    expect(resolved.stackStepPx).toBeGreaterThanOrEqual(labelBlockHeightPx(20, 14, 4));
+  });
+
+  it('leaves explicit options untouched', () => {
+    const resolved = resolveOverlayOptions(scene(), PINNED);
+    expect(resolved.nameFontPx).toBe(20);
+    expect(resolved.basePoleLengthPx).toBe(60);
+    expect(resolved.frameMarginPx).toBe(10);
+  });
+});
+
+describe('formatPeakDetail', () => {
+  it('rounds the elevation to a whole metre and the distance to 100 m', () => {
+    expect(formatPeakDetail(peak({ id: 'n', name: 'x', elevationM: 4477.6, distanceKm: 12.34 })))
+      .toBe('4478 m · 12.3 km');
+  });
+
+  it('keeps one decimal even when the distance is whole', () => {
+    expect(formatPeakDetail(peak({ id: 'n', name: 'x', elevationM: 1000, distanceKm: 8 }))).toBe(
+      '1000 m · 8.0 km',
+    );
+  });
+});

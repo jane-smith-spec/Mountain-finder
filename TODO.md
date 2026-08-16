@@ -75,9 +75,22 @@ Live checklist. Check items only after their self-check has been run and passed 
 - [ ] Re-record `fixtures/api/**` from live OpenTopoData + Overpass once egress permits
 - [ ] P6.2 real-viewpoint research needs reachable reference sources (Wikipedia also 403)
 
-## Phase 4 — Renderer (group D)
-- [ ] P4.1 SVG overlay builder (horizon line, flags, labels, collision avoidance)
-- [ ] P4.2 PNG compositor + export
+## Phase 4 — Renderer (group D) ✅ 97 tests + 2 e2e
+- [x] P4.1 SVG overlay builder — pure `scene → string`. Horizon polyline sampled in bearing
+      across 1.5× hFOV and Liang–Barsky-clipped to the frame; flag pole + summit dot + two-line
+      label per visible peak; off-frame and behind-camera peaks reported, never drawn.
+      Collision avoidance: left-to-right placement (ties by peak id, never input order), first
+      free candidate from increasing pole lengths — up first, then down — `overlapped` flagged
+      rather than dropping a summit. Levels can be *skipped*: poles are measured from their own
+      summits, so a step of one label height clears a same-height neighbour but not always a
+      lower one, and the search tests the real boxes. Geometric self-check met: the flag lands
+      at 1600·(√3−1) = 1171.281 px / 524.820 px, hand-derived from the projection model, to
+      better than 0.01 px against a ±0.5 % gate.
+- [x] P4.2 PNG compositor — photo + overlay → PNG in Chromium via Playwright. **Zero new
+      dependencies**: no `node-canvas`, so the export raster comes from the same engine the app
+      renders in. Asserts the PNG signature, IHDR dimensions and size read from the bytes, and
+      probes the raster — the pixel at the hand-computed summit is marker-coloured, control
+      pixels are not. Artifacts: `out/render-composite.png`, `out/render-overlay.svg`.
 
 ## Phase 5 — Web app (group E)
 - [ ] P5.1 App shell (drop-zone, autofill, overrides, trim sliders, test mode)

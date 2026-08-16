@@ -28,16 +28,23 @@
  *    against sky and the space above them is usually empty; downward exists so
  *    that a peak near the top edge of the frame, where there is no room above,
  *    still gets a legible label instead of one jammed against the border.
- * 4. `stackStepPx` defaults to a full label height plus padding, so **stepping
- *    up a level always clears a same-column neighbour** — the stacking rule
- *    cannot fail to separate two labels that share an x.
+ * 4. `stackStepPx` defaults to a full label height plus padding, so a level
+ *    bump clears a neighbour **whose summit sits at the same height**. It does
+ *    not clear every neighbour unconditionally: each pole is measured from its
+ *    own summit, so where summits differ in y a bump can still land a label
+ *    partly across a lower peak's. That is why step 3 tests the actual boxes
+ *    instead of trusting the arithmetic — the search simply moves to the next
+ *    level, and a level can be skipped. What is guaranteed is the *outcome*
+ *    (disjoint boxes), never a particular level index.
  * 5. If nothing is free, the marker is placed at its first in-frame candidate
  *    and flagged `overlapped`. The overlay never drops a peak to keep itself
- *    tidy; it reports the crowding instead.
+ *    tidy — losing a summit would be a lie about what is in the photograph —
+ *    it reports the crowding instead.
  *
  * The consequence is a visible signature that tests assert on directly: a
- * cluster of near-collinear peaks comes out as a staircase of pole lengths,
- * and two peaks far apart in x both stay at level 0.
+ * cluster of near-collinear peaks comes out as a staircase of pole lengths
+ * (with the occasional skipped rung), and two peaks far apart in x both stay
+ * at level 0.
  */
 
 import { interpolateHorizonAltitudeDeg } from '../core/horizon';

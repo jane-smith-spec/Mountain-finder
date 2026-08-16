@@ -1,0 +1,49 @@
+{
+  "name": "gornergrat-window",
+  "data": "gornergrat-window.i16be",
+  "format": "int16-be-row-major-north-first",
+  "description": "Terrain for the \"gornergrat\" ground-truth acceptance case: a 361x1009 rectangle of real SRTM1 data cut byte-for-byte out of N45E007. Committed so the acceptance suite runs offline without data/tiles/, which is gitignored.",
+  "coverageNote": "Covers the observer and all three must-see summits (Matterhorn 9.6 km, Dufourspitze 8.4 km, Breithorn 5.4 km) with their intervening terrain. Rays running north leave the window after ~1.9 km, at the N45E007 tile edge.",
+  "sweep": {
+    "bearingStepDeg": 0.5,
+    "rangeStepM": 90,
+    "maxRangeKm": 10
+  },
+  "source": {
+    "tile": "N45E007",
+    "url": "https://s3.amazonaws.com/elevation-tiles-prod/skadi/N45/N45E007.hgt.gz",
+    "dataset": "SRTM1 (1 arc-second) via the AWS elevation-tiles-prod \"skadi\" mirror",
+    "sourceGridSize": 3601,
+    "extractedFromRow": 0,
+    "extractedFromCol": 2232,
+    "extractedOn": "2026-08-16",
+    "license": "SRTM is public domain (NASA/USGS); the AWS mirror is a public dataset.",
+    "regenerateWith": "npm run fixtures:case-tiles"
+  },
+  "geometry": {
+    "northLat": 46,
+    "westLon": 7.62,
+    "rows": 361,
+    "cols": 1009,
+    "latStepDeg": 0.0002777777777777778,
+    "lonStepDeg": 0.0002777777777777778
+  },
+  "bounds": {
+    "north": 46,
+    "south": 45.9,
+    "west": 7.62,
+    "east": 7.9
+  },
+  "statistics": {
+    "voidSamples": 0,
+    "minElevationM": 1829,
+    "maxElevationM": 4543,
+    "maxAt": {
+      "row": 208,
+      "col": 901,
+      "lat": 45.94222222222222,
+      "lon": 7.870277777777778
+    }
+  },
+  "accuracyCaveat": "Terrain horizon only. SRTM under-reads AND displaces sharp summits (Matterhorn 4230 m here against a surveyed 4478 m, ~320 m out of position), so summit heights come from the peak database in fixtures/peaks/, never from these bytes."
+}

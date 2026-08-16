@@ -16,7 +16,8 @@
     "demo": "tsx scripts/demo.ts",
     "record:fixtures": "tsx scripts/record-fixtures.ts",
     "fetch:tiles": "tsx scripts/fetch-tiles.ts",
-    "fixtures:tiles": "tsx scripts/make-tile-fixtures.ts"
+    "fixtures:tiles": "tsx scripts/make-tile-fixtures.ts",
+    "fixtures:case-tiles": "tsx scripts/make-case-tile-fixtures.ts"
   },
   "dependencies": {
     "exifr": "^7.1.3",

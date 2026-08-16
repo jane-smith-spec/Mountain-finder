@@ -1,0 +1,33 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildOverlaySvg — snapshot > matches the recorded document for a three-peak scene 1`] = `
+"<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1200" viewBox="0 0 1600 1200">
+<g class="mf-halo" fill="none" stroke="#000000" stroke-opacity="0.6" stroke-linecap="round" stroke-linejoin="round">
+<polyline points="0,558.1 226.05,560.73 428.72,562.44 617.58,563.4 800,563.72 982.42,563.4 1171.28,562.44 1373.95,560.73 1600,558.1" stroke-width="8.16"/>
+<line x1="921.23" y1="541.7" x2="921.23" y2="481.7" stroke-width="7.8"/>
+<line x1="1171.28" y1="524.82" x2="1171.28" y2="464.82" stroke-width="7.8"/>
+<line x1="1181.67" y1="532.22" x2="1181.67" y2="370.22" stroke-width="7.8"/>
+</g>
+<g class="mf-horizon" fill="none" stroke="#ffd166" stroke-width="2.16" stroke-linecap="round" stroke-linejoin="round">
+<polyline points="0,558.1 226.05,560.73 428.72,562.44 617.58,563.4 800,563.72 982.42,563.4 1171.28,562.44 1373.95,560.73 1600,558.1"/>
+</g>
+<g class="mf-poles" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round">
+<line x1="921.23" y1="541.7" x2="921.23" y2="481.7"/>
+<line x1="1171.28" y1="524.82" x2="1171.28" y2="464.82"/>
+<line x1="1181.67" y1="532.22" x2="1181.67" y2="370.22"/>
+</g>
+<g class="mf-summits" fill="#ffd166" stroke="#1b1b1b" stroke-width="1.44">
+<circle cx="921.23" cy="541.7" r="5"/>
+<circle cx="1171.28" cy="524.82" r="5"/>
+<circle cx="1181.67" cy="532.22" r="5"/>
+</g>
+<g class="mf-labels" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-weight="600" text-anchor="middle">
+<text x="921.23" y="453.6" font-size="20" fill="#ffffff" stroke="#000000" stroke-opacity="0.8" stroke-width="3.6" stroke-linejoin="round" paint-order="stroke">Dent d&apos;Hérens</text>
+<text x="921.23" y="471.2" font-size="14" fill="#ffe3a3" stroke="#000000" stroke-opacity="0.8" stroke-width="2.52" stroke-linejoin="round" paint-order="stroke">4478 m · 12.3 km</text>
+<text x="1171.28" y="436.72" font-size="20" fill="#ffffff" stroke="#000000" stroke-opacity="0.8" stroke-width="3.6" stroke-linejoin="round" paint-order="stroke">Matterhorn</text>
+<text x="1171.28" y="454.32" font-size="14" fill="#ffe3a3" stroke="#000000" stroke-opacity="0.8" stroke-width="2.52" stroke-linejoin="round" paint-order="stroke">4478 m · 12.3 km</text>
+<text x="1181.67" y="342.12" font-size="20" fill="#ffffff" stroke="#000000" stroke-opacity="0.8" stroke-width="3.6" stroke-linejoin="round" paint-order="stroke">Pollux</text>
+<text x="1181.67" y="359.72" font-size="14" fill="#ffe3a3" stroke="#000000" stroke-opacity="0.8" stroke-width="2.52" stroke-linejoin="round" paint-order="stroke">4478 m · 12.3 km</text>
+</g>
+</svg>"
+`;
