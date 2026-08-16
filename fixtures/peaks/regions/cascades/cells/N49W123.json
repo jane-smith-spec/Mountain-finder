@@ -1,0 +1,170 @@
+{
+  "cell": "N49W123",
+  "peaks": [
+    {
+      "id": "overture/04e0b381-05d7-36ab-86cf-d6b09abb401d",
+      "name": "Taggart Peak",
+      "lat": 49.10556411743164,
+      "lon": -122.14195251464844,
+      "elevationM": 796,
+      "positionSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceKind": "osm",
+      "usedBy": []
+    },
+    {
+      "id": "overture/05f1afc7-c071-3e2e-be9b-23072d97e5be",
+      "name": "Chillwack Mountain",
+      "lat": 49.151432037353516,
+      "lon": -122.02576446533203,
+      "elevationM": 363,
+      "positionSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceKind": "osm",
+      "usedBy": []
+    },
+    {
+      "id": "overture/18525546-a879-3529-9cc3-caefd1a0ba22",
+      "name": "Sumas Mountain",
+      "lat": 49.12062072753906,
+      "lon": -122.12751007080078,
+      "elevationM": 910,
+      "positionSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceKind": "osm",
+      "usedBy": []
+    },
+    {
+      "id": "overture/2f3ee6f2-1b84-3979-969b-27e257076d54",
+      "name": "Dewdney Peak",
+      "lat": 49.18917465209961,
+      "lon": -122.19806671142578,
+      "elevationM": 930,
+      "positionSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceKind": "osm",
+      "usedBy": []
+    },
+    {
+      "id": "overture/38a8f3a3-5be1-3c97-9bb1-5cf29ffdd32f",
+      "name": "Pilgrim's Knob",
+      "lat": 49.093505859375,
+      "lon": -122.23574829101562,
+      "elevationM": 305,
+      "positionSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceKind": "osm",
+      "usedBy": []
+    },
+    {
+      "id": "overture/3caf5578-392c-3107-b176-7e3b12b13b64",
+      "name": "Silver Hill",
+      "lat": 49.16926574707031,
+      "lon": -122.3620834350586,
+      "elevationM": 358,
+      "positionSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceKind": "osm",
+      "usedBy": []
+    },
+    {
+      "id": "overture/443f5001-1616-3cbf-9911-bff928b39766",
+      "name": "Vedder Mountain",
+      "lat": 49.053497314453125,
+      "lon": -122.04412078857422,
+      "elevationM": 932,
+      "positionSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceKind": "osm",
+      "usedBy": []
+    },
+    {
+      "id": "overture/4b05751a-6a94-30bc-8d0a-464ace70794a",
+      "name": "Eagle Mountain",
+      "lat": 49.05209732055664,
+      "lon": -122.24645233154297,
+      "elevationM": 300,
+      "positionSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceKind": "osm",
+      "usedBy": []
+    },
+    {
+      "id": "overture/4ee268e7-219c-31ce-ac2c-2f315a26b8b4",
+      "name": "Heritage Mountain",
+      "lat": 49.14976119995117,
+      "lon": -122.27464294433594,
+      "elevationM": 212,
+      "positionSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceKind": "osm",
+      "usedBy": []
+    },
+    {
+      "id": "overture/71e75243-7af4-3a82-8153-8038f243f852",
+      "name": "Bear Mountain",
+      "lat": 49.19515609741211,
+      "lon": -122.29875183105469,
+      "elevationM": 543,
+      "positionSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceKind": "osm",
+      "usedBy": []
+    },
+    {
+      "id": "overture/c4da88f2-087a-3c85-811a-576056e51b72",
+      "name": "Grant Hill",
+      "lat": 49.197879791259766,
+      "lon": -122.50477600097656,
+      "elevationM": 336,
+      "positionSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceKind": "osm",
+      "usedBy": []
+    },
+    {
+      "id": "overture/df9a1cd8-9bf7-358e-9a13-ca6cdf1c47c4",
+      "name": "Poignant",
+      "lat": 49.11398696899414,
+      "lon": -122.20647430419922,
+      "elevationM": 533,
+      "positionSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceKind": "osm",
+      "usedBy": []
+    },
+    {
+      "id": "overture/e81aea42-54a9-34af-843d-7140921fe64a",
+      "name": "McKee Peak",
+      "lat": 49.06343078613281,
+      "lon": -122.21454620361328,
+      "elevationM": 468,
+      "positionSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceKind": "osm",
+      "usedBy": []
+    },
+    {
+      "id": "overture/e8561ff8-b6e9-3ba0-aec6-a15320be2d0c",
+      "name": "Intervedder Mountain",
+      "lat": 49.0092658996582,
+      "lon": -122.12097930908203,
+      "elevationM": 623,
+      "positionSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceKind": "osm",
+      "usedBy": []
+    },
+    {
+      "id": "overture/fb2449d0-a166-367e-b86c-abba2a4e750c",
+      "name": "Little Nicomen Peak",
+      "lat": 49.18998718261719,
+      "lon": -122.14728546142578,
+      "elevationM": 495,
+      "positionSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceKind": "osm",
+      "usedBy": []
+    }
+  ]
+}

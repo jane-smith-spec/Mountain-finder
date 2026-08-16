@@ -139,8 +139,13 @@
       ambiguous once real coverage is on — OSM calls the cited 4 164 m summit
       `Breithorn Occidentale / Westgipfel` and the Valais holds three other `Breithorn`s.
 
-**Deferred by decision, not forgotten:** Phase 7 CV skyline alignment (v2.1, decision D3) and
-Phase 8 live view (v3, decision D5). Neither starts before v2.0 ships.
+**Phase 7 (CV skyline alignment, decision D3) is built and proved, and is not switched on.**
+Synthetic and real-SRTM round trips recover an injected offset to 0.02° in heading; every
+failure mode refuses rather than guessing. What is missing is not code: the extractor has never
+been run on a photograph of a mountain, because this repository contains none. See the Phase 7
+section below and `src/cv/README.md`.
+
+**Deferred by decision, not forgotten:** Phase 8 live view (v3, decision D5) — after v2.1.
 
 
 Live checklist. Check items only after their self-check has been run and passed (see PLAN.md for each check's definition).
@@ -421,8 +426,42 @@ Live checklist. Check items only after their self-check has been run and passed 
 - [ ] Wave 3 review (E) — `npm run test:e2e` green
 - [ ] **v2.0 ship gate:** all global checks green, demo PNG produced and inspected
 
+## Phase 7 — CV skyline alignment (v2.1, decision D3) ✅ built and proved, NOT wired in — +78 tests + 1 e2e
+- [x] P7.1 Skyline extraction — `src/cv/skyline.ts`. Per-column ordered step fit (Otsu's
+      criterion with the classes forced contiguous) on a sky-affinity signal (luminance +
+      blueness). Every column carries **four independent confidence factors** — contrast, SNR,
+      local edge, neighbour agreement — and a column below the floor reports **no row at all**,
+      because a wrong skyline confidently reported is worse than a gap.
+- [x] P7.2 Alignment — `src/cv/align.ts`. Heading is an *exact* rigid translation in bearing
+      (proof in `src/cv/rays.ts`), so stage 1 is a true 1-D weighted NCC over heading; NCC is
+      mean-subtracted and therefore nearly blind to pitch, which is very nearly a constant
+      altitude offset. Stage 2 solves pitch on the geometric residual, stage 3 refines both
+      jointly on the exact rotation. **Not a pixel shift** — a rectilinear lens makes that
+      wrong by 3.7° at the frame edge for a 10° error.
+- [x] P7.3 Honest reporting — the failure variant of `SkylineAlignment` carries **no offsets at
+      all**, so a caller cannot read a confident zero out of a refusal. Six gates: coverage,
+      relief, score, margin, residual, search-edge.
+- [x] **Self-check (PLAN.md Phase 7): recover an injected offset within 0.5°.** Worst error over
+      six injected offsets spanning ±20°: **heading 0.022°, pitch 0.091°** through the full
+      render→extract→align round trip; **0.013° / 0.075°** over the real SRTM Gornergrat
+      horizon built from the committed window. Also passes in a real browser
+      (`tests/e2e/cv.spec.ts`, artifact `out/cv-skyline.png`).
+- [x] Failure states exercised: flat horizon, total fog, 80 % of columns lost, periodic
+      ridgeline, offset outside the search window, offset exactly at its rim, snow-capped
+      skyline. All refuse; none returns an offset.
+- [ ] **P7.4 Integration — deliberately NOT done.** Seam is `src/pipeline/cv-alignment.ts`
+      (new file, exported from nothing, imported by nothing). The plan is to pre-set the P5.1
+      trim sliders rather than replace them: an automatic correction the user cannot see or undo
+      is worse than a manual one. See `src/cv/README.md`.
+- [ ] **⚠ The extractor has never met a real photograph.** There is no photograph of a mountain
+      in this repository — `fixtures/photos/*.jpg` are uniform grey frames generated for the
+      EXIF suite, and `gornergrat-matterhorn.jpg` yields **zero readable columns** (asserted in
+      `src/cv/real-photo.test.ts`, and refusing is the correct answer for that file). The known
+      enemy is sunlit snow, which is brighter than a hazy sky: `align.test.ts` shows the
+      extractor locking onto the *snowline* and the aligner refusing. Getting real photographs
+      with documented viewpoints is the same gap PLAN.md P6.2 already names, and it blocks P7.4.
+
 ## Later
-- [ ] Phase 7 — CV silhouette alignment (v2.1)
 - [ ] Phase 8 — Live view mobile app (v3)
 
 ## Done

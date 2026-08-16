@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "description": "Named summits imported from Overture Maps for \"cascades\".  Heights are OpenStreetMap `ele` tags carried through Overture, never DEM samples.",
+  "release": "2026-06-17.0",
+  "generatedBy": "npm run fetch:peaks -- --bbox 45.0,-123.6,49.2,-120.4 --name cascades",
+  "bounds": {
+    "south": 45,
+    "west": -123.6,
+    "north": 49.2,
+    "east": -120.4
+  },
+  "sources": [
+    {
+      "id": "overture-2026-06-17.0-base-land",
+      "title": "Overture Maps Foundation, base theme, type=land, release 2026-06-17.0 — summit features (subtype=physical, class=peak|volcano), © OpenStreetMap contributors, ODbL-1.0",
+      "url": "https://overturemaps-us-west-2.s3.amazonaws.com/release/2026-06-17.0/theme=base/type=land/",
+      "retrieved": "2026-08-16",
+      "access": "fetched",
+      "note": "Position is the midpoint of Overture's float32-rounded `bbox` (sub-metre for a point feature); height is the `elevation` column, which carries the OpenStreetMap `ele` tag unchanged — verified row-by-row against the same rows' `source_tags.ele`. Heights are therefore tagged/surveyed values, NEVER DEM samples (MISSION.md: SRTM under-reads sharp summits by 250–350 m). Area imported: 45,-123.6 … 49.2,-120.4."
+    }
+  ],
+  "cells": [
+    {
+      "name": "N45W121",
+      "peaks": 29,
+      "file": "cells/N45W121.json"
+    },
+    {
+      "name": "N45W122",
+      "peaks": 216,
+      "file": "cells/N45W122.json"
+    },
+    {
+      "name": "N45W123",
+      "peaks": 150,
+      "file": "cells/N45W123.json"
+    },
+    {
+      "name": "N45W124",
+      "peaks": 62,
+      "file": "cells/N45W124.json"
+    },
+    {
+      "name": "N46W121",
+      "peaks": 26,
+      "file": "cells/N46W121.json"
+    },
+    {
+      "name": "N46W122",
+      "peaks": 319,
+      "file": "cells/N46W122.json"
+    },
+    {
+      "name": "N46W123",
+      "peaks": 135,
+      "file": "cells/N46W123.json"
+    },
+    {
+      "name": "N46W124",
+      "peaks": 50,
+      "file": "cells/N46W124.json"
+    },
+    {
+      "name": "N47W121",
+      "peaks": 157,
+      "file": "cells/N47W121.json"
+    },
+    {
+      "name": "N47W122",
+      "peaks": 408,
+      "file": "cells/N47W122.json"
+    },
+    {
+      "name": "N47W123",
+      "peaks": 117,
+      "file": "cells/N47W123.json"
+    },
+    {
+      "name": "N47W124",
+      "peaks": 159,
+      "file": "cells/N47W124.json"
+    },
+    {
+      "name": "N48W121",
+      "peaks": 244,
+      "file": "cells/N48W121.json"
+    },
+    {
+      "name": "N48W122",
+      "peaks": 294,
+      "file": "cells/N48W122.json"
+    },
+    {
+      "name": "N48W123",
+      "peaks": 95,
+      "file": "cells/N48W123.json"
+    },
+    {
+      "name": "N48W124",
+      "peaks": 131,
+      "file": "cells/N48W124.json"
+    },
+    {
+      "name": "N49W121",
+      "peaks": 26,
+      "file": "cells/N49W121.json"
+    },
+    {
+      "name": "N49W122",
+      "peaks": 84,
+      "file": "cells/N49W122.json"
+    },
+    {
+      "name": "N49W123",
+      "peaks": 15,
+      "file": "cells/N49W123.json"
+    }
+  ],
+  "peakCount": 2717
+}
