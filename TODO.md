@@ -86,6 +86,60 @@
       one. Finding 7 adds a third: `'nearest-valid'` is discontinuous at a grid line (250 m on
       it, 200 m a hair off it) because it returns a corner rather than re-normalising the valid
       weights — the documented policy, flagged to the caller, and a policy decision to change.
+- [~] **Q2b — Fix WAVE-2 review findings** (`REVIEW-FINDINGS-2.md`), in the review's own order.
+      Each fix has a test that was watched failing first, on the review's own reproduction.
+      **Finding 1 (HIGH) — D8 measured the col from the wrong crest.** `classifyOcclusion` took
+      the FIRST nearer sample that out-angled the summit; with anything taller behind it, the
+      col separating the two mountains was measured against the wrong, lower reference and read
+      0, so a summit across a 400 m col came out `self-occluded` — a greyed label planted on a
+      different mountain's face, below the skyline. The crest is now the HIGHEST-ANGLE nearer
+      sample, i.e. the one that forms the skyline and the same ground the visibility verdict
+      was taken against. The old docstring defended first-blocker selection as "a stronger test
+      over a longer span"; that is backwards, because a lower crest LOWERS the bar the
+      intervening ground must clear to count as "no col", biasing toward labelling. The review's
+      terrain now reads `colDepthM` 400 and `foreground-occluded` (unit + pipeline tests).
+      **No ground-truth verdict moved** — Cow Hill is still self-occluded with col 0, Ben Nevis
+      still foreground-occluded, its col now 216.1 m below a 232 m crest instead of 128.5 m
+      below a 144 m one. One unit fixture had to be rebuilt: the `colToleranceM` test put its
+      6 m dip BEHIND the skyline-forming sample, so under the corrected rule its scene is
+      genuinely one landform and no longer exercised the allowance.
+      **Finding 2 (HIGH) — peaks beyond the swept range got a confident `visible`.** Peak radius
+      200 km against a 30 km sweep meant every summit from 30–200 km was judged on ≤15 % of its
+      sightline with no warning. The RANGE axis now gets the refusal the bearing axis has:
+      `rangeIsMeasured` (pure, in `src/core/visibility.ts`, shared with `classifyOcclusion`'s
+      own coverage check) asks whether the ray records terrain continuously out to the peak, and
+      `annotateScene` puts a peak that fails it in `AnnotatedScene.unmeasured` with a warning
+      naming it. Keyed to terrain MEASURED, not to the configured range, so a ray truncated by
+      missing tiles is refused on the same footing as one truncated by `maxRangeKm`. The
+      defaults are unchanged and deliberately asymmetric: looking 200 km wide and refusing out
+      loud beats looking 30 km wide and never mentioning the mountain. `judgeBeyondMeasuredTerrain`
+      (default false) is how a caller with a deliberately truncated sweep declares it; the two
+      acceptance cases whose committed windows are 3–5 km against 60–292 km sightlines set it via
+      `CaseTerrainSpec.judgeBeyondWindow`, and Gornergrat and Fort William leave it off, so the
+      refusing default is gated end to end by real viewpoints.
+      **Finding 3 (MEDIUM-HIGH) — portrait FOV on the wrong axis, `Orientation` never read.**
+      `2·atan(36/(2·f35))` is the angle across the LONG side of the 35 mm gate and was attributed
+      to image width unconditionally — right in landscape, 12.4 % of frame width wrong on the
+      repo's own portrait fixture, and badged `EXIF` either way. `extract.ts` now reads
+      `Orientation` (nothing in `src/` did), reports the DISPLAYED pixel dimensions, and
+      `fovDegFromFocalLength35mm` gives the 36 mm angle to the longer displayed axis. New fixture
+      `fixtures/photos/portrait-orientation-6.jpg` (stored landscape, displayed portrait) — every
+      other fixture pins Orientation 1, so no test could see the tag. **`extract.test.ts` PINNED
+      THE BUG** with a hand-derived expectation encoding the wrong model (hFov 39.597753 on a
+      3:4 frame); it now states 30.219150 and says in the test why it changed. The long-side vs
+      diagonal reading of `FocalLengthIn35mmFormat` is a convention — they agree exactly at 3:2
+      and differ by ~1° at 4:3 — and `fov.ts` states the choice, the alternative and the cost.
+      **Gates (from the review's mutation testing).** Fort William's Ben Nevis must-NOT-see claim
+      promoted `medium` → `high`: its blocking ridge is the only one wholly inside a committed
+      window, and the case file itself said to promote it once the DEM answered the shoulder
+      question. Verified: mutating `classifyOcclusion` to return `self-occluded` unconditionally
+      now fails a HIGH-confidence gate (it previously survived every one). And the first
+      horizontal-placement assertions in the suite — each analytic scene's flag is now predicted
+      at Δ = ±20° off the optical axis from the rectilinear closed form, x through `tan Δ` and y
+      through its `1/cos Δ` magnification. Verified: mutating the projection to be angle-linear
+      in x now fails 3 assertions (it previously passed all 148).
+      Acceptance: **153 passed** (was 148; none weakened, 5 added).
+
 - [x] **Q3 — The demo PNG.** `npm run demo -- gornergrat` writes `out/annotated.png`: the real
       pipeline over the full `data/tiles/N45E007.hgt`, laid out by `src/render` and composited by
       `src/render/composite.ts` in Chromium (`scripts/rasterise.ts` + `src/render/composite-page.html`

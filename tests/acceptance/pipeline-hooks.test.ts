@@ -468,6 +468,108 @@ describe('P6.3 hooks — synthetic scenes through the real pipeline', () => {
         expect(svg).toContain(escapeXml(peak.name));
       }
     });
+
+    /**
+     * THE SAME FLAG, OFF THE OPTICAL AXIS (adversarial review 2, gates).
+     *
+     * The assertion above points the camera straight at the peak, so Δ = 0 and
+     * x is the frame centre whatever the projection does with hFOV. Mutation
+     * testing found what that costs: making the projection LINEAR in angle
+     * (x = 0.5 + Δ/hFOV instead of the rectilinear form) broke horizontal
+     * placement outright and every one of the 148 assertions still passed.
+     * There was no horizontal-placement coverage at all.
+     *
+     * So: offset the camera by a known angle and predict x from the pinhole
+     * geometry, written out here rather than taken from src/core. For a level
+     * camera (pitch 0, roll 0) at heading H, a target at bearing B and altitude
+     * α has, in camera axes, forward·d = cosα·cosΔ, right·d = cosα·sinΔ and
+     * up·d = sinα with Δ = B − H, so
+     *
+     *     x = 0.5 + tanΔ / (2·tan(hFOV/2))
+     *     y = 0.5 − (tanα / cosΔ) / (2·tan(vFOV/2))
+     *
+     * Two things fall out that Δ = 0 cannot see: x is the TANGENT of the
+     * off-axis angle, not the angle; and y picks up a 1/cosΔ factor, because a
+     * summit at the edge of the frame is farther from the lens's principal
+     * point than one dead ahead. Both are asserted.
+     *
+     * At Δ = 20° with hFOV 65.5° the rectilinear answer is x = 0.78293 and the
+     * angle-linear one is 0.80534 — 2.2 % of the frame, 36 px at this width,
+     * against a 0.5 % gate. The margin is checked explicitly below so this test
+     * cannot quietly stop discriminating if the scene's field of view changes.
+     */
+    it(`${scene.id}: places a flag OFF the optical axis by the rectilinear projection`, async () => {
+      const { scene: annotated } = await runScene(scene);
+      const widthPx = 1600;
+      const heightPx = 1200;
+      const RAD = Math.PI / 180;
+
+      for (const verdict of visibleVerdicts) {
+        const peak = annotated.peaks.find((candidate) => candidate.id === verdict.peakId);
+        expect(peak, `${scene.id}: no peak produced for ${verdict.peakId}`).toBeDefined();
+        if (peak === undefined) continue;
+
+        // Both signs: a mirrored x would pass at +20 and fail at −20.
+        for (const offsetDeg of [20, -20]) {
+          const pose = cameraFacing(peak.bearingDeg - offsetDeg);
+          const layout = layoutOverlay({
+            widthPx,
+            heightPx,
+            pose,
+            horizon: annotated.horizon,
+            peaks: [peak],
+          });
+
+          expect(
+            layout.markers,
+            `${scene.id}/${verdict.peakId} at ${offsetDeg} deg off axis: the overlay dropped it`,
+          ).toHaveLength(1);
+          const marker = layout.markers[0];
+          if (marker === undefined) continue;
+
+          const deltaRad = offsetDeg * RAD;
+          const alphaRad = verdict.peakAltitudeDeg * RAD;
+          const tanHalfH = Math.tan((pose.hFovDeg / 2) * RAD);
+          const tanHalfV = Math.tan((pose.vFovDeg / 2) * RAD);
+
+          const expectedXPx = widthPx * (0.5 + Math.tan(deltaRad) / (2 * tanHalfH));
+          const expectedYPx =
+            heightPx * (0.5 - Math.tan(alphaRad) / Math.cos(deltaRad) / (2 * tanHalfV));
+
+          // The angle-linear projection this test exists to kill, and proof
+          // that it lands outside the gate rather than inside it.
+          const angleLinearXPx = widthPx * (0.5 + offsetDeg / pose.hFovDeg);
+          const gateXPx = 0.005 * widthPx;
+          expect(
+            Math.abs(angleLinearXPx - expectedXPx),
+            `${scene.id}: at ${offsetDeg} deg off axis the angle-linear projection is ` +
+              'indistinguishable from the rectilinear one — this assertion would gate nothing',
+          ).toBeGreaterThan(4 * gateXPx);
+
+          expect(
+            Math.abs(marker.summitPx.xPx - expectedXPx),
+            `${scene.id}/${verdict.peakId} at ${offsetDeg} deg off axis: flag at ` +
+              `x = ${marker.summitPx.xPx.toFixed(3)} px, closed form ` +
+              `${expectedXPx.toFixed(3)} px (gate ${gateXPx.toFixed(3)} px)`,
+          ).toBeLessThanOrEqual(gateXPx);
+
+          // y is allowed the same angular slack as the on-axis assertion, plus
+          // the 1/cos(Δ) magnification that slack picks up off centre.
+          const pxPerDeg =
+            (((heightPx * RAD) / (2 * tanHalfV)) / Math.cos(alphaRad) ** 2) / Math.cos(deltaRad);
+          const gateYPx = 0.005 * heightPx + scene.toleranceDeg * pxPerDeg;
+          expect(
+            Math.abs(marker.summitPx.yPx - expectedYPx),
+            `${scene.id}/${verdict.peakId} at ${offsetDeg} deg off axis: flag at ` +
+              `y = ${marker.summitPx.yPx.toFixed(3)} px, closed form ` +
+              `${expectedYPx.toFixed(3)} px (gate ${gateYPx.toFixed(3)} px)`,
+          ).toBeLessThanOrEqual(gateYPx);
+
+          // And the flag really is off centre, in the direction it should be.
+          expect(Math.sign(marker.summitPx.xPx - widthPx / 2)).toBe(Math.sign(offsetDeg));
+        }
+      }
+    });
   }
   }
 
