@@ -146,6 +146,30 @@ function assertNumber(value: unknown, field: string, label: string): number {
   return value;
 }
 
+/**
+ * A sample spacing is a DIVISOR: `HgtTile.indexFor` computes
+ * `(northLat − lat) / latStepDeg`. Zero makes every index NaN and a negative
+ * step mirrors the grid, reading a real value from the wrong row. Neither is a
+ * spacing, so neither is accepted — the same check `parseTerrainManifest`
+ * applies to a grid arriving over HTTP.
+ */
+function assertStep(value: unknown, field: string, label: string): number {
+  const step = assertNumber(value, field, label);
+  if (step <= 0) {
+    throw new ProviderError('bad-tile', `${label}: ${field} spacing must be positive, got ${step}`);
+  }
+  return step;
+}
+
+/** Rows and columns index an array, and interpolation needs a cell to work in. */
+function assertGridCount(value: unknown, field: string, label: string): number {
+  const count = assertNumber(value, field, label);
+  if (!Number.isInteger(count) || count < 2) {
+    throw new ProviderError('bad-tile', `${label}: ${field} must be an integer >= 2, got ${count}`);
+  }
+  return count;
+}
+
 /** Validate a parsed sidecar. Exported so the generator and the tests share one schema. */
 export function parseTileWindowMeta(value: unknown, label: string): TileWindowMeta {
   if (typeof value !== 'object' || value === null) {
@@ -180,10 +204,10 @@ export function parseTileWindowMeta(value: unknown, label: string): TileWindowMe
     geometry: {
       northLat: assertNumber(g['northLat'], 'geometry.northLat', label),
       westLon: assertNumber(g['westLon'], 'geometry.westLon', label),
-      rows: assertNumber(g['rows'], 'geometry.rows', label),
-      cols: assertNumber(g['cols'], 'geometry.cols', label),
-      latStepDeg: assertNumber(g['latStepDeg'], 'geometry.latStepDeg', label),
-      lonStepDeg: assertNumber(g['lonStepDeg'], 'geometry.lonStepDeg', label),
+      rows: assertGridCount(g['rows'], 'geometry.rows', label),
+      cols: assertGridCount(g['cols'], 'geometry.cols', label),
+      latStepDeg: assertStep(g['latStepDeg'], 'geometry.latStepDeg', label),
+      lonStepDeg: assertStep(g['lonStepDeg'], 'geometry.lonStepDeg', label),
     },
     source: {
       tile: String(s['tile'] ?? 'unknown'),

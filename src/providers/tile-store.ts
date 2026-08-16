@@ -122,12 +122,72 @@ export interface TileBounds {
 }
 
 /**
+ * How wide a box is in longitude, in degrees, walked EASTWARD from `west`.
+ *
+ * This is the single definition of "how much longitude is in this box", and
+ * everything that asks "is this inside the box" — cell selection, tile
+ * selection, the peak stores' own filter — has to use it, or two answers to the
+ * same question exist in one codebase (Wave 1 finding 2, Wave 3 finding 2).
+ *
+ * Three cases, and the middle one is the one that was wrong:
+ *
+ *   • `east > west` — an ordinary box, width `east − west`.
+ *   • `east − west ≥ 360` — a WHOLE-WORLD box. `boundingBoxAround` emits
+ *     −180 … 180 whenever a circle reaches a pole, and `fetch-tiles`'
+ *     `boundsAround` emits `lon ± 180`. Normalising both ends first makes them
+ *     equal, which reads as width ZERO — a single meridian strip, silently
+ *     dropping every tile and every peak away from that one line. Longitude is
+ *     periodic: −180 and +180 name the same meridian, so a full turn cannot be
+ *     recovered from the endpoints after normalisation. It has to be measured
+ *     BEFORE, which is what this function does. Anything wider than a turn is
+ *     still a turn.
+ *   • `east < west` — a box crossing the antimeridian the short way, e.g.
+ *     179.5 … −179.5, which is 1° wide, not 359°.
+ */
+export function lonWidthDeg(west: number, east: number): number {
+  const span = east - west;
+  if (span >= 360) return 360;
+  return ((span % 360) + 360) % 360;
+}
+
+/**
+ * How far east of `west` a longitude lies, in degrees, in [0, 360).
+ *
+ * The direct subtraction is used whenever it already lands in range: taking an
+ * ordinary in-range longitude modulo 360 is lossy (0.025 comes back as
+ * 0.024999999999977), and an edge comparison that drifts by an ulp is exactly
+ * how a summit sitting on a boundary goes missing. See `HgtTile.lonOffsetDeg`,
+ * which makes the same trade for the same reason.
+ */
+export function lonOffsetEastDeg(lon: number, west: number): number {
+  const direct = lon - west;
+  if (direct >= 0 && direct < 360) return direct;
+  return ((direct % 360) + 360) % 360;
+}
+
+/**
+ * Is a longitude inside the interval `[west, east]` walked eastward?
+ *
+ * Edges are inclusive, matching `TileBounds`. Both the longitude and the box
+ * may be written in any convention — normalised to either seam, or not at all.
+ */
+export function lonWithinBounds(lon: number, west: number, east: number): boolean {
+  const width = lonWidthDeg(west, east);
+  if (width >= 360) return true;
+  return lonOffsetEastDeg(lon, west) <= width;
+}
+
+/**
  * Every tile name needed to cover a bounding box.
  *
  * The box is walked in whole degrees from `floor(south)` to `floor(north)`; a
  * north edge that lands exactly on an integer degree still needs the tile above
  * only if the box has height there, so the loop uses the corner of the north
  * edge itself. East of the antimeridian the box is walked the short way round.
+ *
+ * Longitude width is measured by `lonWidthDeg` from the RAW bounds, before any
+ * normalisation, because a whole-world box is indistinguishable from a
+ * zero-width one once both ends have been folded into [−180, 180).
  */
 export function tileNamesForBounds(bounds: TileBounds): readonly string[] {
   const { south, north } = bounds;
@@ -137,12 +197,12 @@ export function tileNamesForBounds(bounds: TileBounds): readonly string[] {
   const latStart = tileCornerFor(south, 0).southLat;
   const latEnd = tileCornerFor(north, 0).southLat;
 
-  const west = normaliseLon(bounds.west);
-  const east = normaliseLon(bounds.east);
+  const width = lonWidthDeg(bounds.west, bounds.east);
+  // A full turn is walked from the meridian, so the names come out W180 … E179
+  // and no column is emitted twice.
+  const west = width >= 360 ? -180 : normaliseLon(bounds.west);
   const lonStart = Math.floor(west);
-  // Width in degrees, going east; a box crossing the antimeridian has east < west.
-  const width = east >= west ? east - west : east + 360 - west;
-  const lonCount = Math.floor(west + width) - lonStart + 1;
+  const lonCount = width >= 360 ? 360 : Math.floor(west + width) - lonStart + 1;
 
   const names: string[] = [];
   for (let lat = latStart; lat <= latEnd; lat += 1) {

@@ -181,6 +181,26 @@ describe('noTerrainMessage', () => {
   it('never suggests anything was drawn', () => {
     expect(message).toMatch(/no (horizon|terrain)/i);
   });
+
+  it('speaks to a visitor first: the DEPLOYMENT lacks the tile', () => {
+    // A member of the public looking at a published site cannot run npm and has
+    // no data/tiles/ to serve. The claim they are shown has to be one about
+    // this build, and it has to be scoped — the app is not broken everywhere.
+    expect(message).toContain('this deployment does not hold');
+    expect(message).toMatch(/terrain this build does ship are unaffected/i);
+    // The visitor-facing sentences come first; nothing before the parenthesis
+    // instructs anyone to type anything.
+    const beforeAside = message.slice(0, message.indexOf('('));
+    expect(beforeAside).not.toMatch(/npm run|Run "/);
+  });
+
+  it('keeps the developer instruction, scoped to someone who can run it', () => {
+    const checkout = message.indexOf('source checkout');
+    const command = message.indexOf('npm run fetch:tiles');
+    expect(checkout).toBeGreaterThan(-1);
+    // The condition is stated before the command, not after it.
+    expect(command).toBeGreaterThan(checkout);
+  });
 });
 
 describe('createOverlayBuilder', () => {

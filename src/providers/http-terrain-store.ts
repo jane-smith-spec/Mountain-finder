@@ -98,8 +98,23 @@ const DEFAULT_MAX_CACHED_GRIDS = 3;
  * Deliberately not `new URL(...)`: this module runs in Node tests where there
  * is no document base, and the index URL is normally a root-relative path.
  * Absolute and root-relative entries are passed through untouched.
+ *
+ * A PROTOCOL-RELATIVE entry (`//host/path`) is refused. It starts with `/`, so
+ * a "root-relative means same origin" test waves it through — but a browser
+ * resolves it against a different HOST, which is precisely what this store
+ * promises not to do (see the module header: static files on the app's own
+ * origin, nothing substituted for them). An index that carries one is either
+ * mis-generated or tampered with, and both deserve to be loud.
  */
 export function resolveTerrainUrl(manifestUrl: string, url: string): string {
+  if (url.startsWith('//')) {
+    throw new ProviderError(
+      'bad-response',
+      `The terrain index entry "${url}" is protocol-relative, so it names another origin. ` +
+        'This store reads terrain only from static files on the app’s own origin.',
+      { url },
+    );
+  }
   if (/^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith('/')) return url;
   const cut = manifestUrl.lastIndexOf('/');
   return cut < 0 ? url : `${manifestUrl.slice(0, cut + 1)}${url}`;

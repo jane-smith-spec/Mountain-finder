@@ -64,7 +64,42 @@ export interface TerrainSample extends LatLng {
 /** Dataset label reported for a point whose tile has not been downloaded. */
 export const MISSING_TILE_DATASET = 'local-tiles(missing)';
 
-/** Human-readable dataset label for a grid size, used in `ElevationResult.dataset`. */
+/**
+ * Human-readable resolution label for a SAMPLE SPACING — the definition.
+ *
+ * Resolution is the spacing, never the array size. A `.hgt` TILE spans exactly
+ * one degree, so for a tile the two carry the same information (`step =
+ * 1/(n−1)`) — but a WINDOW cut out of one does not, and the committed case
+ * fixtures are windows. Labelling by column count called a 1201-column window
+ * of 1-arc-second data `srtm3`: a claim of 90 m posting over 30 m data, which
+ * is the sort of quiet mislabel that later gets used to justify a tolerance.
+ *
+ * The label names the whole-degree grid the spacing implies, so `srtm1` and
+ * `srtm3` keep their meanings and a test grid still reports its own size. A
+ * spacing that does not divide a degree evenly cannot be named that way and is
+ * reported in arc-seconds instead.
+ */
+export function datasetLabelForStepDeg(stepDeg: number): string {
+  if (!Number.isFinite(stepDeg) || stepDeg <= 0) {
+    throw new ProviderError('bad-tile', `Sample spacing must be positive, got ${stepDeg}`);
+  }
+  const perDegree = 1 / stepDeg;
+  const rounded = Math.round(perDegree);
+  // 1/3600 is not representable in binary, so `1/(1/3600)` is 3600.0000000000005
+  // rather than 3600; the tolerance is relative and far tighter than the gap to
+  // any neighbouring standard spacing.
+  if (rounded < 1 || Math.abs(perDegree - rounded) > 1e-6 * rounded) {
+    return `hgt-${Number((stepDeg * 3600).toPrecision(6))}arcsec`;
+  }
+  return datasetLabelForGridSize(rounded + 1);
+}
+
+/**
+ * Label for a whole-degree grid of `size × size` samples.
+ *
+ * Only correct for a grid that spans a full degree — for anything else use
+ * {@link datasetLabelForStepDeg}, which is what resolution actually means.
+ */
 export function datasetLabelForGridSize(size: number): string {
   if (size === SRTM1_GRID_SIZE) return 'srtm1';
   if (size === SRTM3_GRID_SIZE) return 'srtm3';
@@ -107,7 +142,9 @@ export class TileElevationProvider implements ElevationProvider {
       interpolation: this.options.interpolation ?? 'bilinear',
       voidPolicy: this.options.voidPolicy ?? 'nearest-valid',
     });
-    const dataset = datasetLabelForGridSize(tile.geometry.cols);
+    // From the spacing, not the column count: a window of an SRTM1 tile has
+    // whatever width it was cut to and 1-arc-second postings regardless.
+    const dataset = datasetLabelForStepDeg(tile.geometry.lonStepDeg);
 
     if (reading.status === 'ok') {
       return {

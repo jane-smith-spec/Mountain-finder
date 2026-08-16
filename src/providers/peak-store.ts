@@ -49,6 +49,7 @@ import type {
   PeaksProvider,
   PeaksRequestOptions,
 } from './peaks.js';
+import { lonWithinBounds } from './tile-store.js';
 
 /** How a source document was read. Mirrors the ground-truth case schema. */
 export type PeakSourceAccess = 'fetched' | 'via-search-index' | 'derived';
@@ -261,12 +262,27 @@ export function toPeakCandidate(record: PeakRecord): PeakCandidate {
   };
 }
 
+/** Total order on peak ids — the tie-break both stores use. */
+export function compareRecordId(a: PeakRecord, b: PeakRecord): number {
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+/**
+ * Is this peak inside the box?
+ *
+ * Longitude is compared through `lonWithinBounds`, the same rule
+ * `tileNamesForBounds` uses to decide which CELLS a box touches. They used to
+ * disagree: cell selection normalised, this comparison did not, so a box near
+ * the antimeridian (`boundingBoxAround` emits 179.33 … 180.47 there) loaded
+ * both cells and then discarded every peak stored as a negative longitude —
+ * and, with `allowEmpty` unset, called that "no named peaks in this area" about
+ * records it was holding in memory. One box, one meaning.
+ */
 function withinBox(record: PeakRecord, box: BoundingBox): boolean {
   return (
     record.lat >= box.south &&
     record.lat <= box.north &&
-    record.lon >= box.west &&
-    record.lon <= box.east
+    lonWithinBounds(record.lon, box.west, box.east)
   );
 }
 
@@ -317,6 +333,12 @@ export class LocalPeakStore implements PeaksProvider {
    * Distance is the great-circle distance on the datum sphere — the same
    * measure `sightPeak` uses — so a peak that passes this filter is at the
    * range the geometry core will later compute for it.
+   *
+   * Equal distances break on the peak id, which is what `TiledPeakStore` does
+   * when it merges the sightings of several cells. Without it the two stores
+   * answer the same question in different orders — dataset order here, id order
+   * there — and anything that takes "the nearest n" or lays labels out in order
+   * silently depends on which store it was handed.
    */
   recordsWithin(center: LatLng, radiusKm: number): readonly PeakRecordSighting[] {
     if (!(radiusKm >= 0)) {
@@ -327,7 +349,9 @@ export class LocalPeakStore implements PeaksProvider {
       const distanceKm = haversineDistanceM(center, record) / 1000;
       if (distanceKm <= radiusKm) sightings.push({ record, distanceKm });
     }
-    return sightings.sort((a, b) => a.distanceKm - b.distanceKm);
+    return sightings.sort(
+      (a, b) => a.distanceKm - b.distanceKm || compareRecordId(a.record, b.record),
+    );
   }
 
   /** Core-typed peaks within a radius, nearest first. The pipeline's entry point. */

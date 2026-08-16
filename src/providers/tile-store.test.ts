@@ -164,6 +164,47 @@ describe('tileNamesForBounds', () => {
       /below south/,
     );
   });
+
+  /* Wave 3 finding 1 — a 360°-wide box must not collapse onto one meridian.
+   * −180 and +180 name the same line, so normalising both ends first makes a
+   * whole-world box indistinguishable from a zero-width one. The expectation is
+   * arithmetic, not observation: a full turn of longitude walked in whole
+   * degrees is 360 columns, one per integer meridian, W180 … E179. */
+  it('covers all 360 meridians for a box spanning the whole world', () => {
+    const names = tileNamesForBounds({ south: 89, north: 90, west: -180, east: 180 });
+    expect(names).toHaveLength(360);
+    expect(new Set(names).size).toBe(360);
+    // The pole belongs to the 89° band, so this is one latitude band of 360.
+    expect(names).toContain('N89W180');
+    expect(names).toContain('N89W001');
+    expect(names).toContain('N89E000');
+    expect(names).toContain('N89E010'); // the square under an observer at 89 N, 10 E
+    expect(names).toContain('N89E179');
+  });
+
+  it('covers all 360 meridians for the unnormalised ±180 box a polar circle makes', () => {
+    // `boundsAround` in scripts/fetch-tiles.ts caps dLon at 180 and emits
+    // centre.lon ± 180 without normalising: 10 − 180 = −170 … 10 + 180 = 190.
+    // Both ends normalise to −170, which is a full turn, not a point.
+    const names = tileNamesForBounds({ south: 88.2, north: 90, west: -170, east: 190 });
+    expect(new Set(names).size).toBe(2 * 360); // bands N88 and N89
+    expect(names).toContain('N89E010');
+    expect(names).toContain('N88E010');
+  });
+
+  it('clamps a box wider than the world to one turn rather than repeating tiles', () => {
+    const names = tileNamesForBounds({ south: 0.2, north: 0.3, west: -200, east: 200 });
+    expect(names).toHaveLength(360);
+    expect(new Set(names).size).toBe(360);
+  });
+
+  it('still walks the short way for a box that merely touches the seam', () => {
+    // Regression guard for the fix above: only a FULL turn is special.
+    expect(tileNamesForBounds({ south: 0.5, west: 179.33, north: 0.6, east: 180.47 })).toEqual([
+      'N00E179',
+      'N00W180',
+    ]);
+  });
 });
 
 /* ------------------------------------------------------------------ *

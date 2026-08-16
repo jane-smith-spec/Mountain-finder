@@ -304,6 +304,138 @@ describe('TiledPeakStore — the PeaksProvider contract', () => {
   });
 });
 
+/* Wave 3 finding 2 — `cellsForBox` and `recordsInBox` must mean the same thing.
+ * The store loads both cells either side of the meridian; before the fix it
+ * then filtered out everything west of it and, with `allowEmpty` unset, called
+ * that "no named peaks in this area" while holding one in memory. */
+describe('TiledPeakStore — a bbox that crosses the antimeridian', () => {
+  const seamCells: Record<string, PeakRecord[]> = {
+    S18E179: [record('east-of-seam', -17.6, 179.6, 1100)],
+    S18W180: [record('west-of-seam', -17.6, -179.7, 1200)],
+  };
+
+  function seamStore(): { store: TiledPeakStore; loads: string[] } {
+    const loads: string[] = [];
+    const index = parsePeakCellIndex({
+      version: 1,
+      description: 'test index',
+      release: 'test',
+      generatedBy: 'hand',
+      bounds: { south: -18.5, west: 179.33, north: -17.5, east: 180.47 },
+      sources: SOURCES,
+      cells: Object.keys(seamCells).map((name) => ({
+        name,
+        peaks: 1,
+        file: `cells/${name}.json`,
+      })),
+      peakCount: 2,
+    });
+    const tiled = new TiledPeakStore(index, async (entry) => {
+      loads.push(entry.name);
+      return { cell: entry.name, peaks: seamCells[entry.name] ?? [] };
+    });
+    return { store: tiled, loads };
+  }
+
+  const box = { south: -18.5, west: 179.33, north: -17.5, east: 180.47 };
+
+  it('returns the peaks from every cell it loaded for the box', async () => {
+    const { store: tiled, loads } = seamStore();
+    const records = await tiled.recordsInBox(box);
+    expect([...loads].sort()).toEqual(['S18E179', 'S18W180']);
+    expect([...records.map((r) => r.id)].sort()).toEqual(['east-of-seam', 'west-of-seam']);
+  });
+
+  it('does not claim the dataset is empty while holding the answer', async () => {
+    const peaks = await seamStore().store.fetchPeaks({ bbox: box });
+    expect(peaks).toHaveLength(2);
+  });
+});
+
+/* Wave 3 finding 3 — a query wider than the dataset must say so. */
+describe('TiledPeakStore — coverage of a query the dataset cannot fill', () => {
+  const cells: Record<string, PeakRecord[]> = {
+    N45E007: [record('in-dataset', 45.5, 7.5, 3000)],
+  };
+
+  function smallStore(options?: { readonly coveragePolicy?: 'report' | 'throw' }): TiledPeakStore {
+    const index = parsePeakCellIndex({
+      version: 1,
+      description: 'one valley',
+      release: 'test',
+      generatedBy: 'hand',
+      bounds: { south: 45.2, west: 7.2, north: 45.8, east: 7.8 },
+      sources: SOURCES,
+      cells: [{ name: 'N45E007', peaks: 1, file: 'cells/N45E007.json' }],
+      peakCount: 1,
+    });
+    return new TiledPeakStore(
+      index,
+      async (entry) => ({ cell: entry.name, peaks: cells[entry.name] ?? [] }),
+      options,
+    );
+  }
+
+  it('calls a query inside the dataset complete, with no note', () => {
+    // 10 km around 45.5, 7.5: the box is 45.410…45.590 N, 7.372…7.628 E, well
+    // inside 45.2…45.8 N, 7.2…7.8 E.
+    const coverage = smallStore().coverageFor({ center: { lat: 45.5, lon: 7.5 }, radiusKm: 10 });
+    expect(coverage.complete).toBe(true);
+    expect(coverage.note).toBeUndefined();
+    expect(coverage.cellsSpanned).toBe(1);
+    expect(coverage.cellsHeld).toBe(1);
+  });
+
+  it('states how far out it actually answers when the query overflows', () => {
+    // The centre sits 0.3° from the south and north edges and 0.3° from each
+    // meridian. 0.3° of latitude = 6371.0088 km × 0.3π/180 = 33.359 km; the
+    // distance to the meridian 0.3° away at φ = 45.5 is
+    // R·asin(sin 0.3° · cos 45.5°) = 23.381 km. The nearer of those bounds the
+    // radius this dataset can answer in full.
+    const coverage = smallStore().coverageFor({ center: { lat: 45.5, lon: 7.5 }, radiusKm: 200 });
+    expect(coverage.complete).toBe(false);
+    expect(coverage.coveredRadiusKm).toBeCloseTo(23.381, 2);
+    expect(coverage.requestedRadiusKm).toBe(200);
+    expect(coverage.datasetBounds).toEqual({ south: 45.2, west: 7.2, north: 45.8, east: 7.8 });
+    // 200 km around 45.5 N spans lat 43.70…47.30 and lon 4.92…10.08: four
+    // latitude bands (43,44,45,46,47 → 5) by six meridians (4…10 → 7).
+    expect(coverage.cellsSpanned).toBe(5 * 7);
+    expect(coverage.cellsHeld).toBe(1);
+    expect(coverage.note).toContain('45.2');
+    expect(coverage.note).toContain('7.8');
+  });
+
+  it('reports rather than refuses by default — a valley dataset is legitimate', async () => {
+    const peaks = await smallStore().fetchPeaks({
+      center: { lat: 45.5, lon: 7.5 },
+      radiusKm: 200,
+    });
+    expect(peaks.map((peak) => peak.id)).toEqual(['in-dataset']);
+  });
+
+  it('refuses the same query when the caller asked for full coverage', async () => {
+    const store = smallStore({ coveragePolicy: 'throw' });
+    await expect(
+      store.fetchPeaks({ center: { lat: 45.5, lon: 7.5 }, radiusKm: 200 }),
+    ).rejects.toMatchObject({ code: 'empty-result' });
+    await expect(
+      store.fetchPeaks({ center: { lat: 45.5, lon: 7.5 }, radiusKm: 200 }),
+    ).rejects.toThrow(/45\.2/);
+    // …and still answers a query it can cover in full.
+    await expect(
+      store.fetchPeaks({ center: { lat: 45.5, lon: 7.5 }, radiusKm: 10 }),
+    ).resolves.toHaveLength(1);
+  });
+
+  it('blames the dataset extent, not the mountains, for an empty answer', async () => {
+    // Chamonix is outside this dataset entirely. "No peaks here" would be a
+    // false claim about Mont Blanc; the message has to name the extent.
+    await expect(
+      smallStore().fetchPeaks({ center: { lat: 45.9237, lon: 6.8694 }, radiusKm: 20 }),
+    ).rejects.toThrow(/covers 45\.2/);
+  });
+});
+
 describe('the committed Overture import of the Zermatt region', () => {
   const INDEX = fileURLToPath(
     new URL('../../fixtures/peaks/regions/zermatt/index.json', import.meta.url),
@@ -347,6 +479,28 @@ describe('the committed Overture import of the Zermatt region', () => {
     expect(matterhorn?.elevationSource).toBe('osm');
     const dufourspitze = peaks.find((peak) => peak.name === 'Dufourspitze');
     expect(dufourspitze?.elevationM).toBe(4634); // cited
+  });
+
+  it('does not present the 200 km pipeline default as a complete answer', async () => {
+    // The review's own reproduction. The import was cut for 45.6–46.4 N,
+    // 7.2–8.2 E; the pipeline asks for 200 km around the Gornergrat, whose box
+    // is 44.185–47.782 N, 5.194–10.372 E and spans 24 one-degree cells.
+    const store = await loadPeakCellIndex(INDEX);
+    const at = { lat: 45.9833, lon: 7.7833 };
+    const coverage = store.coverageFor({ center: at, radiusKm: 200 });
+    expect(coverage.complete).toBe(false);
+    expect(coverage.cellsSpanned).toBe(24);
+    expect(coverage.cellsHeld).toBe(4);
+    // Nearest dataset edge: the 8.2 E meridian, R·asin(sin 0.4167° · cos
+    // 45.9833°) = 32.197 km. Beyond that this dataset can lose summits.
+    expect(coverage.coveredRadiusKm).toBeCloseTo(32.197, 2);
+    expect(coverage.note).toContain('45.6');
+
+    // Mont Blanc — 4808 m, 73 km away, unmissable from the Gornergrat — is
+    // outside the import. The list cannot say that; the coverage does.
+    const peaks = await store.peaksWithin(at, 200);
+    expect(peaks.some((peak) => peak.name === 'Mont Blanc')).toBe(false);
+    expect(peaks.length).toBeGreaterThan(1000);
   });
 
   it('files every peak in the cell its coordinates put it in', async () => {

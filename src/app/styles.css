@@ -62,7 +62,98 @@ body {
 .app {
   max-width: 1180px;
   margin: 0 auto;
-  padding: 1.5rem 1rem 4rem;
+  padding: 1.5rem 1rem 1.5rem;
+}
+
+/* --- attribution footer ---
+ *
+ * A licence condition, not decoration (ODbL-1.0 requires the notice to reach
+ * users), so it is sticky: on a long page — a loaded photo plus every panel —
+ * a credit at the document end is a credit nobody reads. Sticky rather than
+ * fixed keeps it in the flow, so at the bottom of the page it stops covering
+ * anything. Colour carries no meaning here; every distinction is in words.
+ */
+
+.app__footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  padding: 0.5rem 1rem 0.6rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--muted);
+  /*
+   * A hard ceiling on how much of a small screen the notice may take. It never
+   * clips on a desktop; on a phone in landscape it can, and the credits are
+   * ordered obligations-first (`orderCredits`) precisely so the licence-required
+   * line is the one that survives — the rest scrolls within the footer.
+   */
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.app__footer-heading {
+  margin: 0 0 0.2rem;
+  max-width: 1180px;
+  margin-inline: auto;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.credits {
+  list-style: none;
+  margin: 0 auto;
+  padding: 0;
+  max-width: 1180px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.credit {
+  display: grid;
+  grid-template-columns: minmax(13rem, 30%) 1fr;
+  gap: 0.15rem 0.75rem;
+}
+
+@media (max-width: 640px) {
+  .credit {
+    grid-template-columns: 1fr;
+  }
+
+  /* A phone screen is worth more per pixel; the notice still leads with the
+   * ODbL line and scrolls within itself for the rest. */
+  .app__footer {
+    max-height: 33vh;
+  }
+}
+
+.credit__what {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.credit__detail {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.credit__line {
+  color: var(--ink);
+}
+
+.credit__links {
+  white-space: nowrap;
+}
+
+.credit__link {
+  color: var(--focus);
+  text-decoration: underline;
+  margin-left: 0.5rem;
 }
 
 .app__header h1 {

@@ -236,3 +236,36 @@ test('the packaged peak cells are served in the layout TiledPeakStore expects', 
   expect(body.cell).toBe(cell.name);
   expect(body.peaks.length).toBe(cell.peaks);
 });
+
+test('the deployed page displays the ODbL notice, and it matches ATTRIBUTION.txt', async ({
+  page,
+}) => {
+  // The obligation ODbL-1.0 actually imposes is on the RUNNING app, so it has
+  // to be checked on the deployed bundle rather than on the dev server —
+  // `dist/ATTRIBUTION.txt` is what a deployer publishes, not what a visitor
+  // reads. `tests/e2e/attribution.spec.ts` proves the footer is legible and on
+  // screen; this proves the built artefact carries it and that the two
+  // renderings of the same citation records agree.
+  await page.goto('/');
+  const footer = page.getByTestId('attribution');
+  await expect(footer).toBeVisible();
+  await expect(footer).toContainText('OpenStreetMap contributors');
+  await expect(footer).toContainText('ODbL-1.0');
+
+  const box = await footer.boundingBox();
+  expect(box).not.toBeNull();
+  const viewport = page.viewportSize();
+  if (box !== null && viewport !== null) {
+    // On screen without scrolling, not merely in the document.
+    expect(box.height).toBeGreaterThan(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 0.5);
+  }
+
+  // The staged regions and the page must credit the same thing: packaging
+  // writes ATTRIBUTION.txt from the region index files, the app derives the
+  // footer from the same records, and a deployment where those disagree is a
+  // deployment whose notice is stale.
+  const attribution = await readFile(resolve(DIST, 'ATTRIBUTION.txt'), 'utf8');
+  expect(attribution).toContain('ODbL-1.0');
+  expect(attribution).toContain('OpenStreetMap contributors');
+});

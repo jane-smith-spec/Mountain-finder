@@ -16,9 +16,14 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { isProviderError } from './errors';
+import { ProviderError, isProviderError } from './errors';
 import { encodeBigEndianInt16 } from './hgt-tile';
-import { HttpTerrainStore, type TerrainFetch, type TerrainFetchResponse } from './http-terrain-store';
+import {
+  HttpTerrainStore,
+  resolveTerrainUrl,
+  type TerrainFetch,
+  type TerrainFetchResponse,
+} from './http-terrain-store';
 import type { TerrainManifest } from './terrain-manifest';
 
 const GEOMETRY = {
@@ -164,5 +169,35 @@ describe('HttpTerrainStore.coverage', () => {
     // The specific fact the user needs in order to fix it.
     expect(coverage.tileName).toBe('N45E006');
     expect(coverage.available).toEqual(['N45E007']);
+  });
+});
+
+/* Wave 3 suspicion — `resolveTerrainUrl` treated `//host/x` as same-origin
+ * because it starts with `/`. A protocol-relative URL is not root-relative: a
+ * browser resolves it against another HOST entirely, so an index entry reading
+ * `//evil.example/N45E007.hgt` would take this store — documented as reading
+ * only from its own origin — off it, and the elevation behind the whole
+ * skyline would come from somewhere nobody named. */
+describe('resolveTerrainUrl', () => {
+  it('joins a relative entry to the index’s own directory', () => {
+    expect(resolveTerrainUrl('/terrain/manifest.json', 'tiles/N45E007.hgt')).toBe(
+      '/terrain/tiles/N45E007.hgt',
+    );
+    expect(resolveTerrainUrl('manifest.json', 'windows/w.i16be')).toBe('windows/w.i16be');
+  });
+
+  it('passes a root-relative entry through untouched', () => {
+    expect(resolveTerrainUrl('/terrain/manifest.json', '/other/N45E007.hgt')).toBe(
+      '/other/N45E007.hgt',
+    );
+  });
+
+  it('refuses a protocol-relative entry, which points at another origin', () => {
+    expect(() => resolveTerrainUrl('/terrain/manifest.json', '//evil.example/x.hgt')).toThrow(
+      /another origin/,
+    );
+    expect(() => resolveTerrainUrl('/terrain/manifest.json', '//evil.example/x.hgt')).toThrow(
+      ProviderError,
+    );
   });
 });

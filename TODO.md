@@ -494,6 +494,37 @@ Live checklist. Check items only after their self-check has been run and passed 
 
 </details>
 
+## Wave 3 review — `src/providers` fixes (REVIEW-FINDINGS-3.md)
+- [x] **Finding 3 — a query wider than the dataset now says so.** `TiledPeakStore.coverageFor`
+      answers from the index alone (no cell loaded): dataset bounds, cells spanned vs held, and
+      `coveredRadiusKm` — the largest radius wholly inside the bounds, from `R·|Δφ|` and
+      `R·asin(sin Δλ · cos φ)`. Default policy REPORTS (a dataset cut for one valley is
+      legitimate); `coveragePolicy: 'throw'` refuses, mirroring `missingTilePolicy: 'throw'`.
+      An empty answer to an overflowing query names the extent instead of claiming there are no
+      peaks there. Zermatt + 200 km: complete=false, 24 cells spanned / 4 held, covered to
+      32.2 km — the radius at which Mont Blanc's absence stops being evidence.
+- [x] **Gate gap 1 — the whole-world fallback is pinned.** A synthetic `FileMetaData` with the
+      bbox statistics stripped must still select its row group. Verified to FAIL against the
+      inverted (empty-box) implementation, which every one of the previous 293 tests passed.
+- [x] **Gate gap 2 — the Range header string is asserted.** `slice(100, 200)` must send
+      `bytes=100-199`; also the open-ended and single-byte forms. Fails against `bytes=${from}-${to}`.
+- [x] **Finding 1 — a 360°-wide box no longer collapses to one meridian.** Longitude width is
+      measured from the RAW bounds by `lonWidthDeg` before any normalisation, because −180 and
+      +180 name the same meridian. `npm run fetch:tiles -- --around 89,10 --radius-km 200` went
+      from 3 tiles on W170 (not including the one underfoot) to 1080 = 3 bands × 360.
+- [x] **Finding 2 — "in this box" has one meaning.** `peak-store.withinBox` compares longitude
+      through the same `lonWithinBounds` that `tileNamesForBounds` uses, so a box near the
+      antimeridian no longer loads both cells and then discards half the peaks while reporting
+      "no named peaks in this area".
+- [x] **Finding 4 — resolution comes from the sample spacing.** `datasetLabelForStepDeg`;
+      `tile-elevation` and the manifest both use it. A 1201-column WINDOW of 1-arc-second data
+      is `srtm1`, not `srtm3`. `scripts/terrain-server.ts` still derives its own label and should
+      be pointed at this function.
+- [x] **Suspicions.** Window sidecar steps must be positive and rows/cols integers ≥ 2 (a zero
+      step divided by zero in `indexFor`); `resolveTerrainUrl` refuses `//host/x`, which starts
+      with `/` but names another origin; `LocalPeakStore.recordsWithin` breaks distance ties on
+      the peak id, as `TiledPeakStore` already did.
+
 ## Gates
 - [ ] Wave 1 review (A, B, C, F diffs adversarially reviewed)
 - [ ] Wave 2 review (D)

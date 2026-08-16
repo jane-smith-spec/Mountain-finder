@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
+import { AttributionFooter } from './components/AttributionFooter';
 import { DropZone } from './components/DropZone';
 import { ExifSummary } from './components/ExifSummary';
 import { ExportControl } from './components/ExportControl';
@@ -150,92 +151,102 @@ export function App({ overlayBuilder, pngExporter }: AppProps = {}): JSX.Element
   });
 
   return (
-    <main className="app">
-      <header className="app__header">
-        <h1 data-testid="app-title">Mountain Finder</h1>
-        <p data-testid="app-phase" className="app__tagline">
-          Drop a mountain photo. Every number it uses is shown with where it came from — EXIF, you,
-          or an assumption you opted into. Nothing is invented.
-        </p>
-      </header>
+    <>
+      <main className="app">
+        <header className="app__header">
+          <h1 data-testid="app-title">Mountain Finder</h1>
+          <p data-testid="app-phase" className="app__tagline">
+            Drop a mountain photo. Every number it uses is shown with where it came from — EXIF, you,
+            or an assumption you opted into. Nothing is invented.
+          </p>
+        </header>
 
-      <DropZone
-        onFile={handleFile}
-        busy={state.status === 'reading'}
-        errorMessage={state.errorMessage}
-        loadedFileName={session?.photo.fileName}
-        onClear={() => {
-          dispatch({ type: 'photo-cleared' });
-        }}
-      />
+        <DropZone
+          onFile={handleFile}
+          busy={state.status === 'reading'}
+          errorMessage={state.errorMessage}
+          loadedFileName={session?.photo.fileName}
+          onClear={() => {
+            dispatch({ type: 'photo-cleared' });
+          }}
+        />
 
-      {session === undefined ? (
-        <p className="status" data-testid="empty-state">
-          No photo loaded yet.
-        </p>
-      ) : (
-        <div className="app__columns">
-          <div className="app__column">
-            <PhotoView
-              photo={session.photo}
-              overlay={overlay}
-              busy={overlayBusy}
-              errorMessage={overlayError}
-              builderWired={overlayBuilder !== undefined}
-              missingFieldCount={session.missing.length}
-            />
-            <TrimSliders
-              trim={state.trim}
-              onTrimChange={(axis, valueDeg) => {
-                dispatch({ type: 'trim-changed', axis, valueDeg });
-              }}
-              onReset={() => {
-                dispatch({ type: 'trim-reset' });
-              }}
-              basePose={session.basePose}
-              effectivePose={session.effectivePose}
-            />
-            <PoseReadout
-              request={session.overlayRequest}
-              missing={session.missing}
-            />
-            <ObscuredPeaksControl
-              showObscuredPeaks={state.showObscuredPeaks}
-              onToggle={(enabled) => {
-                dispatch({ type: 'obscured-peaks-toggled', enabled });
-              }}
-            />
-            <ExportControl
-              disabledReason={disabledReason}
-              busy={exportBusy}
-              message={exportMessage}
-              onExport={handleExport}
-              fileName={downloadName}
-            />
+        {session === undefined ? (
+          <p className="status" data-testid="empty-state">
+            No photo loaded yet.
+          </p>
+        ) : (
+          <div className="app__columns">
+            <div className="app__column">
+              <PhotoView
+                photo={session.photo}
+                overlay={overlay}
+                busy={overlayBusy}
+                errorMessage={overlayError}
+                builderWired={overlayBuilder !== undefined}
+                missingFieldCount={session.missing.length}
+              />
+              <TrimSliders
+                trim={state.trim}
+                onTrimChange={(axis, valueDeg) => {
+                  dispatch({ type: 'trim-changed', axis, valueDeg });
+                }}
+                onReset={() => {
+                  dispatch({ type: 'trim-reset' });
+                }}
+                basePose={session.basePose}
+                effectivePose={session.effectivePose}
+              />
+              <PoseReadout
+                request={session.overlayRequest}
+                missing={session.missing}
+              />
+              <ObscuredPeaksControl
+                showObscuredPeaks={state.showObscuredPeaks}
+                onToggle={(enabled) => {
+                  dispatch({ type: 'obscured-peaks-toggled', enabled });
+                }}
+              />
+              <ExportControl
+                disabledReason={disabledReason}
+                busy={exportBusy}
+                message={exportMessage}
+                onExport={handleExport}
+                fileName={downloadName}
+              />
+            </div>
+            <div className="app__column">
+              <ExifSummary exif={session.photo.exif} dimensions={session.dimensions} />
+              <OverridePanel
+                resolution={session.resolution}
+                drafts={state.drafts}
+                onDraftChange={(field, text) => {
+                  dispatch({ type: 'draft-changed', field, text });
+                }}
+                onDraftRevert={(field) => {
+                  dispatch({ type: 'draft-reverted', field });
+                }}
+                declinationDraft={state.declinationDraft}
+                onDeclinationChange={(text) => {
+                  dispatch({ type: 'declination-changed', text });
+                }}
+                useStandardAssumptions={state.useStandardAssumptions}
+                onAssumptionsToggle={(enabled) => {
+                  dispatch({ type: 'assumptions-toggled', enabled });
+                }}
+              />
+            </div>
           </div>
-          <div className="app__column">
-            <ExifSummary exif={session.photo.exif} dimensions={session.dimensions} />
-            <OverridePanel
-              resolution={session.resolution}
-              drafts={state.drafts}
-              onDraftChange={(field, text) => {
-                dispatch({ type: 'draft-changed', field, text });
-              }}
-              onDraftRevert={(field) => {
-                dispatch({ type: 'draft-reverted', field });
-              }}
-              declinationDraft={state.declinationDraft}
-              onDeclinationChange={(text) => {
-                dispatch({ type: 'declination-changed', text });
-              }}
-              useStandardAssumptions={state.useStandardAssumptions}
-              onAssumptionsToggle={(enabled) => {
-                dispatch({ type: 'assumptions-toggled', enabled });
-              }}
-            />
-          </div>
-        </div>
-      )}
-    </main>
+        )}
+      </main>
+
+      {/*
+       * Outside <main> on purpose: a <footer> that is not nested in a sectioning
+       * element is the document's contentinfo landmark, so a screen-reader user
+       * can jump straight to the data credit. It is the last thing in the
+       * document and sticks to the bottom of the viewport — see the component.
+       */}
+      <AttributionFooter />
+    </>
   );
 }

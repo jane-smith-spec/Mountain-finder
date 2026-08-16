@@ -37,12 +37,14 @@ import {
   type DegreeBox,
 } from './overture-peaks.js';
 import {
+  CountingRangeBuffer,
   planParquetRead,
   readParquetMetadata,
   readRowGroup,
   rowGroupExtents,
   type FileMetaData,
 } from './overture-parquet.js';
+import type { ColumnChunk, ColumnMetaData, Statistics } from 'hyparquet';
 import { parseParquetSliceMeta, parquetSliceBuffer } from './parquet-slice.js';
 import { ProviderError } from './errors.js';
 import groundTruth from '../../fixtures/peaks/ground-truth-peaks.json';
@@ -190,6 +192,151 @@ describe('P9.2 — spatial pruning', () => {
     expect(only).toHaveLength(1);
     const rows = await readRowGroup(buffer, metadata, only[0]!, OVERTURE_LAND_COLUMNS);
     expect(rows).toHaveLength(expectations.rowGroupRows);
+  });
+});
+
+/*
+ * Wave 3 gate gap 1 — the fallback that costs every peak if it is inverted.
+ *
+ * `rowGroupExtents` gives a group with incomplete bbox statistics the WHOLE
+ * WORLD, so it is fetched and filtered rather than skipped unseen. The real
+ * Overture footer has statistics on every group, so no test built from it can
+ * ever exercise that branch: inverting the fallback to an empty box — which
+ * prunes every such group and returns zero peaks from a healthy file — passed
+ * the whole suite. This builds the footer that branch needs instead.
+ *
+ * The metadata below is synthetic and minimal: `rowGroupExtents` reads
+ * `num_rows`, `total_byte_size` and the column chunks' `path_in_schema`,
+ * `total_compressed_size` and `statistics`, and nothing else.
+ */
+describe('a row group whose bbox statistics are missing', () => {
+  function chunk(path: string, stats: Statistics | undefined): ColumnChunk {
+    const meta: ColumnMetaData = {
+      type: 'DOUBLE',
+      encodings: ['PLAIN'],
+      path_in_schema: path.split('.'),
+      codec: 'SNAPPY',
+      num_values: 10n,
+      total_uncompressed_size: 200n,
+      total_compressed_size: 100n,
+      data_page_offset: 4n,
+      ...(stats === undefined ? {} : { statistics: stats }),
+    };
+    return { file_offset: 4n, meta_data: meta };
+  }
+
+  /** One row group over the columns the importer reads, statistics on or off. */
+  function metadataWith(statistics: 'present' | 'stripped'): FileMetaData {
+    const stats = (min: number, max: number): Statistics | undefined =>
+      statistics === 'present' ? { min_value: min, max_value: max } : undefined;
+    return {
+      version: 2,
+      schema: [{ name: 'root' }],
+      num_rows: 10n,
+      metadata_length: 0,
+      row_groups: [
+        {
+          num_rows: 10n,
+          total_byte_size: 600n,
+          columns: [
+            chunk('bbox.xmin', stats(7.6, 7.6)),
+            chunk('bbox.xmax', stats(7.8, 7.8)),
+            chunk('bbox.ymin', stats(45.9, 45.9)),
+            chunk('bbox.ymax', stats(46.0, 46.0)),
+            chunk('names.primary', undefined),
+            chunk('elevation', undefined),
+          ],
+        },
+      ],
+    };
+  }
+
+  it('is given the whole world, so it is read and filtered rather than skipped', () => {
+    const [extent] = rowGroupExtents(metadataWith('stripped'), OVERTURE_LAND_COLUMNS);
+    expect(extent).toBeDefined();
+    expect(extent?.box).toEqual({ south: -90, west: -180, north: 90, east: 180 });
+  });
+
+  it('survives pruning for a box on the other side of the planet', () => {
+    // An empty-box fallback would prune this group — and every group in a file
+    // that stopped writing statistics — leaving an import that silently
+    // returns zero peaks from a perfectly good part.
+    const plan = planParquetRead(
+      metadataWith('stripped'),
+      { south: -44.5, west: 169, north: -43, east: 171 },
+      OVERTURE_LAND_COLUMNS,
+    );
+    expect(plan.groups).toHaveLength(1);
+    expect(plan.plannedBytes).toBeGreaterThan(0);
+  });
+
+  it('prunes normally as soon as the statistics are there', () => {
+    // The same synthetic file WITH statistics must prune, or the test above
+    // would pass for the trivial reason that nothing prunes at all.
+    const plan = planParquetRead(
+      metadataWith('present'),
+      { south: -44.5, west: 169, north: -43, east: 171 },
+      OVERTURE_LAND_COLUMNS,
+    );
+    expect(plan.groups).toHaveLength(0);
+    const near = planParquetRead(
+      metadataWith('present'),
+      { south: 45.9, west: 7.6, north: 46.05, east: 7.8 },
+      OVERTURE_LAND_COLUMNS,
+    );
+    expect(near.groups).toHaveLength(1);
+  });
+});
+
+/*
+ * Wave 3 gate gap 2 — the Range header string itself.
+ *
+ * HTTP byte ranges are INCLUSIVE at both ends; Parquet's are half-open. The
+ * conversion is one `- 1` three lines above the length check that would catch
+ * it, and only the length check was gated. An off-by-one here fetches one byte
+ * too few or too many from every request the importer makes.
+ */
+describe('CountingRangeBuffer — the Range header it sends', () => {
+  function recordingBuffer(): { buffer: CountingRangeBuffer; headers: string[] } {
+    const headers: string[] = [];
+    const buffer = new CountingRangeBuffer('https://example.invalid/part.parquet', 1000, async (
+      _url,
+      init,
+    ) => {
+      const header = init.headers['Range'] ?? '';
+      headers.push(header);
+      const match = /^bytes=(\d+)-(\d+)$/.exec(header);
+      if (match === null) throw new Error(`unparseable Range header ${header}`);
+      const from = Number(match[1]);
+      const to = Number(match[2]);
+      return {
+        ok: true,
+        status: 206,
+        arrayBuffer: async () => new ArrayBuffer(to - from + 1),
+      };
+    });
+    return { buffer, headers };
+  }
+
+  it('asks for an inclusive range one shorter than the half-open one', async () => {
+    const { buffer, headers } = recordingBuffer();
+    // Bytes 100…199 are 100 bytes; the last byte's index is 199, not 200.
+    const slice = await buffer.slice(100, 200);
+    expect(headers).toEqual(['bytes=100-199']);
+    expect(slice.byteLength).toBe(100);
+    expect(buffer.bytesFetched).toBe(100);
+  });
+
+  it('asks for the final byte of the file when no end is given', async () => {
+    const { buffer, headers } = recordingBuffer();
+    await buffer.slice(996);
+    expect(headers).toEqual(['bytes=996-999']);
+  });
+
+  it('asks for a single byte as a range of one', async () => {
+    const { buffer, headers } = recordingBuffer();
+    await buffer.slice(7, 8);
+    expect(headers).toEqual(['bytes=7-7']);
   });
 });
 

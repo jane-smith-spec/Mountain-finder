@@ -200,6 +200,51 @@ describe('window sidecar', () => {
       parseTileWindowMeta({ format, geometry: {}, source: {}, name: 'x', data: 'x.i16be' }, 'x.json'),
     ).toThrow(/geometry.northLat must be a finite number/);
   });
+
+  /* Wave 3 suspicion — a sidecar step is a DIVISOR. `HgtTile.indexFor` divides
+   * by `latStepDeg`/`lonStepDeg`; a zero step yields NaN indices and a negative
+   * one silently mirrors the grid, reading the wrong row for every query.
+   * `parseTerrainManifest` already refuses both for a served grid; the file on
+   * disk got no such check. */
+  it('rejects a spacing that is not positive, which would divide by zero', () => {
+    const format = 'int16-be-row-major-north-first';
+    const good = {
+      format,
+      name: 'w',
+      data: 'w.i16be',
+      geometry: { northLat: 46, westLon: 7, rows: 3, cols: 3, latStepDeg: 0.5, lonStepDeg: 0.5 },
+      source: { tile: 'N45E007', url: 'x', dataset: 'srtm1', extractedFromRow: 0, extractedFromCol: 0 },
+    };
+    expect(() => parseTileWindowMeta(good, 'w.json')).not.toThrow();
+    for (const geometry of [
+      { ...good.geometry, latStepDeg: 0 },
+      { ...good.geometry, lonStepDeg: 0 },
+      { ...good.geometry, latStepDeg: -1 / 3600 },
+    ]) {
+      expect(() => parseTileWindowMeta({ ...good, geometry }, 'w.json')).toThrow(
+        /spacing must be positive/,
+      );
+    }
+  });
+
+  it('rejects a row/column count that cannot address a grid', () => {
+    const format = 'int16-be-row-major-north-first';
+    const good = {
+      format,
+      name: 'w',
+      data: 'w.i16be',
+      geometry: { northLat: 46, westLon: 7, rows: 3, cols: 3, latStepDeg: 0.5, lonStepDeg: 0.5 },
+      source: { tile: 'N45E007', url: 'x', dataset: 'srtm1', extractedFromRow: 0, extractedFromCol: 0 },
+    };
+    for (const geometry of [
+      { ...good.geometry, rows: 1 },
+      { ...good.geometry, cols: 2.5 },
+    ]) {
+      expect(() => parseTileWindowMeta({ ...good, geometry }, 'w.json')).toThrow(
+        /must be an integer >= 2/,
+      );
+    }
+  });
 });
 
 /* ------------------------------------------------------------------ *

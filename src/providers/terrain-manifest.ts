@@ -34,7 +34,7 @@
 import { ProviderError } from './errors.js';
 import { BYTES_PER_SAMPLE, gridSizeForByteLength, type GridGeometry } from './hgt-tile.js';
 import { parseTileName, type TileBounds } from './tile-store.js';
-import { datasetLabelForGridSize } from './tile-elevation.js';
+import { datasetLabelForStepDeg } from './tile-elevation.js';
 
 /** Version of the index format this module understands. */
 export const TERRAIN_MANIFEST_VERSION = 1;
@@ -159,7 +159,9 @@ export function terrainGridForTileFile(
   return {
     name: name.toUpperCase(),
     url,
-    dataset: datasetLabelForGridSize(size),
+    // Labelled from the spacing, so a whole tile and a window cut from it
+    // report the same resolution — see `datasetLabelForStepDeg`.
+    dataset: datasetLabelForStepDeg(step),
     geometry: {
       northLat: corner.southLat + 1,
       westLon: corner.westLon,

@@ -34,6 +34,7 @@ import type { LatLng, Peak } from '../core/types.js';
 import { ProviderError } from './errors.js';
 import {
   LocalPeakStore,
+  compareRecordId,
   parsePeakDataset,
   type PeakDataset,
   type PeakRecord,
@@ -47,7 +48,7 @@ import type {
   PeaksProvider,
   PeaksRequestOptions,
 } from './peaks.js';
-import { tileNameFor, tileNamesForBounds } from './tile-store.js';
+import { lonOffsetEastDeg, lonWidthDeg, tileNameFor, tileNamesForBounds } from './tile-store.js';
 
 /**
  * The smallest degree box that contains every point within `radiusKm`.
@@ -268,10 +269,80 @@ export function parsePeakCell(
 }
 
 /**
+ * What a query asked for, measured against what this dataset can answer.
+ *
+ * ── WHY THIS TYPE EXISTS (Wave 3 finding 3) ───────────────────────────────
+ * `index.bounds` records the area the import was cut for, and its own comment
+ * says peaks outside it are "absent by design, not by loss" — but no query
+ * method consulted it. A 200 km request (the pipeline's default) against a
+ * dataset cut for one valley was answered from the cells that happened to
+ * exist, stopped dead at the dataset's edge, and came back as a plain list. A
+ * caller could not tell a summit that is not there from a summit that was never
+ * imported: on the Zermatt region, Mont Blanc — 4808 m, 73 km away, unmissable
+ * from the Gornergrat — is simply absent, with no note.
+ *
+ * That is the peak-database mirror of the terrain layer's missing tile, and it
+ * gets the same treatment: the provider states the gap in the caller's own
+ * terms (`TerrainCoverage` does exactly this for elevation, and
+ * `AnnotatedScene.unmeasured` does it for peaks the sweep could not judge).
+ * What it must NOT do is present a truncated list as a complete one.
+ */
+export interface PeakCoverage {
+  /** True when the dataset's declared bounds contain the whole query area. */
+  readonly complete: boolean;
+  /** The degree box the query resolves to. For a radius, the box around it. */
+  readonly requested: BoundingBox;
+  /** The radius asked for, when this was a radius query. */
+  readonly requestedRadiusKm?: number;
+  /** The area the dataset was imported for — `index.bounds`. */
+  readonly datasetBounds: BoundingBox;
+  /** One-degree cells the query box spans. */
+  readonly cellsSpanned: number;
+  /** How many of those this dataset holds. */
+  readonly cellsHeld: number;
+  /**
+   * Radius queries only: the largest radius wholly inside the dataset bounds.
+   * Summits beyond it may be missing from the answer BY EXTENT. `0` when the
+   * centre is outside the dataset altogether.
+   */
+  readonly coveredRadiusKm?: number;
+  /** A sentence naming the extent. Present only when `complete` is false. */
+  readonly note?: string;
+}
+
+/** What a store does when a query reaches past the data it holds. */
+export type PeakCoveragePolicy =
+  /** Answer with what the dataset has; `coverageFor` states the gap. Default. */
+  | 'report'
+  /** Refuse the query, naming the extent — for callers that need it complete. */
+  | 'throw';
+
+export interface TiledPeakStoreOptions {
+  /** Default `'report'`. See {@link PeakCoveragePolicy}. */
+  readonly coveragePolicy?: PeakCoveragePolicy;
+}
+
+/**
  * A peak database addressed by 1° cell, loading only the cells a query touches.
  *
  * Loaded cells are cached for the life of the store, so a session that pans
  * around one valley pays for that valley once.
+ *
+ * ON PARTIAL COVERAGE. A query wider than the dataset is answered, not refused,
+ * because a dataset deliberately cut for one valley is a legitimate thing to
+ * hold and a 200 km request against it is a legitimate thing to ask — the
+ * caller wants the summits in that valley, and throwing would deny them. What
+ * the store may not do is let the truncation pass unremarked, so:
+ *
+ *   • {@link TiledPeakStore.coverageFor} answers before any cell is loaded, and
+ *     is the inspectable fact — bounds, cells spanned vs held, and the radius
+ *     out to which the answer is trustworthy.
+ *   • `coveragePolicy: 'throw'` turns partial coverage into a refusal, exactly
+ *     as `TileElevationProvider`'s `missingTilePolicy: 'throw'` does for a tile
+ *     that has not been downloaded.
+ *   • An empty answer to a query that overflows the dataset says so instead of
+ *     claiming there are no peaks out there — the difference between "we looked
+ *     and there are none" and "we never held that ground".
  */
 export class TiledPeakStore implements PeaksProvider {
   readonly index: PeakCellIndex;
@@ -280,11 +351,13 @@ export class TiledPeakStore implements PeaksProvider {
   private readonly entries: ReadonlyMap<string, PeakCellEntry>;
   private readonly loaded = new Map<string, LocalPeakStore>();
   private readonly inFlight = new Map<string, Promise<LocalPeakStore>>();
+  private readonly coveragePolicy: PeakCoveragePolicy;
 
-  constructor(index: PeakCellIndex, loader: PeakCellLoader) {
+  constructor(index: PeakCellIndex, loader: PeakCellLoader, options: TiledPeakStoreOptions = {}) {
     this.index = index;
     this.loader = loader;
     this.entries = new Map(index.cells.map((cell) => [cell.name, cell]));
+    this.coveragePolicy = options.coveragePolicy ?? 'report';
   }
 
   /** Cell names held by this dataset, in index order. */
@@ -304,18 +377,47 @@ export class TiledPeakStore implements PeaksProvider {
 
   /** Cells the dataset holds that a box touches. Cells it does not hold are skipped. */
   cellsForBox(box: BoundingBox): readonly PeakCellEntry[] {
-    const wanted = tileNamesForBounds({
-      south: Math.max(-90, box.south),
-      north: Math.min(90, box.north),
-      west: box.west,
-      east: box.east,
-    });
     const entries: PeakCellEntry[] = [];
-    for (const name of wanted) {
+    for (const name of cellNamesForBox(box)) {
       const entry = this.entries.get(name);
       if (entry !== undefined) entries.push(entry);
     }
     return entries;
+  }
+
+  /**
+   * How much of a query this dataset can actually answer — decided from the
+   * index alone, so it costs nothing and can be asked BEFORE the query.
+   *
+   * See {@link PeakCoverage}. `complete` is judged against `index.bounds`, the
+   * area the import was cut for, not against which cells exist: an importer may
+   * legitimately omit a cell inside its bounds that holds no named summits, and
+   * that is not a gap in coverage.
+   */
+  coverageFor(area: PeakSearchArea): PeakCoverage {
+    const box = 'bbox' in area ? area.bbox : boundingBoxAround(area.center, area.radiusKm);
+    const names = cellNamesForBox(box);
+    let held = 0;
+    for (const name of names) if (this.entries.has(name)) held += 1;
+
+    const bounds = this.index.bounds;
+    const complete = boxWithinBounds(box, bounds);
+    const base = {
+      complete,
+      requested: box,
+      datasetBounds: bounds,
+      cellsSpanned: names.length,
+      cellsHeld: held,
+    };
+    const radial =
+      'bbox' in area
+        ? base
+        : {
+            ...base,
+            requestedRadiusKm: area.radiusKm,
+            coveredRadiusKm: radiusInsideBoundsKm(area.center, bounds),
+          };
+    return complete ? radial : { ...radial, note: coverageNote(radial) };
   }
 
   private async cell(entry: PeakCellEntry): Promise<LocalPeakStore> {
@@ -379,15 +481,31 @@ export class TiledPeakStore implements PeaksProvider {
     if (options.signal?.aborted === true) {
       throw new ProviderError('aborted', 'Peak lookup was aborted by the caller');
     }
+    const coverage = this.coverageFor(area);
+    if (!coverage.complete && this.coveragePolicy === 'throw') {
+      throw new ProviderError(
+        'empty-result',
+        `This query reaches past the peak dataset and coveragePolicy is "throw". ${
+          coverage.note ?? ''
+        }`.trim(),
+      );
+    }
     const records =
       'bbox' in area
         ? await this.recordsInBox(area.bbox)
         : (await this.recordsWithin(area.center, area.radiusKm)).map(({ record }) => record);
 
     if (records.length === 0 && options.allowEmpty !== true) {
+      // An empty answer from a query that overflowed the dataset is not
+      // evidence that there are no mountains out there, and must not be
+      // reported as if it were.
       throw new ProviderError(
         'empty-result',
-        'The local peak dataset holds no named peaks in this area',
+        coverage.complete
+          ? 'The local peak dataset holds no named peaks in this area'
+          : `The local peak dataset holds no named peaks in the part of this area it covers. ${
+              coverage.note ?? ''
+            }`.trim(),
       );
     }
     return records.map((record) => ({
@@ -401,8 +519,112 @@ export class TiledPeakStore implements PeaksProvider {
   }
 }
 
+/** The 1° cells a box touches, latitude clamped to the globe. */
+function cellNamesForBox(box: BoundingBox): readonly string[] {
+  return tileNamesForBounds({
+    south: Math.max(-90, box.south),
+    north: Math.min(90, box.north),
+    west: box.west,
+    east: box.east,
+  });
+}
+
+/**
+ * Does `outer` contain `inner`? Longitude through the shared seam rule, so a
+ * box written 179.33 … 180.47 is compared the same way peaks in it are.
+ */
+function boxWithinBounds(inner: BoundingBox, outer: BoundingBox): boolean {
+  if (inner.south < outer.south || inner.north > outer.north) return false;
+  const outerWidth = lonWidthDeg(outer.west, outer.east);
+  if (outerWidth >= 360) return true;
+  const innerWidth = lonWidthDeg(inner.west, inner.east);
+  if (innerWidth >= 360) return false;
+  return lonOffsetEastDeg(inner.west, outer.west) + innerWidth <= outerWidth;
+}
+
+/** Kilometres per radian on the datum sphere. */
+const KM_PER_RADIAN = EARTH_RADIUS_M / 1000;
+
+/**
+ * The largest radius around `center` that lies wholly inside `bounds`, in km.
+ *
+ * Derivation (spherical Earth, written out rather than taken from any code):
+ *   • The nearest point of the PARALLEL φ₀ is the one at the same longitude, so
+ *     that edge is `R·|φ − φ₀|` away.
+ *   • A MERIDIAN λ₀ is half of a great circle. The cross-track distance from a
+ *     point to that great circle is `R·asin(sin Δλ · cos φ)`. That formula puts
+ *     the perpendicular foot on the λ₀ half only while `|Δλ| ≤ 90°`; beyond
+ *     that the foot is on the antipodal half and the nearest point of the λ₀
+ *     meridian itself is the nearer pole, `R·(π/2 − |φ|)` away.
+ *   • The answer is the smallest of the four edge distances; a centre outside
+ *     the bounds is covered out to no radius at all.
+ */
+function radiusInsideBoundsKm(center: LatLng, bounds: BoundingBox): number {
+  const width = lonWidthDeg(bounds.west, bounds.east);
+  const eastOfWest = lonOffsetEastDeg(center.lon, bounds.west);
+  const insideLon = width >= 360 || eastOfWest <= width;
+  if (center.lat < bounds.south || center.lat > bounds.north || !insideLon) return 0;
+
+  const distances = [
+    KM_PER_RADIAN * toRadians(center.lat - bounds.south),
+    KM_PER_RADIAN * toRadians(bounds.north - center.lat),
+  ];
+  if (width < 360) {
+    distances.push(
+      distanceToMeridianKm(center, eastOfWest),
+      distanceToMeridianKm(center, width - eastOfWest),
+    );
+  }
+  return Math.min(...distances);
+}
+
+/** Great-circle distance from a point to a meridian `deltaLonDeg` away. */
+function distanceToMeridianKm(center: LatLng, deltaLonDeg: number): number {
+  if (deltaLonDeg >= 90) {
+    return KM_PER_RADIAN * toRadians(90 - Math.abs(center.lat));
+  }
+  return (
+    KM_PER_RADIAN *
+    Math.asin(Math.sin(toRadians(deltaLonDeg)) * Math.cos(toRadians(center.lat)))
+  );
+}
+
+/** `45.6 N`, `17.6 S`, `7.2 E`, `179.7 W` — signs read as hemispheres. */
+function describeLat(lat: number): string {
+  return `${trim(Math.abs(lat))} ${lat < 0 ? 'S' : 'N'}`;
+}
+
+function describeLon(lon: number): string {
+  return `${trim(Math.abs(lon))} ${lon < 0 ? 'W' : 'E'}`;
+}
+
+function trim(value: number): string {
+  return String(Number(value.toFixed(4)));
+}
+
+/**
+ * The sentence a caller can show. Phrased like the terrain layer's missing-tile
+ * message: what the data covers, what was asked for, and what that means for
+ * what is NOT in the answer.
+ */
+function coverageNote(coverage: Omit<PeakCoverage, 'note'>): string {
+  const b = coverage.datasetBounds;
+  const extent =
+    `The peak dataset covers ${describeLat(b.south)}…${describeLat(b.north)}, ` +
+    `${describeLon(b.west)}…${describeLon(b.east)} — the area it was imported for.`;
+  const cells =
+    `This query spans ${coverage.cellsSpanned} one-degree cell` +
+    `${coverage.cellsSpanned === 1 ? '' : 's'} and the dataset holds ${coverage.cellsHeld}.`;
+  const reach =
+    coverage.coveredRadiusKm === undefined
+      ? 'Summits outside those bounds are absent by the dataset’s extent, not by absence of mountains.'
+      : `Summits farther than ${coverage.coveredRadiusKm.toFixed(1)} km from the centre may be ` +
+        'absent by the dataset’s extent, not by absence of mountains.';
+  return `${extent} ${cells} ${reach}`;
+}
+
 function compareId(a: PeakRecordSighting, b: PeakRecordSighting): number {
-  return a.record.id < b.record.id ? -1 : a.record.id > b.record.id ? 1 : 0;
+  return compareRecordId(a.record, b.record);
 }
 
 function toCorePeak(record: PeakRecord): Peak {

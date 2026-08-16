@@ -143,12 +143,88 @@ describe('LocalPeakStore — radius queries', () => {
     expect(() => store.recordsWithin({ lat: 10, lon: 20 }, -1)).toThrow(RangeError);
   });
 
+  /* Wave 3 suspicion — two stores, one contract. `TiledPeakStore` has to
+   * re-sort the sightings it collects from several cells and breaks ties on the
+   * peak id; `LocalPeakStore` left ties in dataset order. Same query, same
+   * peaks, different order, and anything downstream that takes "the first n" or
+   * places labels in order gets a different answer depending on which store it
+   * was handed. The tie-break is the id, in both. */
+  it('breaks a distance tie on the peak id, like the tiled store', () => {
+    const tied = mutated((d) => {
+      const peaks = peaksOf(d);
+      const first = peaks[0];
+      const second = peaks[1];
+      if (first === undefined || second === undefined) throw new Error('lost a peak');
+      // Symmetric about lat 10: both are exactly 0.05° from the query point,
+      // and the one listed FIRST sorts SECOND by id.
+      first['id'] = 'test/zulu';
+      first['lat'] = 10.05;
+      second['id'] = 'test/alpha';
+      second['lat'] = 9.95;
+    });
+    const store = new LocalPeakStore(parsePeakDataset(tied));
+    const found = store.recordsWithin({ lat: 10, lon: 20 }, 10);
+    expect(found.map((sighting) => sighting.record.id)).toEqual(['test/alpha', 'test/zulu']);
+  });
+
   it('reports each record with the range the geometry core will compute', () => {
     const [nearest, next] = store.recordsWithin({ lat: 10, lon: 20 }, 50);
     expect(nearest?.distanceKm).toBeCloseTo(0, 6);
     // 0.1 deg of latitude on a sphere of R = 6 371 008.8 m:
     //   0.1 * pi/180 * 6371008.8 m = 11 119.5 m.
     expect(next?.distanceKm).toBeCloseTo(11.1195, 3);
+  });
+});
+
+/* Wave 3 finding 2 — one notion of "inside this box".
+ *
+ * A degree box is a longitude INTERVAL walked eastward from `west`, exactly as
+ * `tileNamesForBounds` walks it. Longitudes are periodic, so a box may be
+ * written unnormalised (179.33 … 180.47, which `boundingBoxAround` emits near
+ * the seam) while the peaks in it are stored in [−180, 180]. Comparing the two
+ * raw discards everything west of the meridian.
+ *
+ * Coordinates below are the Fiji-side reproduction from the review: a box
+ * 179.33 … 180.47 E is 1.14° wide, so a summit at 179.6 E sits 0.27° into it
+ * and a summit at 179.7 W — the same line as 180.3 E — sits 0.97° into it.
+ * Both are inside; a summit at 178.9 W (181.1 E) is 1.77° along and outside.
+ */
+describe('LocalPeakStore — a box that crosses the antimeridian', () => {
+  function seamStore(): LocalPeakStore {
+    const dataset = mutated((d) => {
+      const peaks = peaksOf(d);
+      const east = peaks[0];
+      const west = peaks[1];
+      if (east === undefined || west === undefined) throw new Error('test dataset lost a peak');
+      east['id'] = 'test/east-of-seam';
+      east['name'] = 'East of seam';
+      east['lat'] = -17.6;
+      east['lon'] = 179.6;
+      west['id'] = 'test/west-of-seam';
+      west['name'] = 'West of seam';
+      west['lat'] = -17.6;
+      west['lon'] = -179.7;
+    });
+    return new LocalPeakStore(parsePeakDataset(dataset));
+  }
+
+  const box = { south: -18.5, west: 179.33, north: -17.5, east: 180.47 };
+
+  it('keeps the peaks on BOTH sides of the meridian', () => {
+    const found = seamStore().recordsInBox(box);
+    expect([...found.map((record) => record.id)].sort()).toEqual([
+      'test/east-of-seam',
+      'test/west-of-seam',
+    ]);
+  });
+
+  it('still excludes a peak past the box’s east edge', () => {
+    const found = seamStore().recordsInBox({ ...box, east: 180.1 });
+    expect(found.map((record) => record.id)).toEqual(['test/east-of-seam']);
+  });
+
+  it('does not claim an empty area while holding matching peaks', async () => {
+    await expect(seamStore().fetchPeaks({ bbox: box })).resolves.toHaveLength(2);
   });
 });
 

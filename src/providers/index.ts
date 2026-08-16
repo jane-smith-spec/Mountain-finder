@@ -71,6 +71,9 @@ export type {
 
 export {
   MemoryTileStore,
+  lonOffsetEastDeg,
+  lonWidthDeg,
+  lonWithinBounds,
   normaliseLon,
   parseNamedTile,
   parseTileName,
@@ -106,6 +109,7 @@ export {
   MISSING_TILE_DATASET,
   TileElevationProvider,
   datasetLabelForGridSize,
+  datasetLabelForStepDeg,
 } from './tile-elevation.js';
 export type { TerrainSample, TerrainStatus, TileElevationOptions } from './tile-elevation.js';
 
@@ -140,7 +144,13 @@ export type {
   ResolvedPeaks,
 } from './peaks.js';
 
-export { LocalPeakStore, parsePeakDataset, toPeak, toPeakCandidate } from './peak-store.js';
+export {
+  LocalPeakStore,
+  compareRecordId,
+  parsePeakDataset,
+  toPeak,
+  toPeakCandidate,
+} from './peak-store.js';
 export type {
   PeakDataset,
   PeakRecord,
@@ -156,7 +166,14 @@ export {
   parsePeakCell,
   parsePeakCellIndex,
 } from './peak-tile-store.js';
-export type { PeakCellEntry, PeakCellIndex, PeakCellLoader } from './peak-tile-store.js';
+export type {
+  PeakCellEntry,
+  PeakCellIndex,
+  PeakCellLoader,
+  PeakCoverage,
+  PeakCoveragePolicy,
+  TiledPeakStoreOptions,
+} from './peak-tile-store.js';
 
 // The pure half of the Overture importer only. `overture-parquet.js` (hyparquet
 // + zstd), `parquet-slice.js` and `peak-directory.js` are deliberately NOT

@@ -145,9 +145,19 @@ function nameList(names: readonly string[], limit = 4): string {
  * The message shown when the app has no terrain for a photograph.
  *
  * Written to be actionable rather than apologetic: where the photo is, which
- * tile that needs, what the app does hold, and the command that closes the gap.
- * It also states plainly that nothing was drawn, because the failure mode being
- * guarded against is a blank overlay being read as "no peaks are visible".
+ * tile that needs, and what the deployment does hold. It also states plainly
+ * that nothing was drawn, because the failure mode being guarded against is a
+ * blank overlay being read as "no peaks are visible".
+ *
+ * ── WHO IS READING IT ──────────────────────────────────────────────────────
+ * Two audiences, one string. A visitor to a deployed site cannot run npm and
+ * has no `data/tiles/` to serve, so the first three sentences are addressed to
+ * them and say what is true of the *deployment*: this build does not hold that
+ * square degree of the planet, and that is a gap in what was published, not a
+ * verdict about the view. The developer instruction is kept — it is the one
+ * sentence that closes the gap — but it comes last and is explicitly scoped to
+ * someone running a source checkout, so a stranger is never told to type a
+ * command that cannot exist for them.
  */
 export function noTerrainMessage(coverage: TerrainCoverage, at: LatLng): string {
   const held =
@@ -156,11 +166,13 @@ export function noTerrainMessage(coverage: TerrainCoverage, at: LatLng): string 
       : `It is serving: ${nameList(coverage.available, 6)}.`;
   return (
     `No terrain data for ${at.lat.toFixed(5)}, ${at.lon.toFixed(5)}. ` +
-    `That position needs SRTM tile ${coverage.tileName}, which this app does not have. ` +
+    `That position needs SRTM tile ${coverage.tileName}, which this deployment does not hold. ` +
     `${held} ` +
-    `Run "npm run fetch:tiles -- ${coverage.tileName}" and serve data/tiles/ at /terrain/. ` +
-    'Until then there is no horizon and no visibility verdict here, so nothing is drawn — ' +
-    'an empty overlay would look like "no peaks are visible", which is a different claim.'
+    'Without it there is no horizon and no visibility verdict here, so nothing is drawn — ' +
+    'an empty overlay would look like "no peaks are visible", which is a different claim. ' +
+    'Photographs taken over the terrain this build does ship are unaffected. ' +
+    `(Running Mountain Finder from a source checkout? "npm run fetch:tiles -- ${coverage.tileName}" ` +
+    'downloads that tile into data/tiles/, which is served at /terrain/.)'
   );
 }
 

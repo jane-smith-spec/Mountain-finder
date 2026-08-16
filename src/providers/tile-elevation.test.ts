@@ -11,6 +11,7 @@ import {
   MISSING_TILE_DATASET,
   TileElevationProvider,
   datasetLabelForGridSize,
+  datasetLabelForStepDeg,
 } from './tile-elevation.js';
 import { toElevationSamples } from './elevation.js';
 import { isProviderError } from './errors.js';
@@ -97,6 +98,34 @@ describe('TileElevationProvider — the ElevationProvider contract', () => {
     expect(result?.dataset).toBe('hgt-21');
     expect(datasetLabelForGridSize(3601)).toBe('srtm1');
     expect(datasetLabelForGridSize(1201)).toBe('srtm3');
+    // Resolution IS the sample spacing; grid size is only a proxy for it, and
+    // only for a grid that spans a whole degree.
+    expect(datasetLabelForStepDeg(1 / 3600)).toBe('srtm1');
+    expect(datasetLabelForStepDeg(1 / 1200)).toBe('srtm3');
+    expect(datasetLabelForStepDeg(1 / 20)).toBe('hgt-21');
+    // A spacing that does not divide a degree evenly is named by the spacing.
+    expect(datasetLabelForStepDeg(0.3)).toBe('hgt-1080arcsec');
+    expect(() => datasetLabelForStepDeg(0)).toThrow(/positive/);
+  });
+
+  /* Wave 3 finding 4 — a WINDOW is not a tile, so its column count says
+   * nothing about its resolution. The committed case windows are exactly this
+   * shape: rectangles cut out of a 1-arc-second tile. A 1201-column window of
+   * SRTM1 data labelled `srtm3` claims 90 m posting over 30 m data — the
+   * manifest and the provider then disagree about the same bytes. */
+  it('labels a 1201-column WINDOW of 1-arc-second data as srtm1, not srtm3', async () => {
+    const step = 1 / 3600;
+    const window = new HgtTile(
+      new Int16Array(3 * 1201),
+      { northLat: 46, westLon: 7, rows: 3, cols: 1201, latStepDeg: step, lonStepDeg: step },
+      'N45E007-window',
+    );
+    const provider = new TileElevationProvider(new MemoryTileStore([['N45E007', window]]), {
+      interpolation: 'nearest',
+    });
+    const sample = await provider.sampleTerrain({ lat: 46 - step, lon: 7 + 100 * step });
+    expect(sample.status).toBe('ok');
+    expect(sample.dataset).toBe('srtm1');
   });
 
   it('plugs into toElevationSamples, which forces a no-data decision', async () => {
