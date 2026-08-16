@@ -1,0 +1,149 @@
+{
+  "release": "2026-06-17.0",
+  "key": "release/2026-06-17.0/theme=base/type=land/part-00011-2a3be0da-0aa7-5a09-88d0-9c0cf1d3e21e-c000.zstd.parquet",
+  "url": "https://overturemaps-us-west-2.s3.amazonaws.com/release/2026-06-17.0/theme=base/type=land/part-00011-2a3be0da-0aa7-5a09-88d0-9c0cf1d3e21e-c000.zstd.parquet",
+  "partByteLength": 424105813,
+  "retrieved": "2026-08-16",
+  "rowGroup": 21,
+  "columns": [
+    "id",
+    "names",
+    "subtype",
+    "class",
+    "elevation",
+    "bbox"
+  ],
+  "ranges": [
+    {
+      "start": 102608608,
+      "end": 103057326,
+      "offset": 0,
+      "label": "id"
+    },
+    {
+      "start": 103057466,
+      "end": 103069769,
+      "offset": 448718,
+      "label": "names.primary"
+    },
+    {
+      "start": 103069880,
+      "end": 103071193,
+      "offset": 461021,
+      "label": "names.common.key_value.key"
+    },
+    {
+      "start": 103071294,
+      "end": 103074461,
+      "offset": 462334,
+      "label": "names.common.key_value.value"
+    },
+    {
+      "start": 103074593,
+      "end": 103075856,
+      "offset": 465501,
+      "label": "names.rules.list.element.variant"
+    },
+    {
+      "start": 103075972,
+      "end": 103077207,
+      "offset": 466764,
+      "label": "names.rules.list.element.language"
+    },
+    {
+      "start": 103077310,
+      "end": 103078523,
+      "offset": 467999,
+      "label": "names.rules.list.element.perspectives.mode"
+    },
+    {
+      "start": 103078627,
+      "end": 103079827,
+      "offset": 469212,
+      "label": "names.rules.list.element.perspectives.countries.list.element"
+    },
+    {
+      "start": 103079949,
+      "end": 103081868,
+      "offset": 470412,
+      "label": "names.rules.list.element.value"
+    },
+    {
+      "start": 103082003,
+      "end": 103083217,
+      "offset": 472331,
+      "label": "names.rules.list.element.between.list.element"
+    },
+    {
+      "start": 103083324,
+      "end": 103084537,
+      "offset": 473545,
+      "label": "names.rules.list.element.side"
+    },
+    {
+      "start": 103084628,
+      "end": 103088409,
+      "offset": 474758,
+      "label": "subtype"
+    },
+    {
+      "start": 103088493,
+      "end": 103094753,
+      "offset": 478539,
+      "label": "class"
+    },
+    {
+      "start": 103303124,
+      "end": 103306815,
+      "offset": 484799,
+      "label": "elevation"
+    },
+    {
+      "start": 108819823,
+      "end": 108914661,
+      "offset": 488490,
+      "label": "bbox.xmin"
+    },
+    {
+      "start": 108914772,
+      "end": 109009478,
+      "offset": 583328,
+      "label": "bbox.xmax"
+    },
+    {
+      "start": 109009589,
+      "end": 109089366,
+      "offset": 678034,
+      "label": "bbox.ymin"
+    },
+    {
+      "start": 109089477,
+      "end": 109169410,
+      "offset": 757811,
+      "label": "bbox.ymax"
+    },
+    {
+      "start": 423581525,
+      "end": 424105813,
+      "offset": 837744,
+      "label": "footer"
+    }
+  ],
+  "sliceByteLength": 1362032,
+  "regenerateWith": "npm run fixtures:peak-parquet",
+  "description": "Row group 21 of part-00011-2a3be0da-0aa7-5a09-88d0-9c0cf1d3e21e-c000.zstd.parquet, plus the part's Parquet footer: the exact byte ranges one pruned read touches. The group holds 20629 rows spanning lon 7.280755519866943…7.787675857543945, lat 45.612369537353516…46.157691955566406 (from the footer's bbox statistics) and contains the Matterhorn. The part has 128 row groups and 2337243 rows in total. Overture data © OpenStreetMap contributors, ODbL-1.0.",
+  "expectations": {
+    "rowGroupCount": 128,
+    "fileRowCount": 2337243,
+    "rowGroupRowStart": 372344,
+    "rowGroupRows": 20629,
+    "rowGroupBox": {
+      "south": 45.612369537353516,
+      "west": 7.280755519866943,
+      "north": 46.157691955566406,
+      "east": 7.787675857543945
+    },
+    "selectedColumnBytes": 837744,
+    "totalCompressedBytes": 9933362
+  }
+}
