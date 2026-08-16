@@ -71,9 +71,36 @@ export interface PipelineConfig {
   /**
    * How far out to ask the peak source for summits. Independent of the sweep:
    * Mount Rainier is 97 km from Kerry Park while the terrain that decides its
-   * visibility is in the first kilometre. Default 200 km.
+   * visibility is often in the first kilometre. Default 200 km.
+   *
+   * A radius larger than the sweep's reach is allowed and useful, but it does
+   * NOT buy verdicts on the peaks past the end of the sweep — see
+   * {@link PipelineConfig.judgeBeyondMeasuredTerrain}.
    */
   readonly peakRadiusKm?: number;
+  /**
+   * Judge peaks whose sightline the terrain sweep did not measure to the end.
+   * **Default false**, i.e. refuse: such a peak is reported in
+   * `AnnotatedScene.unmeasured` with a warning and gets no verdict at all.
+   *
+   * The default is the honest one. "Visible" means no terrain in front of the
+   * summit reaches its angle, and a run that sampled 30 km of a 60 km sightline
+   * has not looked at the half where a blocker is most likely to sit. Terrain
+   * beyond the sweep cannot lower the verdict either — occlusion only ever
+   * accumulates — so what the short run really established is "nothing within
+   * 30 km hides it", which is a different and much weaker claim than the one a
+   * `visible` flag makes. This is the same refusal `hasTerrainAtBearing` makes
+   * across a hole in the bearing axis and `classifyOcclusion` makes across a
+   * hole in a ray, applied to the axis that was left out.
+   *
+   * Set it to true only where the truncation is deliberate and its meaning is
+   * written down — the acceptance suite's committed terrain windows are 3–10 km
+   * wide for sightlines of up to 292 km, and each states in its `coverageNote`
+   * exactly what a verdict there is worth. It is a declaration, not a
+   * convenience: with it set, `visible` means "nothing in the swept part hides
+   * it" and the caller owns that distinction.
+   */
+  readonly judgeBeyondMeasuredTerrain?: boolean;
   /**
    * Peaks closer than this are dropped as "you are standing on it": their
    * bearing is meaningless and their altitude angle runs to ±90°. Default
@@ -99,6 +126,7 @@ export interface ResolvedPipelineConfig {
   readonly peakRadiusKm: number;
   readonly minPeakDistanceKm: number;
   readonly colToleranceM: number;
+  readonly judgeBeyondMeasuredTerrain: boolean;
 }
 
 /**
@@ -202,12 +230,23 @@ export interface AnnotatedScene {
   /** The subset that did not. Equals `selfOccluded` ∪ `foregroundOccluded`. */
   readonly occluded: readonly AnnotatedPeak[];
   /**
-   * Peaks on a bearing the sweep asked about and got NO terrain data for:
-   * every ray there was dropped, so the profile has a hole and any horizon
-   * angle at that bearing would be a straight line drawn across it. Sighted
-   * (bearing, range and altitude angle are pure geometry and still true) but
-   * deliberately unjudged — a `visible` or `hidden` verdict would be measured
-   * against terrain nobody looked at, and both answers would be inventions.
+   * Peaks the run refused to judge, because the terrain their verdict would
+   * rest on was never measured. Two ways that happens, and both are refusals
+   * of the same kind — no data, therefore no verdict:
+   *
+   *   BEARING  the sweep asked about that bearing and every ray there was
+   *            dropped, so the profile has a hole and any horizon angle there
+   *            would be a straight line drawn across it.
+   *   RANGE    the peak stands farther out than the sweep measured along its
+   *            own bearing, so the stretch of sightline between the end of the
+   *            terrain and the summit was never looked at. See
+   *            `PipelineConfig.judgeBeyondMeasuredTerrain`, which is how a
+   *            caller with a deliberately truncated sweep opts out.
+   *
+   * Sighted (bearing, range and altitude angle are pure geometry and still
+   * true) but deliberately unjudged — a `visible` or `hidden` verdict would be
+   * measured against terrain nobody looked at, and both answers would be
+   * inventions.
    *
    * Nearest first. Never drawn as a labelled peak: the overlay is entitled to
    * name what the terrain says is in view, and here the terrain says nothing.

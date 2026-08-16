@@ -9,9 +9,11 @@
  *   3. build the horizon profile     running maximum per ray = the skyline
  *   4. fetch named peaks             from the peak database, NEVER from the DEM
  *   5. sight each peak               bearing, range, altitude angle
- *   5b. set aside peaks on a bearing the sweep asked about and got no terrain
- *       for — they are `unmeasured`, and get NO verdict rather than one read
- *       off a horizon interpolated across the hole
+ *   5b. set aside peaks whose verdict would rest on terrain nobody measured —
+ *       a bearing the sweep asked about and got nothing for, or a range past
+ *       the end of the sampled ray. Both are `unmeasured` and get NO verdict
+ *       rather than one read off a horizon interpolated across the hole or a
+ *       sightline examined for its first half only
  *   6. filter by the NEARER-terrain rule
  *   7. classify each occlusion    self-occluded (labelled, greyed) or
  *                                 foreground-occluded (never drawn) — D8
@@ -48,11 +50,12 @@ import {
   filterVisiblePeaks,
   isLabelled,
   isPeakVisible,
+  rangeIsMeasured,
   resolveAgainstHorizon,
 } from '../core/visibility.js';
 
 import { PipelineError, throwIfAborted } from './errors.js';
-import { classifyPeakOcclusion, describeOccluder } from './occlusion.js';
+import { classifyPeakOcclusion, describeOccluder, nearestRay } from './occlusion.js';
 import { eyeElevationM, resolveObserver } from './observer.js';
 import { buildTerrainRays, resolveSweep, sweepBearingsDeg } from './terrain.js';
 import type {
@@ -63,7 +66,18 @@ import type {
   ResolvedPipelineConfig,
 } from './types.js';
 
-/** Peaks are looked for this far out unless the caller says otherwise. */
+/**
+ * Peaks are looked for this far out unless the caller says otherwise.
+ *
+ * Deliberately much larger than `DEFAULT_SWEEP.maxRangeKm` (30 km), and no
+ * longer a contradiction: a peak past the end of the sweep is REPORTED, as
+ * `unmeasured` with a warning naming it, instead of being handed a `visible`
+ * verdict nothing measured supports (review 2, finding 2). Asking wide and
+ * refusing loudly beats asking narrow and going quiet — "Mount Rainier, not
+ * judged, terrain measured to 3 km of a 97 km sightline" is a prompt to fetch
+ * more tiles or widen the sweep, whereas a peak that was never looked up leaves
+ * nothing behind at all.
+ */
 export const DEFAULT_PEAK_RADIUS_KM = 200;
 
 /**
@@ -103,6 +117,7 @@ export function resolveConfig(config: PipelineConfig = {}): ResolvedPipelineConf
     peakRadiusKm: config.peakRadiusKm ?? DEFAULT_PEAK_RADIUS_KM,
     minPeakDistanceKm: config.minPeakDistanceKm ?? DEFAULT_MIN_PEAK_DISTANCE_KM,
     colToleranceM,
+    judgeBeyondMeasuredTerrain: config.judgeBeyondMeasuredTerrain ?? false,
   };
 }
 
@@ -179,7 +194,8 @@ export async function annotateScene(request: AnnotateSceneRequest): Promise<Anno
   const coverage = horizonCoverage(horizon, sweepBearingsDeg(config.sweep));
 
   const sightings: PeakSighting[] = [];
-  const unmeasured: PeakSighting[] = [];
+  const unmeasuredBearing: PeakSighting[] = [];
+  const unmeasuredRange: PeakSighting[] = [];
   for (const peak of found) {
     const sighting = sightPeak(observer, peak, config.sightline);
     if (sighting.distanceKm < config.minPeakDistanceKm) {
@@ -196,18 +212,46 @@ export async function annotateScene(request: AnnotateSceneRequest): Promise<Anno
     // same refusal `classifyOcclusion` makes when a ray's record has a hole in
     // it wide enough to hide a col.
     if (!hasTerrainAtBearing(horizon, sighting.bearingDeg, coverage)) {
-      unmeasured.push(sighting);
+      unmeasuredBearing.push(sighting);
       continue;
+    }
+    // The same refusal on the RANGE axis. A sightline sampled for its first
+    // 30 km cannot say what stands in the remaining 30: terrain there was never
+    // read, occlusion only ever accumulates with more terrain, and so the run
+    // has established "nothing in the swept part hides it" — which is not what
+    // `visible` claims. Measured, not configured: a ray that stops short
+    // because its tiles are missing is in exactly the same position as one that
+    // stops short because the sweep asked for less.
+    if (!config.judgeBeyondMeasuredTerrain) {
+      const ray = nearestRay(rays, sighting.bearingDeg);
+      if (
+        ray === undefined ||
+        !rangeIsMeasured(ray.samples, 0, sighting.distanceKm * 1000, config.sweep.rangeStepM)
+      ) {
+        unmeasuredRange.push(sighting);
+        continue;
+      }
     }
     sightings.push(sighting);
   }
+  const unmeasured = [...unmeasuredBearing, ...unmeasuredRange];
   sightings.sort((a, b) => a.distanceKm - b.distanceKm);
   unmeasured.sort((a, b) => a.distanceKm - b.distanceKm);
-  if (unmeasured.length > 0) {
+  if (unmeasuredBearing.length > 0) {
     warnings.push(
-      `No visible/hidden verdict for ${unmeasured.length} peak(s) on bearings the sweep asked ` +
-        `about and got no terrain data for: ${describePeakNames(unmeasured)}. Judging them ` +
-        'would mean measuring against a horizon interpolated across the hole.',
+      `No visible/hidden verdict for ${unmeasuredBearing.length} peak(s) on bearings the sweep ` +
+        `asked about and got no terrain data for: ${describePeakNames(unmeasuredBearing)}. ` +
+        'Judging them would mean measuring against a horizon interpolated across the hole.',
+    );
+  }
+  if (unmeasuredRange.length > 0) {
+    warnings.push(
+      `No visible/hidden verdict for ${unmeasuredRange.length} peak(s) standing farther out than ` +
+        `the terrain sweep measured (${config.sweep.maxRangeKm} km): ` +
+        `${describePeakNames(unmeasuredRange)}. Their sightlines were examined for the swept ` +
+        'part only, and "nothing within the swept part hides it" is not "visible". Widen ' +
+        'sweep.maxRangeKm over terrain you hold, or set judgeBeyondMeasuredTerrain to accept ' +
+        'partial evidence deliberately.',
     );
   }
 

@@ -35,6 +35,15 @@
  *     `'no-data'` — any void corner makes the whole reading `status: 'void'`.
  *   Nearest-neighbour lookups never substitute: a void sample reads `'void'`.
  *
+ *   Both policies turn on a void that the interpolation actually WEIGHTED. A
+ *   query that lands on a grid line gives the corners off that line a weight of
+ *   zero, so a reading exactly on a valid sample, or anywhere along an edge
+ *   whose void sits off the edge, is plain `'bilinear'` over the corners that
+ *   carry the weight — its value cannot depend on what is stored in the void.
+ *   Calling that `'nearest-valid'` understates good data, and under `'no-data'`
+ *   it would throw away a correct measurement. `NEGLIGIBLE_VOID_WEIGHT` states
+ *   the bound; the fallback still fires the moment a void can move the answer.
+ *
  * ACCURACY CAVEAT — READ BEFORE USING THIS FOR SUMMIT HEIGHTS.
  *   SRTM is a ~30 m-posting radar surface. It resolves ridge lines well but
  *   systematically UNDER-reads sharp summits, because no sample lands exactly on
@@ -91,7 +100,12 @@ export interface GridGeometry {
  * because the other three weights are ~0.
  */
 export type TileReadingMethod =
-  /** Weighted average of four valid corner samples. */
+  /**
+   * Weighted average of the cell's corners, none of which carried a void with
+   * any weight — so the value is the full-precision interpolation. A void
+   * corner the query gave zero weight (it landed on a grid line) does not
+   * change that and does not demote the reading.
+   */
   | 'bilinear'
   /** Nearest-neighbour lookup that the caller asked for. */
   | 'nearest'
@@ -126,6 +140,37 @@ export interface ReadOptions {
  * `northLat - rows * step` style arithmetic.
  */
 const EDGE_EPSILON_DEG = 1e-9;
+
+/**
+ * The largest elevation error, in metres, that a void corner may be able to
+ * cause before the reading stops calling itself `'bilinear'`.
+ *
+ * A millimetre — six orders of magnitude below SRTM's own ±10 m vertical
+ * accuracy, and below the width of the beam's own footprint by rather more.
+ */
+const VOID_INFLUENCE_TOLERANCE_M = 1e-3;
+
+/**
+ * Total bilinear weight the void corners of a cell may carry while the reading
+ * still counts as unaffected by them.
+ *
+ * Weights are exactly 0 for the far corners of a query that lands on a grid
+ * line, which is the case this bound exists for — but only in exact arithmetic.
+ * Sample lines sit at multiples of 1/3600°, which is not representable in
+ * binary, so `(northLat − lat) / latStepDeg` for a query aimed at row 2 of an
+ * SRTM1 grid actually yields 2.0000000000067 and the "zero" weights come out
+ * around 1e-12 (see `TileReadingMethod` for why there is no exactness flag).
+ *
+ * So the test is on the reading's ERROR, not on the weight: omitting a corner
+ * of weight `w` moves the answer by `w × (that corner's true elevation)`, which
+ * is unknown but bounded by the format's own extreme, ±32767 m. Below this
+ * weight the answer therefore cannot be more than
+ * `VOID_INFLUENCE_TOLERANCE_M` from full bilinear no matter what the radar
+ * failed to see there. Anything above it is a genuine degradation and is
+ * reported as one — including weights far too small to matter physically, which
+ * is the conservative side to err on.
+ */
+const NEGLIGIBLE_VOID_WEIGHT = VOID_INFLUENCE_TOLERANCE_M / 32767;
 
 /** An addressable grid of elevation samples: a whole `.hgt` tile or a window of one. */
 export class HgtTile {
@@ -305,19 +350,27 @@ export class HgtTile {
     ] as const;
 
     let sum = 0;
-    let voidSeen = false;
+    let voidWeight = 0;
     let best: { value: number; weight: number } | null = null;
     for (const corner of corners) {
       const value = this.sampleAt(corner.row, corner.col);
       if (value === null) {
-        voidSeen = true;
+        voidWeight += corner.weight;
         continue;
       }
       sum += value * corner.weight;
       if (best === null || corner.weight > best.weight) best = { value, weight: corner.weight };
     }
 
-    if (!voidSeen) return { status: 'ok', elevationM: sum, method: 'bilinear' };
+    // A void the interpolation gave no weight did not touch the answer. On a
+    // grid line the far corners' weights are 0, so a query ON a valid sample —
+    // or anywhere along an edge whose void sits off that edge — is exactly
+    // bilinear over the corners that do carry the weight, and saying otherwise
+    // is a false report of degraded data. See NEGLIGIBLE_VOID_WEIGHT for why
+    // this is a bound rather than `=== 0`. Voids are still never averaged in.
+    if (voidWeight <= NEGLIGIBLE_VOID_WEIGHT) {
+      return { status: 'ok', elevationM: sum, method: 'bilinear' };
+    }
     if (voidPolicy === 'no-data' || best === null) return VOID_READING;
     return { status: 'ok', elevationM: best.value, method: 'nearest-valid' };
   }

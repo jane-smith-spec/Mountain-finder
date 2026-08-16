@@ -384,6 +384,99 @@ describe('void handling', () => {
     });
   });
 
+  it('does not report a void that carried no weight', () => {
+    // The query lands EXACTLY on sample (0,1) = 200 m — the north edge, one row
+    // north of the void. Cell (0,1)–(1,2): fRow = 0, fCol = 0, so the weights are
+    // (0,1) 1 ; (0,2) 0 ; (1,1) 0 = VOID ; (1,2) 0.
+    // The void's weight is ZERO: the answer is 200 m whatever is stored there,
+    // so it is a plain bilinear reading, not a fallback — and the strict policy
+    // has nothing to withhold.
+    expect(tile.bilinear(1, 0.5)).toEqual({ status: 'ok', elevationM: 200, method: 'bilinear' });
+    expect(tile.bilinear(1, 0.5, 'no-data')).toEqual({
+      status: 'ok',
+      elevationM: 200,
+      method: 'bilinear',
+    });
+
+    // Same for the west edge, exactly on sample (1,0) = 400 m, with the void as
+    // its EAST neighbour: cell (1,0)–(2,1), fRow = 0, fCol = 0.
+    expect(tile.bilinear(0.5, 0)).toEqual({ status: 'ok', elevationM: 400, method: 'bilinear' });
+    expect(tile.bilinear(0.5, 0, 'no-data')).toEqual({
+      status: 'ok',
+      elevationM: 400,
+      method: 'bilinear',
+    });
+  });
+
+  it('interpolates along an edge whose cell has a void off the edge', () => {
+    // Halfway along the north edge of cell (0,1)–(1,2): fRow = 0, fCol = 0.5.
+    // Weights: (0,1) 0.5 = 200 ; (0,2) 0.5 = 300 ; (1,1) 0 = VOID ; (1,2) 0.
+    // Two valid corners carry the whole weight, so the answer is the exact
+    // one-dimensional interpolation 0.5·200 + 0.5·300 = 250 — NOT the nearest
+    // corner's 200, which would be 50 m of avoidable error.
+    expect(tile.bilinear(1, 0.75)).toEqual({ status: 'ok', elevationM: 250, method: 'bilinear' });
+    expect(tile.bilinear(1, 0.75, 'no-data')).toEqual({
+      status: 'ok',
+      elevationM: 250,
+      method: 'bilinear',
+    });
+
+    // And the west edge of cell (0,0)–(1,1): fRow = 0.5, fCol = 0.
+    // Weights: (0,0) 0.5 = 100 ; (1,0) 0.5 = 400 ; (0,1) 0 ; (1,1) 0 = VOID.
+    // 0.5·100 + 0.5·400 = 250.
+    expect(tile.bilinear(0.75, 0)).toEqual({ status: 'ok', elevationM: 250, method: 'bilinear' });
+  });
+
+  it('still degrades when the void carries a small but real weight', () => {
+    // A hair south of the north edge: fRow = 1e-4 in cell (0,1)–(1,2), fCol = 0.
+    // The void (1,1) now carries weight 1e-4, so the stored value there WOULD
+    // move the answer — by up to 1e-4 × 3000 m = 0.3 m for plausible terrain.
+    // That is a real degradation and must keep saying so.
+    const lat = 1 - 1e-4 * 0.5;
+    expect(tile.bilinear(lat, 0.5)).toEqual({
+      status: 'ok',
+      elevationM: 200,
+      method: 'nearest-valid',
+    });
+    expect(tile.bilinear(lat, 0.5, 'no-data')).toEqual({ status: 'void', elevationM: null });
+  });
+
+  it('does not report a void that carried only float dust, at real SRTM spacing', () => {
+    // The module docs note that sample lines sit at multiples of 1/3600°, which
+    // is not representable in binary, so a query aimed AT a sample line lands a
+    // few 1e-12 off it. Here 45 − 2/3600 divides back to row 2.0000000000067.
+    //
+    //   lat 45 − 0/3600   100   200   300
+    //   lat 45 − 1/3600   400   500   600
+    //   lat 45 − 2/3600   700   800   900     ← the query lands here, on 800
+    //   lat 45 − 3/3600  1000  VOID  1200
+    //
+    // The void (3,1) therefore carries weight ~6.7e-12 rather than a clean zero.
+    // Whatever int16 is stored there — the format's extreme is ±32767 m — it can
+    // move the answer by at most 6.7e-12 × 32767 = 2.2e-7 m, a fifth of a
+    // micrometre against a source whose vertical accuracy is ±10 m. Reporting
+    // that as a fallback, or as no data at all, is the false negative.
+    const step = 1 / 3600;
+    const srtmSpaced = new HgtTile(
+      Int16Array.from([100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, VOID_SAMPLE, 1200]),
+      { northLat: 45, westLon: 7, rows: 4, cols: 3, latStepDeg: step, lonStepDeg: step },
+      'srtm-spaced',
+    );
+    const index = srtmSpaced.indexFor(45 - 2 * step, 7 + 1 * step);
+    expect(index).not.toBeNull();
+    if (index === null) return;
+    // Not on the line: the fractions are the float dust this test exists for.
+    expect(index.row).not.toBe(2);
+    expect(index.row - 2).toBeLessThan(1e-9);
+
+    for (const policy of ['nearest-valid', 'no-data'] as const) {
+      const reading = srtmSpaced.bilinear(45 - 2 * step, 7 + 1 * step, policy);
+      expect(reading.status).toBe('ok');
+      expect(reading.elevationM).toBeCloseTo(800, 6);
+      if (reading.status === 'ok') expect(reading.method).toBe('bilinear');
+    }
+  });
+
   it('returns no data when every corner of the cell is void', () => {
     //          lon 0   lon 0.5  lon 1
     //  lat 1    100     200      300

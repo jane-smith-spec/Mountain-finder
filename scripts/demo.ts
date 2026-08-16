@@ -55,6 +55,8 @@ import type { AnnotatedPeak, AnnotatedScene } from '../src/pipeline/types.js';
 import { buildOverlaySvgFromLayout, layoutOverlay } from '../src/render/index.js';
 import { buildSyntheticBackdropSvg } from '../src/render/synthetic-backdrop.js';
 import type { OverlayScene } from '../src/render/types.js';
+import { loadPeakCellIndex } from '../src/providers/peak-directory.js';
+import type { PeaksProvider } from '../src/providers/peaks.js';
 import { groundTruthPeakStore } from '../fixtures/peaks/index.js';
 import { groundTruthCases, type GroundTruthCase } from '../tests/acceptance/cases/index.js';
 import { rasteriseToPng, RasteriseUnavailableError } from './rasterise.js';
@@ -74,6 +76,81 @@ const DEMO_IMAGE_HEIGHT_PX = 1200;
 /** Where the annotated image lands unless `--out` says otherwise. */
 const DEFAULT_PNG_PATH = 'out/annotated.png';
 
+/**
+ * How many rows of a peak list the report prints before summarising the rest.
+ *
+ * With the cited 15-summit dataset every list fit on a screen. With an imported
+ * region a single Gornergrat run considers ~1 800 summits and occludes most of
+ * them, and a report nobody scrolls to the end of hides its own warnings.
+ * `--list-limit 0` prints everything.
+ */
+const DEFAULT_LIST_LIMIT = 30;
+
+/**
+ * Which imported region backs which case, by default.
+ *
+ * These are the datasets `npm run fetch:peaks` wrote under
+ * `fixtures/peaks/regions/`; each was cut wide enough to hold the summits its
+ * case names. `--peaks cited` goes back to the 15 hand-cited summits in
+ * `fixtures/peaks/ground-truth-peaks.json`, which remain the authority for the
+ * acceptance suite — this script is a demo, not a gate.
+ */
+const CASE_REGIONS: Readonly<Record<string, string>> = {
+  gornergrat: 'zermatt',
+  'mount-diablo-summit': 'california',
+  'kerry-park-seattle': 'cascades',
+  'fort-william': 'fort-william',
+};
+
+const REGION_ROOT = 'fixtures/peaks/regions';
+
+/** The cited dataset, named so `--peaks cited` reads as a deliberate choice. */
+const CITED_SOURCE = 'cited';
+
+interface PeakSource {
+  readonly store: PeaksProvider;
+  readonly description: string;
+}
+
+/**
+ * Resolve the peak database for a run.
+ *
+ * A named region that is not on disk is an ERROR, not a silent fallback to the
+ * cited 15 summits: the whole point of this flag is the difference between
+ * three labels and three hundred, and a demo that quietly showed the small
+ * dataset while claiming the big one would be the exact failure mode
+ * `--full-tiles` was fixed for.
+ */
+async function peakSourceFor(caseId: string, requested: string | undefined): Promise<PeakSource> {
+  const name = requested ?? CASE_REGIONS[caseId] ?? CITED_SOURCE;
+  if (name === CITED_SOURCE) {
+    return {
+      store: groundTruthPeakStore,
+      description: `cited ground truth — ${groundTruthPeakStore.dataset.peaks.length} hand-sourced summits`,
+    };
+  }
+  const indexPath = join(REGION_ROOT, name, 'index.json');
+  const present = await stat(indexPath).then(
+    () => true,
+    () => false,
+  );
+  if (!present) {
+    throw new Error(
+      `No imported peak region "${name}" (${indexPath} is not here).\n` +
+        `  Import it:                   npm run fetch:peaks -- --region ${name}\n` +
+        '  Or use the cited dataset:    --peaks cited',
+    );
+  }
+  const store = await loadPeakCellIndex(indexPath);
+  const index = store.index;
+  return {
+    store,
+    description:
+      `imported region "${name}" — ${index.peakCount} summits in ${index.cells.length} cells, ` +
+      `Overture release ${index.release}`,
+  };
+}
+
 interface Options {
   readonly caseId: string | undefined;
   /** Use the committed window instead of the full tile. */
@@ -88,6 +165,14 @@ interface Options {
   readonly heightPx: number;
   readonly writePng: boolean;
   readonly outPath: string;
+  /**
+   * Which peak database to query: an imported region under
+   * `fixtures/peaks/regions/`, or `cited` for the 15 hand-cited summits.
+   * Undefined means "the region registered for this case".
+   */
+  readonly peaksSource: string | undefined;
+  /** How many rows of each peak list to print. The lists are now long. */
+  readonly listLimit: number;
 }
 
 function parseArgs(argv: readonly string[]): Options {
@@ -102,6 +187,8 @@ function parseArgs(argv: readonly string[]): Options {
   let heightPx = DEMO_IMAGE_HEIGHT_PX;
   let writePng = true;
   let outPath = DEFAULT_PNG_PATH;
+  let peaksSource: string | undefined;
+  let listLimit = DEFAULT_LIST_LIMIT;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -150,6 +237,14 @@ function parseArgs(argv: readonly string[]): Options {
         heightPx = numberArg(argv[index + 1], arg);
         index += 1;
         break;
+      case '--peaks':
+        peaksSource = stringArg(argv[index + 1], arg);
+        index += 1;
+        break;
+      case '--list-limit':
+        listLimit = numberArg(argv[index + 1], arg);
+        index += 1;
+        break;
       default:
         if (arg.startsWith('--')) throw new Error(`Unknown flag ${arg}`);
         caseId = arg;
@@ -167,6 +262,8 @@ function parseArgs(argv: readonly string[]): Options {
     heightPx,
     writePng,
     outPath,
+    peaksSource,
+    listLimit,
   };
 }
 
@@ -197,6 +294,10 @@ function listCases(): void {
   line('  --window            use the committed terrain window, not data/tiles/');
   line('  --no-png            text report only, do not write an image');
   line('  --out PATH          where to write the image (default out/annotated.png)');
+  line('  --peaks NAME        peak database: an imported region under');
+  line(`  ${' '.repeat(20)}${REGION_ROOT}/, or "${CITED_SOURCE}" for the`);
+  line(`  ${' '.repeat(20)}hand-cited summits (default: the case's own region)`);
+  line('  --list-limit N      rows printed per peak list, 0 for all (default 30)');
   line('  --heading DEG       override the case\'s stated view bearing');
   line('  --hfov DEG          override the horizontal field of view');
   line('  --width/--height N  frame size in pixels (default 1600x1200)');
@@ -247,7 +348,28 @@ function describeOccludedPeak(peak: AnnotatedPeak): void {
   );
 }
 
-function report(testCase: GroundTruthCase, scene: AnnotatedScene, provenance: string): void {
+/**
+ * The first `limit` entries of a list, highest in the frame first, with an
+ * honest count of what was not printed. `limit <= 0` means "all of it".
+ */
+function head(peaks: readonly AnnotatedPeak[], limit: number): readonly AnnotatedPeak[] {
+  const ordered = [...peaks].sort((a, b) => b.altitudeDeg - a.altitudeDeg);
+  return limit > 0 ? ordered.slice(0, limit) : ordered;
+}
+
+function tailNote(total: number, limit: number): void {
+  if (limit > 0 && total > limit) {
+    line(`    … and ${total - limit} more (highest first; --list-limit 0 prints them all)`);
+  }
+}
+
+function report(
+  testCase: GroundTruthCase,
+  scene: AnnotatedScene,
+  provenance: string,
+  peakSource: string,
+  listLimit: number,
+): void {
   const eyeM = scene.observer.groundElevationM + scene.observer.eyeHeightM;
 
   line('='.repeat(100));
@@ -267,6 +389,7 @@ function report(testCase: GroundTruthCase, scene: AnnotatedScene, provenance: st
   );
   line(`  eye above sea     ${eyeM.toFixed(1)} m  (camera ${scene.observer.eyeHeightM} m up)`);
   line(`  terrain source    ${provenance}`);
+  line(`  peak database     ${peakSource}`);
   line();
   line('CAMERA');
   line(
@@ -302,21 +425,24 @@ function report(testCase: GroundTruthCase, scene: AnnotatedScene, provenance: st
   line();
   line(`  VISIBLE — LABELLED (${scene.visible.length})`);
   if (scene.visible.length === 0) line('    (none)');
-  for (const peak of scene.visible) line(`    ${describePeak(peak)}`);
+  for (const peak of head(scene.visible, listLimit)) line(`    ${describePeak(peak)}`);
+  tailNote(scene.visible.length, listLimit);
   line();
   line(`  SELF-OCCLUDED — LABELLED, GREYED (${scene.selfOccluded.length})`);
   line('    The summit point is behind a shoulder of its OWN hill: the ground runs');
   line('    unbroken from the blocker to the summit, so the hill filling the view IS');
   line('    the peak, and the label belongs on it (decision D8).');
   if (scene.selfOccluded.length === 0) line('    (none)');
-  for (const peak of scene.selfOccluded) describeOccludedPeak(peak);
+  for (const peak of head(scene.selfOccluded, listLimit)) describeOccludedPeak(peak);
+  tailNote(scene.selfOccluded.length, listLimit);
   line();
   line(`  FOREGROUND-OCCLUDED — NOT LABELLED (${scene.foregroundOccluded.length})`);
   line('    A different, nearer landform is in the way, or the terrain between could');
   line('    not be shown continuous. Drawing these would name a mountain that is not');
   line('    in the picture.');
   if (scene.foregroundOccluded.length === 0) line('    (none)');
-  for (const peak of scene.foregroundOccluded) describeOccludedPeak(peak);
+  for (const peak of head(scene.foregroundOccluded, listLimit)) describeOccludedPeak(peak);
+  tailNote(scene.foregroundOccluded.length, listLimit);
 
   if (scene.warnings.length > 0) {
     line();
@@ -427,9 +553,13 @@ async function writeImage(
   });
 
   line('IMAGE');
+  const overlapped = layout.markers.filter((marker) => marker.overlapped).length;
   line(`  ${layout.markers.length} marker(s) drawn, ${layout.offFramePeaks.length} peak(s) off-frame, ` +
-    `${layout.horizonPolylinesPx.length} horizon polyline(s)`);
-  for (const marker of layout.markers) {
+    `${layout.horizonPolylinesPx.length} horizon polyline(s)` +
+    `${overlapped === 0 ? '' : `, ${overlapped} label(s) OVERLAPPED — no free space`}`);
+  const shown =
+    options.listLimit > 0 ? layout.markers.slice(0, options.listLimit) : layout.markers;
+  for (const marker of shown) {
     line(
       `    ${marker.peak.name.padEnd(26)} summit at x=${marker.summitPx.xPx.toFixed(1)} ` +
         `y=${marker.summitPx.yPx.toFixed(1)} px  label level ${marker.stackLevel} ${marker.direction}` +
@@ -446,6 +576,9 @@ async function writeImage(
         `${deg(skylineDeg)} deg at the same bearing — the dot sits ` +
         `${deg(marker.peak.altitudeDeg - skylineDeg)} deg above the drawn ridge`,
     );
+  }
+  if (layout.markers.length > shown.length) {
+    line(`    … and ${layout.markers.length - shown.length} more marker(s), left to right`);
   }
   if (layout.markers.length === 0) {
     line('    (no peak in this frame — the image shows the skyline and nothing else)');
@@ -483,6 +616,7 @@ async function main(): Promise<void> {
   }
 
   const terrain = await terrainFor(testCase.id, options.useWindow);
+  const peakSource = await peakSourceFor(testCase.id, options.peaksSource);
   const camera = demoCamera(testCase, options);
 
   const scene = await annotateScene({
@@ -496,7 +630,7 @@ async function main(): Promise<void> {
     },
     camera,
     elevation: terrain.elevation,
-    peaks: groundTruthPeakStore,
+    peaks: peakSource.store,
     config: {
       sweep: {
         ...terrain.spec.sweep,
@@ -508,7 +642,7 @@ async function main(): Promise<void> {
     },
   });
 
-  report(testCase, scene, terrain.provenance);
+  report(testCase, scene, terrain.provenance, peakSource.description, options.listLimit);
 
   if (!options.writePng) {
     line('IMAGE');

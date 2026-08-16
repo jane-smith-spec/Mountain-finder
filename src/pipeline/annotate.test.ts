@@ -735,3 +735,118 @@ describe('annotateScene — a summit across a col behind a low near bank', () =>
     expect(scene.foregroundOccluded.map((peak) => peak.name)).toContain('Mount Ghost');
   });
 });
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * PEAKS PAST THE END OF THE SWEEP (adversarial review 2, finding 2)
+ * ══════════════════════════════════════════════════════════════════════════
+ *
+ * The review's scene, and the asymmetry the shipped defaults have:
+ * `DEFAULT_PEAK_RADIUS_KM` is 200 km while `DEFAULT_SWEEP.maxRangeKm` is 30 km,
+ * so summits are looked for six times farther out than terrain is ever
+ * sampled. A 1500 m wall at 45 km and a 2000 m summit at 60 km, eye at 100 m:
+ *
+ *   wall    1500 m @ 45 km: drop 138.2647 → atan(1261.7353/45000) = 1.606073°
+ *   summit  2000 m @ 60 km: drop 245.8017 → atan(1654.1983/60000) = 1.579244°
+ *
+ * The wall hides the summit by 0.026829°. A 30 km sweep never sees the wall, so
+ * nothing blocks and the summit clears comfortably — a confident `visible`
+ * resting on the first half of a sightline, with no warning anywhere.
+ *
+ * Both numbers are hand arithmetic from the documented drop model, asserted
+ * below before anything else is claimed.
+ */
+const WALL_DISTANCE_M = 45_000;
+const WALL_ELEVATION_M = 1500;
+const BEHIND_DISTANCE_M = 60_000;
+const BEHIND_ELEVATION_M = 2000;
+
+const wallBeyondTheSweep: TerrainFunctionM = (point) => {
+  const distanceM = greatCircleDistanceM(ORIGIN, point);
+  // +-50 m of a 90 m sampling step: exactly one sample per ray, at 45 km.
+  return distanceM >= 44_950 && distanceM <= 45_050 ? WALL_ELEVATION_M : 0;
+};
+
+function longRangeRequest(maxRangeKm: number): AnnotateSceneRequest {
+  return {
+    observer: { lat: 0, lon: 0, eyeHeightM: EYE_HEIGHT_M },
+    camera,
+    elevation: new FunctionElevationSource(wallBeyondTheSweep, 'wall-at-45km'),
+    peaks: new StaticPeakSource([
+      {
+        id: 'test/behind',
+        name: 'Mount Behind',
+        ...east(BEHIND_DISTANCE_M),
+        elevationM: BEHIND_ELEVATION_M,
+        elevationSource: 'unknown',
+      },
+    ]),
+    config: {
+      sweep: { startBearingDeg: 60, spanDeg: 60, bearingStepDeg: 1, rangeStepM: 90, maxRangeKm },
+      peakRadiusKm: 200,
+      clock: () => FIXED_CLOCK,
+    },
+  };
+}
+
+describe('annotateScene — a peak farther out than the sweep reached', () => {
+  it('has the geometry the case turns on: the wall really does hide the summit', () => {
+    const wallDeg = expectedAltitudeDeg(WALL_ELEVATION_M, WALL_DISTANCE_M);
+    const summitDeg = expectedAltitudeDeg(BEHIND_ELEVATION_M, BEHIND_DISTANCE_M);
+
+    expect(wallDeg).toBeCloseTo(1.606073, 5);
+    expect(summitDeg).toBeCloseTo(1.579244, 5);
+    expect(wallDeg - summitDeg).toBeCloseTo(0.026829, 5);
+    expect(summitDeg).toBeLessThan(wallDeg);
+  });
+
+  it('refuses a verdict rather than clearing a summit on half a sightline', async () => {
+    const scene = await annotateScene(longRangeRequest(30));
+
+    // The sweep stopped at 30 km; the summit is at 60 km. Nothing between the
+    // two was looked at, so neither answer is available.
+    expect(scene.config.sweep.maxRangeKm).toBe(30);
+    for (const list of [scene.peaks, scene.visible, scene.occluded, scene.labelled]) {
+      expect(list.map((peak) => peak.id)).not.toContain('test/behind');
+    }
+    expect(scene.unmeasured.map((peak) => peak.id)).toEqual(['test/behind']);
+
+    // And it says so — the silence was half the finding.
+    expect(scene.warnings.join('\n')).toMatch(/Mount Behind/);
+    expect(scene.warnings.join('\n')).toMatch(/30 km/);
+  });
+
+  it('gives a real answer once the sweep is long enough to reach the wall', async () => {
+    // The same scene with the sweep widened past the summit: the wall is now
+    // sampled, and the verdict is a measurement rather than a refusal.
+    const scene = await annotateScene(longRangeRequest(65));
+    const behind = byId(scene.peaks, 'test/behind');
+
+    expect(scene.unmeasured).toEqual([]);
+    expect(behind.visible).toBe(false);
+    expect(behind.occludingAltitudeDeg).toBeCloseTo(
+      expectedAltitudeDeg(WALL_ELEVATION_M, WALL_DISTANCE_M),
+      4,
+    );
+    expect(behind.clearanceDeg).toBeCloseTo(-0.026829, 5);
+    // 15 km of sea-level ground between the wall and the summit: a 1500 m col,
+    // so the wall is a different landform and the peak is never labelled.
+    expect(behind.visibility).toBe('foreground-occluded');
+    expect(behind.occlusion?.colDepthM).toBe(WALL_ELEVATION_M);
+    expect(scene.labelled.map((peak) => peak.id)).not.toContain('test/behind');
+  });
+
+  it('lets a caller judge on partial evidence, but only by saying so', async () => {
+    // The acceptance suite's committed terrain windows are deliberately small
+    // (3 km at Kerry Park for a 134 km sightline), and they state what that
+    // means in prose. This flag is how a caller states it in code; the default
+    // is the refusal above.
+    const base = longRangeRequest(30);
+    const scene = await annotateScene({
+      ...base,
+      config: { ...base.config, judgeBeyondMeasuredTerrain: true },
+    });
+
+    expect(scene.unmeasured).toEqual([]);
+    expect(byId(scene.peaks, 'test/behind').visible).toBe(true);
+  });
+});

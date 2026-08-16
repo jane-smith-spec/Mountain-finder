@@ -256,6 +256,55 @@ export interface OcclusionOptions {
  */
 export const MAX_SAMPLE_GAP_FACTOR = 1.5;
 
+/**
+ * Whether a ray records terrain continuously from `fromM` out to `toM`.
+ *
+ * "Continuously" means no step — including the step from `fromM` to the first
+ * sample and from the last sample to `toM` — exceeds
+ * {@link MAX_SAMPLE_GAP_FACTOR} times the nominal spacing. It is the one test
+ * for "was this stretch of ground actually looked at", and it is deliberately
+ * blind to WHY a stretch is missing: a void in the tile, a tile that was never
+ * fetched, and a sweep that simply stopped short are the same fact from the
+ * verdict's point of view — no terrain was measured there, so nothing measured
+ * there can be claimed.
+ *
+ * The samples need not be sorted; a copy is sorted here rather than trusting
+ * the caller, because an out-of-order ray would otherwise report a hole where
+ * there is none and vice versa.
+ *
+ * `false` for an empty range request is deliberate too: `toM <= fromM` asks
+ * about no ground at all, and the answer to "is this measured" is then a
+ * property of the caller's arithmetic rather than of the terrain, so the
+ * caller must not reach here with one.
+ *
+ * @param sampleSpacingM The spacing the ray was walked at. Must be > 0.
+ */
+export function rangeIsMeasured(
+  samples: readonly RaySample[],
+  fromM: number,
+  toM: number,
+  sampleSpacingM: number,
+): boolean {
+  if (!(sampleSpacingM > 0)) {
+    throw new RangeError(`sampleSpacingM must be > 0, received ${sampleSpacingM}`);
+  }
+  if (!(toM > fromM)) {
+    throw new RangeError(`toM (${toM}) must be greater than fromM (${fromM})`);
+  }
+
+  const maxGapM = sampleSpacingM * MAX_SAMPLE_GAP_FACTOR;
+  const within = samples
+    .filter((sample) => sample.distanceM > fromM && sample.distanceM < toM)
+    .sort((a, b) => a.distanceM - b.distanceM);
+
+  let previousM = fromM;
+  for (const sample of within) {
+    if (sample.distanceM - previousM > maxGapM) return false;
+    previousM = sample.distanceM;
+  }
+  return toM - previousM <= maxGapM;
+}
+
 /** Whether a peak in this state may be drawn on the overlay. */
 export function isLabelled(visibility: PeakVisibility): boolean {
   return visibility !== 'foreground-occluded';
@@ -418,20 +467,8 @@ export function classifyOcclusion(
 
   // Coverage first: a hole in the record is not evidence of continuous ground.
   // The span checked runs from the crest to the peak's own range, so a ray that
-  // simply stops short of the summit is caught by the final leg.
-  const maxGapM = sampleSpacingM * MAX_SAMPLE_GAP_FACTOR;
-  let previousDistanceM = crest.sample.distanceM;
-  for (const sample of beyondCrest) {
-    if (sample.distanceM - previousDistanceM > maxGapM) {
-      return {
-        ...found,
-        kind: 'foreground-occluded',
-        evidence: 'unsampled-gap-between-occluder-and-summit',
-      };
-    }
-    previousDistanceM = sample.distanceM;
-  }
-  if (targetDistanceM - previousDistanceM > maxGapM) {
+  // simply stops short of the summit is caught by the same test.
+  if (!rangeIsMeasured(beyondCrest, crest.sample.distanceM, targetDistanceM, sampleSpacingM)) {
     return {
       ...found,
       kind: 'foreground-occluded',
