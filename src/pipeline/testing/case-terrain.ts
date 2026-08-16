@@ -73,6 +73,24 @@ export interface CaseTerrainSpec {
   readonly sweep: Partial<SweepConfig>;
   /** What the window covers, and what it therefore cannot prove. */
   readonly coverageNote: string;
+  /**
+   * Whether this case asks the pipeline to judge peaks standing FARTHER OUT
+   * than its window reaches — `PipelineConfig.judgeBeyondMeasuredTerrain`.
+   *
+   * The pipeline's default is to refuse (review 2, finding 2): a summit at
+   * 134 km whose sightline was sampled for 3 km has not been measured, and a
+   * `visible` verdict there would be a claim about ground nobody read. Two of
+   * these cases are deliberately in exactly that position — their windows are
+   * sized to the terrain that decides the OCCLUSION claims, not to the length
+   * of the sightlines — and this flag is where they say so in code rather than
+   * only in `coverageNote`. It changes what a verdict MEANS, never how hard the
+   * case's assertions are: with it set, "visible" reads "nothing inside the
+   * window hides it", which is precisely what the note already said.
+   *
+   * `false` where the window covers every peak the case names, so those cases
+   * gate the refusing default end to end.
+   */
+  readonly judgeBeyondWindow: boolean;
 }
 
 /**
@@ -97,6 +115,7 @@ export const CASE_TERRAIN: readonly CaseTerrainSpec[] = [
       'Covers the observer and all three must-see summits (Matterhorn 9.6 km, ' +
       'Dufourspitze 8.4 km, Breithorn 5.4 km) with their intervening terrain. ' +
       'Rays running north leave the window after ~1.9 km, at the N45E007 tile edge.',
+    judgeBeyondWindow: false,
   },
   {
     caseId: 'mount-diablo-summit',
@@ -108,6 +127,9 @@ export const CASE_TERRAIN: readonly CaseTerrainSpec[] = [
       'case is 60-292 km away, so this window can only prove that nothing ' +
       'WITHIN 5 KM hides them — it says nothing about the Diablo Range at ' +
       '25 km. The case\'s own header argues that ridge line analytically.',
+    // 60-292 km sightlines sampled for 5 km: every must-see verdict here is
+    // "nothing within 5 km hides it", stated above and now declared in code.
+    judgeBeyondWindow: true,
   },
   {
     caseId: 'kerry-park-seattle',
@@ -119,6 +141,8 @@ export const CASE_TERRAIN: readonly CaseTerrainSpec[] = [
       'north of the park — at the native 30 m posting. Mount Rainier (97 km) ' +
       'and Baker (134 km) are far outside the window, so a "visible" verdict ' +
       'here means "nothing within 3 km hides it".',
+    // Rainier (97 km) and Baker (134 km) both stand far outside the window.
+    judgeBeyondWindow: true,
   },
   {
     caseId: 'fort-william',
@@ -132,6 +156,7 @@ export const CASE_TERRAIN: readonly CaseTerrainSpec[] = [
       't-Suidhe and the Ben Nevis summit (6.7 km) at the native 30 m posting. ' +
       'This is the one case where the disputed blocking ridge is inside the ' +
       'window, so the occlusion claim is fully testable here.',
+    judgeBeyondWindow: false,
   },
 ];
 

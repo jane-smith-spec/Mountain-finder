@@ -6,6 +6,7 @@
  *   npm run demo -- gornergrat                # full SRTM tiles + PNG
  *   npm run demo -- gornergrat --window       # the committed 728 KB window
  *   npm run demo -- gornergrat --heading 238 --hfov 85 --out out/wide.png
+ *   npm run demo -- gornergrat --peaks cited # the 15 hand-cited summits only
  *   npm run demo -- fort-william --range-km 8 --range-step-m 30 --bearing-step 0.5
  *   npm run demo -- gornergrat --no-png       # text report only
  *
@@ -37,6 +38,14 @@
  * only source that can prove an occlusion beyond the window's cut. If the tile
  * is not there it says so and stops, rather than quietly falling back; use
  * `--window` to ask for the committed window on purpose.
+ *
+ * ── PEAKS ──────────────────────────────────────────────────────────────────
+ * By default each case queries the Overture-imported region cut for it under
+ * `fixtures/peaks/regions/` (see CASE_REGIONS below) — hundreds to thousands of
+ * named summits, which is what the product actually has to draw. `--peaks
+ * cited` swaps in the 15 hand-cited summits of `ground-truth-peaks.json`, which
+ * remain the authority the acceptance suite gates on. Both are peak databases:
+ * summit heights are never sampled from the DEM (MISSION.md).
  */
 
 import { mkdir, stat, writeFile } from 'node:fs/promises';
@@ -51,12 +60,11 @@ import {
   loadCaseTerrain,
   caseTerrainSpec,
 } from '../src/pipeline/testing/case-terrain.js';
-import type { AnnotatedPeak, AnnotatedScene } from '../src/pipeline/types.js';
+import type { AnnotatedPeak, AnnotatedScene, PeakSource } from '../src/pipeline/types.js';
 import { buildOverlaySvgFromLayout, layoutOverlay } from '../src/render/index.js';
 import { buildSyntheticBackdropSvg } from '../src/render/synthetic-backdrop.js';
 import type { OverlayScene } from '../src/render/types.js';
 import { loadPeakCellIndex } from '../src/providers/peak-directory.js';
-import type { PeaksProvider } from '../src/providers/peaks.js';
 import { groundTruthPeakStore } from '../fixtures/peaks/index.js';
 import { groundTruthCases, type GroundTruthCase } from '../tests/acceptance/cases/index.js';
 import { rasteriseToPng, RasteriseUnavailableError } from './rasterise.js';
@@ -107,8 +115,9 @@ const REGION_ROOT = 'fixtures/peaks/regions';
 /** The cited dataset, named so `--peaks cited` reads as a deliberate choice. */
 const CITED_SOURCE = 'cited';
 
-interface PeakSource {
-  readonly store: PeaksProvider;
+interface DemoPeakSource {
+  /** The pipeline's narrow view of a peak database: "what is near here". */
+  readonly store: PeakSource;
   readonly description: string;
 }
 
@@ -121,7 +130,10 @@ interface PeakSource {
  * dataset while claiming the big one would be the exact failure mode
  * `--full-tiles` was fixed for.
  */
-async function peakSourceFor(caseId: string, requested: string | undefined): Promise<PeakSource> {
+async function peakSourceFor(
+  caseId: string,
+  requested: string | undefined,
+): Promise<DemoPeakSource> {
   const name = requested ?? CASE_REGIONS[caseId] ?? CITED_SOURCE;
   if (name === CITED_SOURCE) {
     return {
@@ -308,6 +320,8 @@ function listCases(): void {
     const spec = caseTerrainSpec(testCase.id);
     line(`  ${testCase.id.padEnd(22)} ${testCase.title}`);
     if (spec !== undefined) line(`  ${' '.repeat(22)} terrain: ${spec.coverageNote}`);
+    const region = CASE_REGIONS[testCase.id];
+    if (region !== undefined) line(`  ${' '.repeat(22)} peaks:   ${REGION_ROOT}/${region}`);
   }
 }
 

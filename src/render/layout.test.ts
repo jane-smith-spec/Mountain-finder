@@ -258,7 +258,7 @@ describe('layoutOverlay — label collision avoidance', () => {
     ).toBe(false);
   });
 
-  it('stacks a cluster of coincident peaks, skipping levels that are not free', () => {
+  it('stacks a cluster of coincident peaks in order of apparent height', () => {
     // Four peaks within 0.3° of bearing and 0.3° of altitude — the tight
     // clustering a real skyline produces. Their labels are ~122 px wide and
     // their summits only ~2.6 px apart in x, so every box overlaps every other
@@ -273,22 +273,24 @@ describe('layoutOverlay — label collision avoidance', () => {
     // A candidate box at level L spans, top to bottom:
     //     top = summitY − 60 (pole) − 51·L (stack) − 3 (gap) − 47.1 (height)
     //
-    //     Alpha   L0 → 414.72…461.82   free            → level 0
-    //     Bravo   L0 → 409.66…456.76   hits Alpha
-    //             L1 → 358.66…405.76   free            → level 1
-    //     Charlie L0 → 417.16…464.26   hits Alpha
-    //             L1 → 366.16…413.26   hits Bravo
-    //             L2 → 315.16…362.26   hits Bravo by 3.6 px
-    //             L3 → 264.16…311.26   free            → level 3
-    //     Delta   L3 → 259.10…306.20   hits Charlie
-    //             L4 → 208.10…255.20   free            → level 4
+    // Placement runs in PRIORITY order — apparent height, highest first — so
+    // the sequence is Bravo (3.2°), Delta (3.1°), Alpha (3.0°), Charlie (2.9°),
+    // and the biggest thing in the view gets first claim on the space:
     //
-    // Level 2 is *skipped*, and that is the point of this test: because each
-    // pole is measured from its own summit and summits differ in height, a
-    // step of one label height clears a same-height neighbour but not always a
-    // lower one. The algorithm tests the actual boxes rather than incrementing
-    // a counter, so it finds that out instead of stacking labels on top of
-    // each other.
+    //     Bravo   L0 → 409.66…456.76   free            → level 0
+    //     Delta   L0 → 412.10…459.20   hits Bravo
+    //             L1 → 361.10…408.20   free            → level 1
+    //     Alpha   L0 → 414.72…461.82   hits Bravo
+    //             L1 → 363.72…410.82   hits Delta and Bravo
+    //             L2 → 312.72…359.82   free by 1.28 px  → level 2
+    //     Charlie L0 → 417.16…464.26   hits Bravo
+    //             L1 → 366.16…413.26   hits Delta
+    //             L2 → 315.16…362.26   hits Alpha
+    //             L3 → 264.16…311.26   free by 1.46 px  → level 3
+    //
+    // Markers are REPORTED left to right (ties by id), which is the reading
+    // order of the picture; that is a presentation decision and is independent
+    // of the placement order above, which is a resource-allocation decision.
     const layout = layoutOverlay(
       scene({
         peaks: [
@@ -302,17 +304,16 @@ describe('layoutOverlay — label collision avoidance', () => {
     );
 
     expect(layout.markers).toHaveLength(4);
-    // Left-to-right placement order, each finding the next free level.
     expect(layout.markers.map((m) => m.peak.name)).toEqual([
       'Alpha',
       'Bravo',
       'Charlie',
       'Delta',
     ]);
-    expect(layout.markers.map((m) => m.stackLevel)).toEqual([0, 1, 3, 4]);
+    expect(layout.markers.map((m) => m.stackLevel)).toEqual([2, 0, 3, 1]);
     expect(layout.markers.every((m) => m.overlapped)).toBe(false);
     expect(layout.markers.map((m) => Math.round(m.labelBoxPx.yPx * 100) / 100)).toEqual([
-      414.72, 358.66, 264.16, 208.1,
+      312.72, 409.66, 264.16, 361.1,
     ]);
 
     // The behaviour that matters, whatever the levels turn out to be: no two
@@ -325,6 +326,39 @@ describe('layoutOverlay — label collision avoidance', () => {
         expect(rectsOverlap(a.labelBoxPx, b.labelBoxPx)).toBe(false);
       }
     }
+  });
+
+  it('skips a level that a lower neighbour has already spoiled', () => {
+    // A level bump clears a neighbour whose summit sits at the SAME height. It
+    // does not clear a lower one, because each pole is measured from its own
+    // summit — so the search has to test the real boxes rather than increment
+    // a counter, and a level index can be skipped entirely.
+    //
+    // Both peaks at Δ = 15.0°, so their boxes coincide horizontally.
+    //     Alpha (α 3.0°) → y 524.820,  L0 → 414.72…461.82   free  → level 0
+    //     Beta  (α 2.5°) → y 537.367,  L0 → 427.27…474.37   hits Alpha
+    //                                  L1 → 376.27…423.37   hits Alpha by 8.65 px
+    //                                  L2 → 325.27…372.37   free  → level 2
+    // Level 1 is skipped.
+    const layout = layoutOverlay(
+      scene({
+        peaks: [
+          peak({ id: 'node/1', name: 'Alpha', bearingDeg: 105.0, altitudeDeg: 3.0 }),
+          peak({ id: 'node/2', name: 'Beta', bearingDeg: 105.0, altitudeDeg: 2.5 }),
+        ],
+      }),
+      PINNED,
+    );
+
+    expect(markerNamed(layout.markers, 'Alpha').stackLevel).toBe(0);
+    expect(markerNamed(layout.markers, 'Beta').summitPx.yPx).toBeCloseTo(537.36736, 4);
+    expect(markerNamed(layout.markers, 'Beta').stackLevel).toBe(2);
+    expect(
+      rectsOverlap(
+        markerNamed(layout.markers, 'Alpha').labelBoxPx,
+        markerNamed(layout.markers, 'Beta').labelBoxPx,
+      ),
+    ).toBe(false);
   });
 
   it('lengthens the pole by exactly one stackStepPx per level', () => {
@@ -357,14 +391,18 @@ describe('layoutOverlay — label collision avoidance', () => {
     expect(reversed.markers).toEqual(forward.markers);
   });
 
-  it('breaks an exact x tie by peak id, not by input order', () => {
-    // Identical bearings: the tie-break is the only thing deciding who gets
-    // level 0, and it must not be "whoever the provider listed first".
+  it('breaks an exact tie by peak id, not by input order', () => {
+    // Identical bearing, identical altitude, identical elevation: neither the
+    // x sort nor the priority sort can separate these two, so the id tie-break
+    // is the ONLY thing deciding who gets level 0 — and it must not be
+    // "whoever the provider listed first". (Previously this fixture gave the
+    // two peaks different altitudes, which under priority placement would have
+    // let apparent height decide and left the tie-break untested.)
     const layout = layoutOverlay(
       scene({
         peaks: [
           peak({ id: 'node/9', name: 'Nine', altitudeDeg: 3.0 }),
-          peak({ id: 'node/2', name: 'Two', altitudeDeg: 3.05 }),
+          peak({ id: 'node/2', name: 'Two', altitudeDeg: 3.0 }),
         ],
       }),
       PINNED,

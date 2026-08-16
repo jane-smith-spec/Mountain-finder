@@ -200,7 +200,19 @@ function runCase(testCase: GroundTruthCase): Promise<CaseRun> {
       camera: cameraFacing(testCase.view.bearingDeg),
       elevation: terrain.elevation,
       peaks: groundTruthPeakStore,
-      config: { sweep: terrain.spec.sweep, peakRadiusKm: 300, clock: FIXED_CLOCK },
+      config: {
+        sweep: terrain.spec.sweep,
+        peakRadiusKm: 300,
+        // Declared per case, next to the window's own coverage note. The
+        // pipeline's default is to refuse a verdict on a peak standing farther
+        // out than the terrain it measured; two of these windows are
+        // deliberately shorter than the sightlines their cases name, and they
+        // say so here. Gornergrat and Fort William leave it false, so the
+        // refusing default is exercised end to end by real viewpoints — and
+        // the new gate at the bottom of this file pins the refusal itself.
+        judgeBeyondMeasuredTerrain: terrain.spec.judgeBeyondWindow,
+        clock: FIXED_CLOCK,
+      },
     });
 
     return {
@@ -832,6 +844,81 @@ describe('P6.3 hooks — D8 self-occlusion vs foreground occlusion, on the real 
     // drawn, and the reason is recorded rather than assumed.
     expect(baker.occlusion?.evidence).toBe('unsampled-gap-between-occluder-and-summit');
     expect(run.scene.labelled.map((peak) => peak.name)).not.toContain('Mount Baker');
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * The RANGE axis of the same refusal (review 2, finding 2)
+ * ══════════════════════════════════════════════════════════════════════════
+ *
+ * Every case above declares `judgeBeyondWindow` so a truncated window still
+ * produces the verdicts its claims are about. This is the other half: with the
+ * pipeline's own default — refuse — the same real viewpoint must decline to
+ * call a 97 km summit visible off 3 km of terrain, and must say so out loud.
+ *
+ * Kerry Park is the sharpest instance in the set: 3 km of committed window
+ * against Mount Rainier at 97 km and Mount Baker at 134 km. Nothing about the
+ * ground truth is being contradicted here — Rainier really is visible from
+ * Kerry Park, and the case file still says so. What is asserted is that the
+ * PIPELINE does not claim to have measured it.
+ */
+describe('P6.3 hooks — peaks beyond the measured terrain, at the default policy', () => {
+  it('kerry-park-seattle: refuses to call Mount Rainier visible off 3 km of terrain', async () => {
+    const kerryPark = groundTruthCases.find((testCase) => testCase.id === 'kerry-park-seattle');
+    expect(kerryPark).toBeDefined();
+    if (kerryPark === undefined) return;
+
+    const terrain = await loadCaseTerrain(kerryPark.id);
+    // The window IS the truncated one, or this proves nothing.
+    expect(terrain.spec.sweep.maxRangeKm).toBe(3);
+    expect(terrain.spec.judgeBeyondWindow).toBe(true);
+
+    const scene = await annotateScene({
+      observer: {
+        lat: kerryPark.observer.lat,
+        lon: kerryPark.observer.lon,
+        eyeHeightM: kerryPark.observer.eyeHeightM,
+        fallbackGroundElevationM: kerryPark.observer.groundElevationM,
+      },
+      camera: cameraFacing(kerryPark.view.bearingDeg),
+      elevation: terrain.elevation,
+      peaks: groundTruthPeakStore,
+      // Same run as above but WITHOUT the declaration — the shipped default.
+      config: { sweep: terrain.spec.sweep, peakRadiusKm: 300, clock: FIXED_CLOCK },
+    });
+
+    expect(scene.config.judgeBeyondMeasuredTerrain).toBe(false);
+    const unmeasuredNames = scene.unmeasured.map((peak) => peak.name);
+    expect(unmeasuredNames).toContain('Mount Rainier');
+    for (const list of [scene.peaks, scene.visible, scene.labelled]) {
+      expect(list.map((peak) => peak.name)).not.toContain('Mount Rainier');
+    }
+
+    // The silence was half the finding: the run has to name what it refused.
+    const warnings = scene.warnings.join('\n');
+    expect(warnings).toMatch(/Mount Rainier/);
+    expect(warnings).toMatch(/farther out than the terrain sweep measured/);
+
+    report(
+      `  kerry-park-seattle [default policy] ${scene.unmeasured.length} peak(s) beyond the ` +
+        `3 km window get NO verdict: ${unmeasuredNames.join(', ')}`,
+    );
+  });
+
+  it('gornergrat: judges every peak it names without needing the declaration', async () => {
+    // The counterweight. Its window reaches all three summits, so the refusing
+    // default costs it nothing — which is what makes the refusal a measurement
+    // rather than a blanket rule about distance.
+    const gornergrat = groundTruthCases.find((testCase) => testCase.id === 'gornergrat');
+    expect(gornergrat).toBeDefined();
+    if (gornergrat === undefined) return;
+
+    const run = await runCase(gornergrat);
+    expect(run.scene.config.judgeBeyondMeasuredTerrain).toBe(false);
+    expect(run.scene.unmeasured).toEqual([]);
+    for (const expectation of gornergrat.mustBeVisible) {
+      expect(run.scene.peaks.map((peak) => peak.name)).toContain(expectation.name);
+    }
   });
 });
 
