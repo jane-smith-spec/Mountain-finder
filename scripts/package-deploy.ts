@@ -463,7 +463,10 @@ async function main(): Promise<void> {
   }
   out.push('');
   out.push(`  peaks in use are bundled: ${peakProof}`);
-  out.push(`  wrote ${relative(root, attribution)} — the app must DISPLAY the ODbL notice`);
+  out.push(
+    `  wrote ${relative(root, attribution)} — the app itself DISPLAYS this notice too ` +
+      '(src/app/attribution.ts; a file nobody links to is not attribution)',
+  );
   out.push('');
   out.push(`Serve ${relative(root, outDir) || outDir}/ as a static directory. Nothing in it`);
   out.push('calls a third-party API at runtime; every request is same-origin.');

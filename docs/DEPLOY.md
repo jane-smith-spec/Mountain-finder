@@ -88,7 +88,7 @@ nearer 1.3 GB on disk. The unit to budget with is **25.93 MB / 16.35 MB per
 mountainous degree square**.
 
 **The windows-only row is a demo, not a deployment.** `--no-tiles --no-peaks`
-produces a complete working app in 1.77 MB — checked: served statically, the
+produces a complete working app in 1.78 MB — checked: served statically, the
 Gornergrat photo still renders `1 peak labelled: Matterhorn`. But those windows
 were cut to the terrain each *acceptance case* turns on, not to the app's 30 km
 sweep: the Gornergrat window is 361 × 1009 samples, about 11 km × 22 km. Rays
@@ -100,7 +100,8 @@ as hidden. Ship it to demo the pipeline; ship tiles to be right.
 single largest grid covering the viewpoint, so a session costs *one grid*: 16.35
 MB gzipped for an alpine tile, 0.47 MB if the deployment ships only the tuned
 case window. Nothing else is fetched — the peak database is already inside the
-302 KB JS bundle.
+JS bundle (318.40 kB, 104.34 kB gzipped, measured 2026-08-16 with the
+attribution footer in it).
 
 ## Serving it
 
@@ -140,19 +141,25 @@ server.
 ## Where terrain is missing
 
 Nothing is drawn, and the app says why. It names the position, the SRTM tile
-that position needs, every grid the deployment *is* serving, and the command
-that closes the gap — and it states outright that silence is not a verdict:
+that position needs and every grid the deployment *is* serving, and it states
+outright that silence is not a verdict:
 
 > No terrain data for 45.92370, 6.86940. That position needs SRTM tile N45E006,
-> which this app does not have. It is serving: N37W122, N45E007, … Run
-> "npm run fetch:tiles -- N45E006" and serve data/tiles/ at /terrain/. Until
-> then there is no horizon and no visibility verdict here, so nothing is drawn —
-> an empty overlay would look like "no peaks are visible", which is a different
-> claim.
+> which this deployment does not hold. It is serving: N37W122, N45E007, …
+> Without it there is no horizon and no visibility verdict here, so nothing is
+> drawn — an empty overlay would look like "no peaks are visible", which is a
+> different claim. Photographs taken over the terrain this build does ship are
+> unaffected. (Running Mountain Finder from a source checkout? "npm run
+> fetch:tiles -- N45E006" downloads that tile into data/tiles/, which is served
+> at /terrain/.)
 
-If you are packaging for the public, edit that last sentence's advice
-(`noTerrainMessage` in `src/app/overlay-builder.ts`) — telling a visitor to run
-an npm command is right for a developer and useless for anyone else.
+**Written for both audiences, in that order** (`noTerrainMessage` in
+`src/app/overlay-builder.ts`). A visitor to a published site is told what is
+true of the deployment — this build does not hold that square degree, and that
+is a gap in what was published rather than a verdict about the view — and is
+never told to run a command they have no checkout for. The command survives,
+last and explicitly conditional, because it is still the one sentence that
+closes the gap for whoever *can* run it.
 
 ## Peaks
 
@@ -167,16 +174,27 @@ The imported Overture regions (`fixtures/peaks/regions/`, thousands of summits,
 3.2 MB) are far too large to inline. They are staged at `/peaks/<region>/` in
 the layout `TiledPeakStore` expects — `index.json` beside a `cells/` directory,
 one 1° cell per file, named exactly like the SRTM tiles — so the switch is a
-change to one file in `src/app/` and *not* also a deployment change. Until then
-those files are served and unused.
+change inside `src/app/` and *not* also a deployment change: `main.tsx` builds a
+`TiledPeakStore` over `/peaks/` instead of importing the JSON, and
+`peakDataReadByThisBuild` in `data-credits.ts` moves to `'regions'` in the same
+commit so the footer stops saying "not read by this build yet". Until then those
+files are served and unused.
 
-## Attribution — a live compliance gap
+## Attribution — displayed by the app (gap closed 2026-08-16)
 
-**The running app displays no attribution of any kind.** Grepping the built
-bundle for `OpenStreetMap`, `ODbL`, `Overture` or `attribution` returns nothing.
-That is fine today only because the summits currently shipped are 15 facts cited
-from Wikipedia; it stops being fine the moment the Overture regions are wired
-in, and that work is already in the tree.
+**The running app shows a data credit in a footer, visible without any
+interaction, on first paint.** It names OpenStreetMap and ODbL-1.0 for the
+Overture summits and credits NASA/USGS SRTM for the terrain. Grepping the built
+bundle now answers:
+
+```
+$ npm run build && grep -o "OpenStreetMap" dist/assets/*.js | wc -l
+13
+```
+
+The same grep returning **nothing** is what proved the gap in the first place.
+It is now the cheapest check that the gap is still closed, and it is worth
+running before any publish.
 
 | Data | Licence | Obligation |
 |---|---|---|
@@ -184,13 +202,48 @@ in, and that work is already in the tree.
 | Overture Maps `base/land` summits | **ODbL-1.0**, © OpenStreetMap contributors | Attribution **required**, in the app, visible to users; licence must be named; a modified database must be offered under the same terms. |
 | The 15 cited ground-truth summits | Facts, cited to Wikipedia/USGS GNIS per source | Citations kept in the dataset; no display obligation for the facts themselves. |
 
-`npm run package:deploy` writes `dist/ATTRIBUTION.txt` from the staged data's own
-citation records, so a deployer has something true to publish. **A text file
-nobody links to is not attribution.** Before shipping peak regions, the app
-needs a visible credit — a footer is enough:
+`npm run package:deploy` still writes `dist/ATTRIBUTION.txt` from the staged
+data's own citation records — a deployer needs a file to publish — but that file
+is not what discharges the obligation. The footer is. What it renders today:
 
-> Elevation: NASA SRTM (public domain). Summits: © OpenStreetMap contributors,
-> ODbL-1.0, via Overture Maps.
+> **Summits** — 8,528 summits, 4 regions (california, cascades, fort-william,
+> zermatt) — shipped at /peaks/, not read by this build yet: © OpenStreetMap
+> contributors, ODbL-1.0, via Overture Maps Foundation. *Attribution required by
+> ODbL-1.0.* [ODbL-1.0] [OpenStreetMap copyright]
+>
+> **Elevation** — terrain horizon and occlusion, from /terrain/: NASA/USGS SRTM
+> 1 arc-second global — public domain. *Credit is courtesy, not a condition.*
+>
+> **Summits** — 15 cited summits — the ones this build labels:
+> en.wikipedia.org, www.outdooractive.com. *Cited facts, no licence attached —
+> credit is courtesy.*
+
+**Nothing in that text is typed into the UI.** `src/app/attribution.ts` derives
+it from the same `sources[]` citation records packaging reads: the licence id
+comes from a table matched against the citation's own words (a bare `ODbL` is
+reported as `ODbL`, never promoted to `ODbL-1.0` — a licence id is a legal
+claim), the holder from the citation's `©` clause, the publisher from the first
+clause of its title. `src/app/data-credits.ts` collects the region indexes with
+a glob, so **adding `fixtures/peaks/regions/<anything>/` puts it in the footer
+under its own licence with no code change**, and removing every region removes
+the notice. Consequences worth knowing before you package:
+
+* Credits a licence *requires* are rendered before courtesy credits, so the ODbL
+  line is the one that survives a footer clipped on a short screen.
+* Required vs courtesy is stated in words, never by colour alone; the footer is
+  the document's `contentinfo` landmark and its links are keyboard-reachable.
+* The footer is `position: sticky` — on a page tall enough to hide a
+  document-end credit it stays on screen, which is the entire point.
+* The wording says whether the app *reads* a dataset or merely ships it. That
+  one claim is a constant (`peakDataReadByThisBuild` in `data-credits.ts`),
+  because it is a fact about `main.tsx` that no data file knows; flipping
+  `main.tsx` to the HTTP regions means flipping it in the same commit.
+
+Proved by `src/app/attribution.test.ts` (the derivation, and that the shipped
+citations name OpenStreetMap and ODbL-1.0), `tests/e2e/attribution.spec.ts` (on
+screen unscrolled, opaque, ≥ 4.5:1 contrast in both colour schemes, keyboard
+reachable) and one assertion in the deploy check below, which runs against the
+built bundle behind the static server.
 
 ## The self-check
 
@@ -218,7 +271,9 @@ but the plain static server over `dist/`, and asserts:
   than asserted;
 * a viewpoint with no tile produces the named absence above, not a blank
   overlay;
-* the staged peak cells resolve the way `TiledPeakStore` would resolve them.
+* the staged peak cells resolve the way `TiledPeakStore` would resolve them;
+* **the served page displays the ODbL notice** — visible, unscrolled, naming
+  OpenStreetMap and ODbL-1.0, and agreeing with `dist/ATTRIBUTION.txt`.
 
 ## Reducing the 25 MB
 

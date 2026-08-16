@@ -98,6 +98,24 @@ Overture Maps is both listable and range-readable.
 | P9.5 Scalable peak store | Serve "peaks within radius of a point" without loading a region into memory per query; keep the `PeaksProvider` seam unchanged | Pipeline is untouched; the cited `ground-truth-peaks.json` summits still resolve and all 148 acceptance assertions still pass |
 | P9.6 Conflict reporting | Where Overture disagrees with a cited ground-truth height or position | Disagreement is **reported, not silently resolved**; the cited value wins by default because it is the one with a source |
 
+### Phase 10 — Deployment *(what turns a passing build into a published site)*
+
+`npm run build` alone is not deployable: it ships no terrain (which square degrees a
+deployment carries is not the bundler's decision) and, until this phase, it displayed no
+attribution for data that legally requires it. A deployment is one static directory served
+by anything — no server code, no API key, no third-party runtime call (decision D7).
+Everything here is documented in [docs/DEPLOY.md](docs/DEPLOY.md).
+
+| Product | Description | Self-check |
+|---|---|---|
+| P10.1 Static packaging | `npm run package:deploy` stages `dist/terrain/` (manifest + grids, `--gzip` siblings) and `dist/peaks/<region>/` from whatever is on disk, using the same index builder the dev server uses; refuses a grid whose byte length disagrees with its geometry | `npm run test:deploy` |
+| P10.2 Deployment proof | A plain static server over `dist/` in real Chromium: manifest byte-identical to the packaged file, no `/@vite/client`, the Gornergrat photo drawing the Matterhorn within 12 px of the closed-form projection, a 25.93 MB tile arriving gzipped, **every request same-origin**, a missing tile named rather than silently blank | `npm run test:deploy` |
+| P10.3 Visible attribution | The app displays the credit its data's licences require — ODbL-1.0 / © OpenStreetMap contributors for the Overture summits, NASA/USGS SRTM as courtesy — derived from the datasets' own `sources[]` records, not typed in, so a region under another licence changes the footer by itself | `npm run test:deploy`; also `npx vitest run src/app/attribution.test.ts` and `npx playwright test tests/e2e/attribution.spec.ts` for legibility (on screen unscrolled, ≥ 4.5:1 in both colour schemes) |
+
+**A generated `ATTRIBUTION.txt` does not satisfy P10.3.** The obligation is on the running
+app; a file nobody links to is not attribution. That distinction is why the self-check is a
+browser assertion on a visible element and not a `grep` of the deployment directory.
+
 ### Phase 7 — CV silhouette alignment *(v2.1 — after base ships)*
 
 Skyline extraction from the photo (per-column luminance gradient), 1-D cross-correlation against the computed profile solving heading/pitch offset, auto-trim replacing manual sliders. Self-check: synthetic rendered silhouettes with known injected offset → recovered within 0.5°; acceptance-suite label error strictly improves vs. manual baseline.
@@ -131,3 +149,4 @@ Rules for every agent task hand-off:
 | `npm run test:e2e` | Playwright against the built app with fixture transport |
 | `npm run test:acceptance` | Ground-truth photo cases end-to-end |
 | `npm run demo -- <case>` | Writes `out/annotated.png` for a case — the human-viewable proof |
+| `npm run test:deploy` | The packaged `dist/` behind a plain static server: real overlay, same-origin only, visible ODbL notice (run after `npm run build && npm run package:deploy -- --gzip`) |

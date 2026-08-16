@@ -213,6 +213,56 @@
       ambiguous once real coverage is on — OSM calls the cited 4 164 m summit
       `Breithorn Occidentale / Westgipfel` and the Valais holds three other `Breithorn`s.
 
+- [x] **Q6 — Visible data attribution (2026-08-16).** The gap was real and verified: the built
+      bundle contained no `OpenStreetMap`, `ODbL`, `Overture` or `attribution` string anywhere,
+      while `fixtures/peaks/regions/` holds **8 528 Overture summits under ODbL-1.0**, whose
+      licence requires the notice to reach *users of the app*. `dist/ATTRIBUTION.txt` did not
+      discharge that: a file nobody links to is not attribution.
+      **What now renders** (`src/app/components/AttributionFooter.tsx`, footer, sticky, on first
+      paint, no interaction): `© OpenStreetMap contributors, ODbL-1.0, via Overture Maps
+      Foundation — Attribution required by ODbL-1.0`, plus NASA/USGS SRTM as courtesy and the
+      15 cited summits by hostname.
+      **It is derived, not typed.** `src/app/attribution.ts` reads the licence out of each
+      dataset's own `sources[]` citation (the same records `package-deploy.ts` writes
+      ATTRIBUTION.txt from) — licence by table match, holder from the `©` clause, publisher from
+      the title's first clause — and `data-credits.ts` globs the region indexes, so a region
+      added under CC-BY-4.0 credits itself and removing every region removes the notice. A bare
+      `ODbL` stays `ODbL`; the version is never invented.
+      Gates: `npm run check` **50 files / 1 025 tests**, `npm run test:acceptance` **153**,
+      `npx playwright test` **21**, `npm run test:deploy` **5**, and
+      `grep -o OpenStreetMap dist/assets/*.js | wc -l` → **13** (was 0).
+      Mutation-checked, not assumed: `display:none` on the footer fails all five e2e assertions,
+      and removing `position: sticky` fails exactly the one that says a loaded photo must not
+      bury it.
+- [x] **Q7 — `noTerrainMessage` made honest for a stranger.** It told every visitor to run
+      `npm run fetch:tiles`, which is right for a developer and useless to the public. It now
+      leads with what is true of the deployment ("this deployment does not hold N45E006"), keeps
+      the position, the missing tile and the list of grids served, says outright that
+      photographs over shipped terrain are unaffected, and keeps the command **last and
+      explicitly scoped** to someone running a source checkout. No assertion was dropped;
+      two were added.
+- [ ] **Q8 — Switch the app to the 8 528-summit dataset.** The app compiles peaks INTO the JS
+      bundle: `src/app/main.tsx` imports `fixtures/peaks/ground-truth-peaks.json` (15 cited
+      summits) and hands `groundTruthPeakStore` to `createOverlayBuilder`. The Overture regions
+      are already staged at `/peaks/<region>/index.json` + `cells/N45E007.json` in exactly the
+      layout `TiledPeakStore` expects, and `npm run test:deploy` already proves they are served
+      correctly — so this is **one file**: build a `TiledPeakStore` over `/peaks/` in `main.tsx`
+      instead of importing the JSON. Two things move with it, in the same commit:
+      `peakDataReadByThisBuild` in `src/app/data-credits.ts` (`'bundled'` → `'regions'`, or the
+      footer keeps saying "not read by this build yet"), and `verifyPeaksAreBundled` in
+      `scripts/package-deploy.ts`, which deliberately FAILS the day the summit name leaves the
+      bundle. Expect the density findings to bite: `Breithorn` is ambiguous (four in the Valais),
+      one mountain arrives as a cluster of nodes (Matterhorn 4, Rainier 8 around it), and
+      California alone repeats 306 names.
+- [ ] **Q9 — Re-measure the DEPLOY.md size table.** "What it costs" predates the four committed
+      regions and the attribution footer. Known stale: it has **no row for `/peaks/`** at all
+      (3.2 MB staged — california 1.26, cascades 1.02, zermatt 0.67, fort-william 0.26 MB — and
+      nothing states what one *session* costs once the app fetches cells rather than bundling
+      them, which is the number a deployer actually budgets with); the bundle figure was 302 KB
+      and is now 318.40 kB / 104.34 kB gzipped; the windows-only demo row moved 1.77 → 1.78 MB.
+      The two updated numbers were measured here; the missing `/peaks/` row needs the per-cell
+      and per-session figures, which only mean something after Q8.
+
 **Phase 7 (CV skyline alignment, decision D3) is built and proved, and is not switched on.**
 Synthetic and real-SRTM round trips recover an injected offset to 0.02° in heading; every
 failure mode refuses rather than guessing. What is missing is not code: the extractor has never
@@ -321,6 +371,28 @@ Live checklist. Check items only after their self-check has been run and passed 
       the part) + sidecar, via `npm run fixtures:peak-parquet`. Replayed at the ORIGINAL file
       offsets; an unrecorded byte **throws** rather than zero-filling.
 - [x] **Committed region** — `fixtures/peaks/regions/zermatt/`, 1 786 summits in 4 cells.
+
+## Phase 10 — Deployment (PLAN.md) ✅ self-check `npm run test:deploy` — 5 assertions
+- [x] **P10.1 Static packaging** — `npm run package:deploy [-- --gzip]` stages `dist/terrain/`
+      (manifest + grids + optional `.gz` siblings) and `dist/peaks/<region>/` from whatever is
+      on disk, through the SAME index builder the dev server uses, and refuses a grid whose byte
+      length disagrees with the geometry the index claims. `scripts/static-server.ts` +
+      `npm run serve:dist` serve it with the documented rules. See docs/DEPLOY.md.
+- [x] **P10.2 Deployment proof** — `scripts/deploy-check/`, a separate Playwright project over
+      the built `dist/` behind the plain static server (the root config starts Vite, which is
+      exactly the machinery a deployment lacks). Manifest byte-identical to the packaged file,
+      no `/@vite/client`, the Gornergrat photo drawing the Matterhorn within 12 px of the
+      closed-form projection, a 25 934 402-byte tile arriving as 16 345 818 bytes and still
+      passing the store's length check, **every request same-origin** (decision D7 enforced),
+      and a viewpoint with no tile producing the named absence rather than a blank overlay.
+- [x] **P10.3 Visible attribution** — the footer above (Q6). Checked three ways: the derivation
+      in `src/app/attribution.test.ts`, legibility in `tests/e2e/attribution.spec.ts` (on screen
+      unscrolled with a photo loaded, opaque, ≥ 4.5:1 WCAG contrast in both colour schemes,
+      required-vs-courtesy stated in words, links keyboard-reachable), and the built artefact in
+      `scripts/deploy-check/deploy.spec.ts`, which also asserts the page and `ATTRIBUTION.txt`
+      credit the same thing.
+- [ ] Open, tracked above: **Q8** (switch to the 8 528-summit dataset — one file in `src/app/`)
+      and **Q9** (the DEPLOY.md cost table has no `/peaks/` row and stale bundle figures).
 
 ## Phase 3 — Photo ingestion (group C) ✅ 69 tests
 - [x] P3.1 EXIF extraction — real JPEGs authored byte-wise; `GPSImgDirectionRef` honoured
