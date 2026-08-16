@@ -11,3 +11,7 @@ playwright-report/
 .DS_Store
 .vscode/
 .idea/
+
+# Downloaded topo tiles — large binaries, fetched via npm run fetch:tiles
+data/tiles/*.hgt
+data/tiles/*.hgt.gz

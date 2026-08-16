@@ -30,6 +30,29 @@ Consequences of the directive:
 | D4 | Ground-truth test data | **Agent-assembled** | Synthetic analytic fixtures plus a small set of openly licensed photos with documented coordinates. Work never blocks on waiting for user photos; user photos can be added as acceptance cases anytime. |
 | D5 | Still photos before live view | **Yes — foundational** | A photo is a file; a location is a number; an annotated image is a checkable artifact. Live view is a projection-loop upgrade on a proven pipeline, not a separate product. |
 | D6 | v1 Expo code | **Archived, not deleted** | `archive/v1-expo/` — the geodesy/LoS math is sound as reference material and gets re-derived with tests in v2. |
+| D7 | Elevation data source | **Offline-first: local SRTM `.hgt` tiles** | User preference, and correct on the merits — mountain photos are taken where there is no signal. Live JSON APIs demote from a runtime dependency to an acquisition step. Also unblocks this environment, where `api.opentopodata.org` and `overpass-api.de` are 403 at the egress proxy but `s3.amazonaws.com` is reachable. |
+
+### What the real SRTM data taught us (verified against a downloaded tile, 2026-08-16)
+
+Sampling a real 1-arc-second tile (`N45E007`, Zermatt) against independently known summit
+elevations produced three findings that shape the design:
+
+| Location | SRTM reads | Known | Δ |
+|---|---|---|---|
+| Grand Combin (broad summit) | 4287 m | 4314 m | −27 m |
+| Matterhorn (sharp pyramid) | 4230 m | 4478 m | −248 m |
+| Dent d'Hérens | 3835 m | 4171 m | −336 m |
+| Zermatt valley floor | **−32768** (void) | 1608 m | *no data* |
+
+1. **Voids are real and common.** `−32768` marks radar shadow, which steep alpine valleys are
+   full of. A void coerced to 0 m — or worse, treated as −32768 metres of altitude — silently
+   corrupts the skyline. This is the highest-risk detail in the data path and must be an
+   explicit no-data state, never a number.
+2. **SRTM systematically underestimates sharp summits** by 250–350 m, because a 30 m grid
+   cannot resolve a pyramid. Therefore: use SRTM for the *terrain horizon*, but take *summit
+   heights* from the peak database's tagged elevation. Sampling peak heights from SRTM would
+   place every alpine label hundreds of metres too low.
+3. **Broad terrain is trustworthy** (−27 m), so the horizon profile itself is sound.
 
 ## What success looks like
 
