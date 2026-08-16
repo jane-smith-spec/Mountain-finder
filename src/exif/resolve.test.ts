@@ -340,6 +340,20 @@ describe('resolvePose — override precedence', () => {
     expectResolved(resolution.fields.lon, 6.8694, 'exif');
   });
 
+  it('refuses an out-of-range override instead of falling through to EXIF', () => {
+    // 475 is a plausible fat-finger for 47.5. Falling through to EXIF hands
+    // back a complete: true pose at a coordinate 165 km away, marked
+    // source: 'exif' — the app inventing a location the user did not give it.
+    const resolution = resolvePose(chamonix, { lat: 475 }, { defaults });
+
+    expectNeedsManual(resolution.fields.lat, 'out-of-range');
+    expect(resolution.missing).toContain('lat');
+    expect(resolution.complete).toBe(false);
+    expect(resolution.observer).toBeUndefined();
+    // Every other field still resolves — one bad box does not blank the panel.
+    expectResolved(resolution.fields.lon, 6.8694, 'exif');
+  });
+
   it('lets an image-size override drive the aspect ratio for vFov', () => {
     // Same photo re-cropped to 1:1 by the app: vFov must equal hFov.
     const resolution = resolvePose(
@@ -349,5 +363,95 @@ describe('resolvePose — override precedence', () => {
     );
 
     expectResolved(resolution.fields.vFovDeg, 69.390307, 'exif', 6);
+  });
+});
+
+/**
+ * RANGE CHECKS — a value that cannot be true is never quietly swapped for
+ * another one.
+ *
+ * `inRange` used to return `undefined` for an out-of-range value, which made it
+ * indistinguishable from "not supplied", so the merge fell through to the next
+ * layer and recorded nothing. That breaks the app's central promise: it means a
+ * user who typed 475 for latitude gets a confident pose at the EXIF coordinate
+ * instead of being told the number is impossible.
+ *
+ * The rule now: an explicitly supplied FINITE value that lies outside a field's
+ * domain is a rejection, reported as `needs-manual` / `'out-of-range'`, and a
+ * user-layer rejection never falls through. NaN is not a rejection — it is what
+ * an empty input box parses to, i.e. no value at all.
+ *
+ * Domains (documented in resolve.ts): lat ±90, lon ±180, eyeHeightM ≥ 0,
+ * hFovDeg and vFovDeg strictly inside (0, 180).
+ */
+describe('resolvePose — out-of-range values are rejected, not replaced', () => {
+  const defaults = { lat: -20, lon: -30, eyeHeightM: 1.6, hFovDeg: 80 };
+
+  it('rejects an out-of-range user latitude and longitude', () => {
+    const resolution = resolvePose({ lat: 45, lon: 7 }, { lat: 475, lon: -181 }, { defaults });
+
+    expectNeedsManual(resolution.fields.lat, 'out-of-range');
+    expectNeedsManual(resolution.fields.lon, 'out-of-range');
+    expect(resolution.observer).toBeUndefined();
+  });
+
+  it('accepts the exact boundaries — a pole and the antimeridian are real places', () => {
+    const resolution = resolvePose({}, { lat: 90, lon: 180, eyeHeightM: 0 });
+
+    expectResolved(resolution.fields.lat, 90, 'user');
+    expectResolved(resolution.fields.lon, 180, 'user');
+    expectResolved(resolution.fields.eyeHeightM, 0, 'user');
+    expect(resolvePose({}, { lat: -90, lon: -180 }).fields.lat.status).toBe('resolved');
+  });
+
+  it('rejects a NEGATIVE eye height, which would put the eye below the terrain', () => {
+    // Observer.eyeHeightM is the camera ABOVE the ground under it. A negative
+    // one buries the eye, inverting every clearance the pipeline computes:
+    // src/core's own flatTerrainHorizon* throw on it rather than answer.
+    const resolution = resolvePose({ gpsAltitudeM: 1035.5 }, { eyeHeightM: -1.7 }, { defaults });
+
+    expectNeedsManual(resolution.fields.eyeHeightM, 'out-of-range');
+    // And the GPS-altitude split, which needs an eye height, stays blocked
+    // rather than subtracting a negative and inflating the terrain height.
+    expectNeedsManual(resolution.fields.groundElevationM, 'eye-height-required');
+    expect(resolution.observer).toBeUndefined();
+  });
+
+  it('rejects an impossible field of view instead of throwing', () => {
+    // vFovDegFromHFov throws outside (0, 180); an hFov override of 200 used to
+    // take resolvePose down with it, which no UI can recover from.
+    const wide = resolvePose({}, { hFovDeg: 200, imageWidthPx: 800, imageHeightPx: 600 });
+    expectNeedsManual(wide.fields.hFovDeg, 'out-of-range');
+    expectNeedsManual(wide.fields.vFovDeg, 'out-of-range');
+
+    const zero = resolvePose({}, { hFovDeg: 0, imageWidthPx: 800, imageHeightPx: 600 });
+    expectNeedsManual(zero.fields.hFovDeg, 'out-of-range');
+
+    const negativeVertical = resolvePose({}, { vFovDeg: -10 });
+    expectNeedsManual(negativeVertical.fields.vFovDeg, 'out-of-range');
+  });
+
+  it('lets an out-of-range EXIF reading fall through, but says why when nothing catches it', () => {
+    // EXIF is not a person typing; a corrupt tag falling through to a default
+    // the caller opted into is the right precedence. With no default there is
+    // nothing to fall through to, and 'out-of-range' is more honest than
+    // 'absent-from-exif' — the tag was there, it was garbage.
+    const withDefault = resolvePose({ lat: 200 }, {}, { defaults });
+    expectResolved(withDefault.fields.lat, -20, 'default');
+
+    const bare = resolvePose({ lat: 200 });
+    expectNeedsManual(bare.fields.lat, 'out-of-range');
+  });
+
+  it('reports an out-of-range default as out-of-range, not as an absent tag', () => {
+    const resolution = resolvePose({}, {}, { defaults: { eyeHeightM: -2 } });
+    expectNeedsManual(resolution.fields.eyeHeightM, 'out-of-range');
+  });
+
+  it('leaves the wrapping fields alone — no bearing is ever out of range', () => {
+    // Heading and roll wrap; 725° is 5°, not an error. Rejecting them would be
+    // a different bug in the same family.
+    expectResolved(resolvePose({}, { headingDeg: 725 }).fields.headingDeg, 5, 'user');
+    expectResolved(resolvePose({}, { rollDeg: -400 }).fields.rollDeg, -400, 'user');
   });
 });

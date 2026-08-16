@@ -20,6 +20,26 @@
  *   Degrees are zero padded: 2 digits for latitude, 3 for longitude.
  *   Longitude wraps into [−180, 180) first, so lon 180 and lon −180 both name
  *   W180 rather than a nonexistent E180.
+ *
+ * TWO SEAM CONVENTIONS, ON PURPOSE.
+ *   `normaliseLon` here folds onto **[−180, 180)** — the half-open interval
+ *   that CLOSES at the west end. `src/core/geodesy.normaliseLongitudeDeg` folds
+ *   onto **(−180, +180]**, which closes at the east end. They are opposites,
+ *   and each is right for its own job:
+ *
+ *     • A tile is named after its south-west corner, so the meridian's tile
+ *       must be `W180`. `E180` does not exist and never will, which forces
+ *       +180 → −180 here.
+ *     • A destination point stepping east from 179.9° must report −179.9°, not
+ *       180.1°, or every subsequent distance goes three-quarters of the way
+ *       round the planet. Core's rule follows from that, and it means
+ *       `destinationPoint` can legitimately emit exactly +180.
+ *
+ *   Unifying them would break one of those two, so instead the JOIN is made
+ *   safe: `HgtTile` compares longitudes MODULO 360 (see `lonOffsetDeg`), so a
+ *   coordinate in either convention lands in the tile this module names for it.
+ *   Before that fix, +180 named `W180` correctly, loaded it, and then read
+ *   "outside" from it — an honest null over bytes we were holding.
  */
 
 import { HgtTile, parseHgtTile } from './hgt-tile.js';

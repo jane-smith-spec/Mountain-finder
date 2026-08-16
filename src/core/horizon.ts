@@ -198,13 +198,46 @@ export function skylineStepsOf(point: HorizonPoint): readonly SkylineStep[] {
 }
 
 /**
- * Highest terrain angle on one bearing among samples STRICTLY nearer than
+ * How close two distances have to be before they are treated as the same
+ * place, as a FRACTION of the distance involved.
+ *
+ * A peak's range and the range of the terrain sample that represents it are
+ * computed by different routes — a haversine against the summit's coordinate
+ * versus the step size the ray walk asked for — so when a summit coincides
+ * with a sample the two agree only to within a few ULPs, in an arbitrary
+ * direction. A bare `<` therefore decides "is this the peak's own sample?" by
+ * rounding error: sometimes correctly excluded, sometimes included, and then
+ * the peak is measured against ITSELF and its clearance collapses to ~0. The
+ * verdict survives (an equal angle still clears), so nothing else complains.
+ *
+ * 1e-9 of the range is 10 µm at 10 km and 1 mm at 1000 km. That is:
+ *   • ~7 orders of magnitude ABOVE the double-precision noise it has to absorb
+ *     (relative error ~1e-16, and a few operations of accumulation);
+ *   • ~6 orders of magnitude BELOW the finest terrain posting that could ever
+ *     be a genuinely distinct occluder (SRTM1 is ~30 m, i.e. 3e-3 of the range
+ *     at 10 km).
+ * There is a factor of a million of daylight on either side, which is what
+ * makes the constant principled rather than tuned: no plausible refinement of
+ * the sampling or the geodesy moves either bound anywhere near it.
+ *
+ * Sizing the slack to the ray's range step instead would be far too coarse —
+ * a step is 250 m in the analytic scenes, and the sample one step in front of
+ * a summit is very often the real occluder (the cone's own flank, which it
+ * clears by 0.5°).
+ */
+export const COINCIDENT_DISTANCE_TOLERANCE = 1e-9;
+
+/**
+ * Highest terrain angle on one bearing among samples nearer than
  * `cutoffDistanceKm`, or `undefined` when no recorded terrain is nearer.
  *
- * Strictly nearer, not "nearer or equal", is deliberate. A summit is normally
- * the very terrain sample that produced the staircase step at its own distance;
- * counting that step would have every peak occlude itself and the answer would
- * hinge on floating-point luck in the distance comparison.
+ * Nearer, not "nearer or equal", is deliberate. A summit is normally the very
+ * terrain sample that produced the staircase step at its own distance;
+ * counting that step would have every peak occlude itself. "Equal" is judged
+ * with {@link COINCIDENT_DISTANCE_TOLERANCE} of slack rather than by exact
+ * comparison, because the two distances are never bit-identical — see that
+ * constant for why the tolerance can be both far above the noise and far below
+ * anything real.
  *
  * The scan does not assume the steps are sorted or monotonic — they are, when
  * built by {@link buildHorizonProfile}, but a hand-assembled profile is under
@@ -215,9 +248,10 @@ export function maxAltitudeNearerThanDeg(
   point: HorizonPoint,
   cutoffDistanceKm: number,
 ): number | undefined {
+  const slackKm = Math.abs(cutoffDistanceKm) * COINCIDENT_DISTANCE_TOLERANCE;
   let highestDeg: number | undefined;
   for (const step of skylineStepsOf(point)) {
-    if (step.distanceKm >= cutoffDistanceKm) continue;
+    if (step.distanceKm >= cutoffDistanceKm - slackKm) continue;
     if (highestDeg === undefined || step.maxAltitudeDeg > highestDeg) {
       highestDeg = step.maxAltitudeDeg;
     }

@@ -210,13 +210,52 @@ export class HgtTile {
     return voids;
   }
 
+  /**
+   * How far east of the west edge a longitude lies, in degrees, measured the
+   * short way round — the only honest way to compare longitudes, because they
+   * are periodic and the codebase deliberately uses two different seams.
+   *
+   * `tile-store.normaliseLon` folds onto [−180, 180) so the meridian is named
+   * `W180` (there is no `E180` tile); `src/core/geodesy.normaliseLongitudeDeg`
+   * folds onto (−180, +180] so a step east of 179.9° reads −179.9°, which means
+   * `destinationPoint` can hand this class exactly +180. Compared raw against
+   * `westLon = −180 … eastLon = −179` that reports "outside", so the provider
+   * names the right tile, holds its bytes, and returns no data.
+   *
+   * Taking the offset modulo 360 makes both conventions — and any other, such
+   * as an unnormalised 180.5° — name the same meridian. The result lands in
+   * [0, 360), except that a hair WEST of the west edge would wrap to just under
+   * 360; that is folded back to a small negative so the edge tolerance still
+   * works there.
+   */
+  private lonOffsetDeg(lon: number): number {
+    // Fast path, and NOT merely an optimisation: `((x % 360) + 360) % 360` is
+    // lossy for ordinary in-range longitudes — for lon 0.025 on a tile at
+    // westLon 0 it returns 0.024999999999977, which rounds a nearest-sample
+    // lookup to the wrong column. Inside the tile the subtraction is exact, so
+    // the wrap is only reached by a coordinate that is genuinely on the far
+    // side of the seam.
+    const direct = lon - this.geometry.westLon;
+    if (direct >= -EDGE_EPSILON_DEG && direct <= this.lonSpanDeg + EDGE_EPSILON_DEG) {
+      return direct;
+    }
+    const wrapped = ((direct % 360) + 360) % 360;
+    return wrapped > 360 - EDGE_EPSILON_DEG ? wrapped - 360 : wrapped;
+  }
+
+  /** Longitude span from the west edge to the east edge, degrees. */
+  private get lonSpanDeg(): number {
+    return (this.geometry.cols - 1) * this.geometry.lonStepDeg;
+  }
+
   /** Is this coordinate within the grid's bounds (edges inclusive)? */
   contains(lat: number, lon: number): boolean {
+    const lonOffset = this.lonOffsetDeg(lon);
     return (
       lat <= this.geometry.northLat + EDGE_EPSILON_DEG &&
       lat >= this.southLat - EDGE_EPSILON_DEG &&
-      lon >= this.geometry.westLon - EDGE_EPSILON_DEG &&
-      lon <= this.eastLon + EDGE_EPSILON_DEG
+      lonOffset >= -EDGE_EPSILON_DEG &&
+      lonOffset <= this.lonSpanDeg + EDGE_EPSILON_DEG
     );
   }
 
@@ -226,9 +265,9 @@ export class HgtTile {
    */
   indexFor(lat: number, lon: number): { readonly row: number; readonly col: number } | null {
     if (!this.contains(lat, lon)) return null;
-    const { northLat, westLon, latStepDeg, lonStepDeg, rows, cols } = this.geometry;
+    const { northLat, latStepDeg, lonStepDeg, rows, cols } = this.geometry;
     const row = clamp((northLat - lat) / latStepDeg, 0, rows - 1);
-    const col = clamp((lon - westLon) / lonStepDeg, 0, cols - 1);
+    const col = clamp(this.lonOffsetDeg(lon) / lonStepDeg, 0, cols - 1);
     return { row, col };
   }
 

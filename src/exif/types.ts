@@ -77,7 +77,16 @@ export type MissingReason =
   /** vFov needs the image aspect ratio and no pixel dimensions are known. */
   | 'image-dimensions-unknown'
   /** GPS altitude is the camera's altitude; splitting it needs an eye height. */
-  | 'eye-height-required';
+  | 'eye-height-required'
+  /**
+   * A value WAS supplied and lies outside what the field can mean — latitude
+   * 475, a negative eye height, a 200° field of view. Distinct from
+   * 'absent-from-exif' on purpose: the app never replaces an impossible value
+   * with a plausible one from a lower precedence layer, because that would
+   * hand back a confident pose nobody asked for. See resolve.ts for the
+   * domains and for why heading, roll, pitch and elevation have none.
+   */
+  | 'out-of-range';
 
 /** A single pose field: either resolved (with provenance) or explicitly unknown. */
 export type ResolvedField =

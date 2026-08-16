@@ -543,9 +543,43 @@ describe('maxAltitudeNearerThanDeg — the cutoff is strict', () => {
     expect(maxAltitudeNearerThanDeg(staircase, 5)).toBe(1);
   });
 
+  it('excludes it however the last few bits of the two distances fall', () => {
+    // The cutoff is a peak's haversine range; the step is the range the ray
+    // walk asked for. They are the same place computed two ways, so they agree
+    // only to a few ULPs and the SIGN of the disagreement is arbitrary. Without
+    // slack, half the time the peak's own sample counts as "nearer" and the
+    // peak becomes its own occluder — a clearance of ~0 for a summit that
+    // clears comfortably, with the visible/hidden verdict unchanged so nothing
+    // else notices.
+    const oneUlpLong = 10 * (1 + Number.EPSILON); // 10.000000000000002
+    const oneUlpShort = 10 * (1 - Number.EPSILON / 2);
+    expect(oneUlpLong).toBeGreaterThan(10);
+    expect(oneUlpShort).toBeLessThan(10);
+    expect(maxAltitudeNearerThanDeg(staircase, oneUlpLong)).toBe(3);
+    expect(maxAltitudeNearerThanDeg(staircase, oneUlpShort)).toBe(3);
+    // Well beyond ULP scale but still far below anything physical: 1e-11 km is
+    // 10 nanometres, i.e. 1e-12 of the range.
+    expect(maxAltitudeNearerThanDeg(staircase, 10 + 1e-11)).toBe(3);
+  });
+
+  it('keeps terrain that is nearer by any physically meaningful margin', () => {
+    // COINCIDENT_DISTANCE_TOLERANCE is 1e-9 of the range — 10 µm at 10 km. A
+    // step 1 m nearer (1e-4 of the range) is 100 000× outside the slack and
+    // still occludes, so the tolerance cannot swallow a real ridge; the finest
+    // real posting is ~30 m.
+    const justInside = steppedPoint(0, [
+      [1, 1],
+      [9.999, 7],
+    ]);
+    expect(maxAltitudeNearerThanDeg(justInside, 10)).toBe(7);
+    expect(maxAltitudeNearerThanDeg(justInside, 10 * (1 + Number.EPSILON))).toBe(7);
+  });
+
   it('reports undefined when nothing is nearer than the cutoff', () => {
     expect(maxAltitudeNearerThanDeg(staircase, 1)).toBeUndefined();
     expect(maxAltitudeNearerThanDeg(staircase, 0.5)).toBeUndefined();
+    // A zero cutoff has no slack to give: nothing is nearer than the observer.
+    expect(maxAltitudeNearerThanDeg(staircase, 0)).toBeUndefined();
   });
 
   it('does not assume the steps arrived sorted', () => {

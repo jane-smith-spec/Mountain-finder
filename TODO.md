@@ -15,7 +15,18 @@
 
 - [ ] **Q1 — Integration.** Wire app ↔ pipeline ↔ renderer across the seams tasks 1/2/4 leave.
       Mechanical if the seams are honest; the first real test of whether they are.
-- [ ] **Q2 — Fix review findings** from task 3, by severity: silent-wrong-answer bugs first.
+- [~] **Q2 — Fix review findings** from task 3, by severity: silent-wrong-answer bugs first.
+      Done (see REVIEW-FINDINGS.md for the numbering): 1 range-0 ray sample no longer walls off a
+      bearing (`sweepRay` skips d = 0, throws on negative/NaN); 2 the cone fixture now states the
+      nearer-terrain occluder (7.976826°, clearance 0.502750°) instead of measuring the apex
+      against itself; 3 `normaliseHorizonProfile` merges the UNION of both staircases; 4 an
+      out-of-range override surfaces as `needs-manual` / `'out-of-range'` and is never replaced by
+      EXIF (lat, lon, eyeHeightM ≥ 0, hFov/vFov in (0,180)); 5 `HgtTile` compares longitude mod 360
+      so lon +180 reads from `W180`; 6 a peak coinciding with a terrain sample is no longer its own
+      occluder (`COINCIDENT_DISTANCE_TOLERANCE`).
+      Still open: rename `skylineAltitudeDeg` → `occludingAltitudeDeg` across
+      `fixtures/scenes` + `src/core` (deferred — it collides with two live agents' surface); the
+      review's unverified suspicions 1 and 2 (gap bridging, `nearest-valid` reporting).
 - [ ] **Q3 — The demo PNG.** `npm run demo -- gornergrat` producing an annotated image with
       flags on real summits. This is v2.0's whole point — the first artifact a human can look at
       and judge. Needs fetched tiles (`npm run fetch:tiles`), which is fine: acquisition, not runtime.

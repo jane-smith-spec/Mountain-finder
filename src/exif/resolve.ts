@@ -15,6 +15,12 @@
  *
  * A pose only exists once all nine fields resolve; until then the caller knows
  * exactly which inputs to ask for.
+ *
+ * Precedence applies to values that could be true. A value that CANNOT be true —
+ * latitude 475, a negative eye height, a 200° field of view — is not a gap for
+ * the next layer to fill: it is reported as `needs-manual` / `'out-of-range'`.
+ * See {@link Domain} for the domains, and for the fields that deliberately have
+ * none.
  */
 
 import type { CameraPose, Observer } from '../core/types';
@@ -88,31 +94,101 @@ function firstFinite(...candidates: readonly (number | undefined)[]): number | u
   return undefined;
 }
 
-/** Merge the three precedence layers into a single field state. */
-function merge(
-  user: number | undefined,
-  exif: Candidate,
-  fallback: number | undefined,
-): ResolvedField {
-  const userValue = finite(user);
-  if (userValue !== undefined) return { status: 'resolved', value: userValue, source: 'user' };
-
-  const exifValue = finite(exif.value);
-  if (exifValue !== undefined) return { status: 'resolved', value: exifValue, source: 'exif' };
-
-  const defaultValue = finite(fallback);
-  if (defaultValue !== undefined) {
-    return { status: 'resolved', value: defaultValue, source: 'default' };
+/**
+ * Merge the three precedence layers into a single field state.
+ *
+ * The one asymmetry: a USER value that was supplied and rejected stops here.
+ * Every other layer may be fallen through, because a photo's metadata or a
+ * caller's default being unusable is a reason to look further down. A person
+ * typing a number that cannot be true is not — replacing it with a different
+ * number from a lower layer would hand back a confident pose the user never
+ * asked for, which is precisely what this module exists to prevent.
+ */
+function merge(user: Candidate, exif: Candidate, fallback: Candidate): ResolvedField {
+  if (user.value !== undefined) return { status: 'resolved', value: user.value, source: 'user' };
+  if (user.blockedReason !== undefined) {
+    return { status: 'needs-manual', reason: user.blockedReason };
   }
 
-  return { status: 'needs-manual', reason: exif.blockedReason ?? 'absent-from-exif' };
+  if (exif.value !== undefined) return { status: 'resolved', value: exif.value, source: 'exif' };
+  if (fallback.value !== undefined) {
+    return { status: 'resolved', value: fallback.value, source: 'default' };
+  }
+
+  return {
+    status: 'needs-manual',
+    reason: exif.blockedReason ?? fallback.blockedReason ?? 'absent-from-exif',
+  };
 }
 
 const resolvedValue = (field: ResolvedField): number | undefined =>
   field.status === 'resolved' ? field.value : undefined;
 
-const inRange = (value: number | undefined, limit: number): number | undefined =>
-  value !== undefined && Math.abs(value) <= limit ? value : undefined;
+/**
+ * The interval a field's value has to lie in for it to mean anything, with the
+ * ends included unless a bound says otherwise.
+ */
+interface Domain {
+  readonly min: number;
+  readonly max: number;
+  /** True when `min`/`max` themselves are illegal (an open interval). */
+  readonly exclusive?: boolean;
+}
+
+/**
+ * The domains this module enforces, and — as importantly — the ones it does
+ * not.
+ *
+ *   lat / lon   The coordinate system's own limits. Both ends are real places:
+ *               ±90 is a pole, ±180 the antimeridian.
+ *   eyeHeightM  `Observer.eyeHeightM` is the camera ABOVE the ground under it.
+ *               Negative buries the eye inside the terrain and inverts every
+ *               clearance the pipeline computes; src/core's own
+ *               `flatTerrainHorizon*` throw on it. No upper bound is imposed —
+ *               a camera on a mast, a drone or a balloon is a legitimate
+ *               observer and any ceiling here would be invented.
+ *   hFov/vFov   Strictly inside (0, 180): `vFovDegFromHFov` throws outside it,
+ *               and a lens with a 0° or 180° field of view is not a lens. This
+ *               is also what stops an impossible hFov override taking
+ *               `resolvePose` down with a RangeError.
+ *
+ * NOT range-checked, deliberately: `headingDeg` and `rollDeg` wrap, so 725° is
+ * 5° rather than an error; `pitchDeg` is left to the projection to interpret;
+ * `groundElevationM` has no defensible bound that would not reject a real
+ * place (the Dead Sea shore is −430 m).
+ */
+const LATITUDE: Domain = { min: -90, max: 90 };
+const LONGITUDE: Domain = { min: -180, max: 180 };
+const EYE_HEIGHT: Domain = { min: 0, max: Number.POSITIVE_INFINITY };
+const FIELD_OF_VIEW: Domain = { min: 0, max: 180, exclusive: true };
+
+/**
+ * Turn one layer's raw number into a {@link Candidate}, applying the field's
+ * domain if it has one.
+ *
+ * Three outcomes, and the difference between the last two is the whole point:
+ *   - a usable value;
+ *   - nothing supplied — `undefined`, or a NaN, which is what an empty or
+ *     half-typed input box parses to. The next layer gets its turn.
+ *   - a finite value outside the domain: supplied, and impossible. This is
+ *     recorded as `'out-of-range'` rather than discarded, so it can be shown to
+ *     whoever typed it instead of being silently swapped for another number.
+ */
+function layer(value: number | undefined, domain?: Domain): Candidate {
+  const usable = finite(value);
+  if (usable === undefined) return {};
+  if (domain === undefined) return { value: usable };
+  const inside = domain.exclusive
+    ? usable > domain.min && usable < domain.max
+    : usable >= domain.min && usable <= domain.max;
+  return inside ? { value: usable } : { blockedReason: 'out-of-range' };
+}
+
+/** Apply a domain to a candidate that came from one of the EXIF derivations. */
+function bounded(candidate: Candidate, domain: Domain): Candidate {
+  if (candidate.value === undefined) return candidate;
+  return layer(candidate.value, domain);
+}
 
 /**
  * Turn the EXIF direction into a TRUE-north heading, or explain why it cannot
@@ -187,33 +263,41 @@ export function resolvePose(
     imageHeightPx > 0;
 
   const lat = merge(
-    inRange(overrides.lat, 90),
-    { value: inRange(exif.lat, 90) },
-    inRange(defaults.lat, 90),
+    layer(overrides.lat, LATITUDE),
+    layer(exif.lat, LATITUDE),
+    layer(defaults.lat, LATITUDE),
   );
   const lon = merge(
-    inRange(overrides.lon, 180),
-    { value: inRange(exif.lon, 180) },
-    inRange(defaults.lon, 180),
+    layer(overrides.lon, LONGITUDE),
+    layer(exif.lon, LONGITUDE),
+    layer(defaults.lon, LONGITUDE),
   );
 
   // Eye height first: the GPS-altitude split below depends on it.
-  const eyeHeightM = merge(overrides.eyeHeightM, {}, defaults.eyeHeightM);
+  const eyeHeightM = merge(
+    layer(overrides.eyeHeightM, EYE_HEIGHT),
+    {},
+    layer(defaults.eyeHeightM, EYE_HEIGHT),
+  );
   const groundElevationM = merge(
-    overrides.groundElevationM,
+    layer(overrides.groundElevationM),
     groundElevationCandidateFromExif(exif, resolvedValue(eyeHeightM)),
-    defaults.groundElevationM,
+    layer(defaults.groundElevationM),
   );
 
   const headingDeg = merge(
-    overrides.headingDeg,
+    layer(overrides.headingDeg),
     headingCandidateFromExif(exif, options),
-    defaults.headingDeg,
+    layer(defaults.headingDeg),
   );
-  const pitchDeg = merge(overrides.pitchDeg, {}, defaults.pitchDeg);
-  const rollDeg = merge(overrides.rollDeg, {}, defaults.rollDeg);
+  const pitchDeg = merge(layer(overrides.pitchDeg), {}, layer(defaults.pitchDeg));
+  const rollDeg = merge(layer(overrides.rollDeg), {}, layer(defaults.rollDeg));
 
-  const hFovDeg = merge(overrides.hFovDeg, hFovCandidateFromExif(exif), defaults.hFovDeg);
+  const hFovDeg = merge(
+    layer(overrides.hFovDeg, FIELD_OF_VIEW),
+    bounded(hFovCandidateFromExif(exif), FIELD_OF_VIEW),
+    layer(defaults.hFovDeg, FIELD_OF_VIEW),
+  );
 
   // vFov is a consequence of the hFov actually in effect and the image aspect
   // ratio — recomputed here so that an overridden hFov drags vFov with it.
@@ -228,7 +312,11 @@ export function resolvePose(
   } else {
     vFovCandidate = { value: vFovDegFromHFov(effectiveHFov, imageWidthPx, imageHeightPx) };
   }
-  const derivedVFov = merge(overrides.vFovDeg, vFovCandidate, defaults.vFovDeg);
+  const derivedVFov = merge(
+    layer(overrides.vFovDeg, FIELD_OF_VIEW),
+    bounded(vFovCandidate, FIELD_OF_VIEW),
+    layer(defaults.vFovDeg, FIELD_OF_VIEW),
+  );
   // A derived vFov inherits the provenance of the hFov it came from.
   const vFovDeg: ResolvedField =
     derivedVFov.status === 'resolved' &&

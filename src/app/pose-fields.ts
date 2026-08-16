@@ -128,6 +128,12 @@ export const REASON_TEXT: Readonly<Record<MissingReason, string>> = {
   'image-dimensions-unknown': 'Needs the image pixel dimensions to derive the aspect ratio.',
   'eye-height-required':
     'GPS altitude is the camera’s altitude. Set an eye height so the terrain height under it can be worked out.',
+  // Added with the 'out-of-range' MissingReason (src/exif/types.ts): a value
+  // that WAS supplied and cannot be true is now reported rather than silently
+  // replaced by the next precedence layer. Reword freely — this is the panel's
+  // prose, not the resolver's.
+  'out-of-range':
+    'That value is outside what this field can mean, so it has not been used. Check it and type it again — nothing was substituted for it.',
 };
 
 const TRAILING_ZEROS = /\.?0+$/;

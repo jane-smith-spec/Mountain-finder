@@ -594,3 +594,125 @@ describe('staircase-free profiles keep their old meaning', () => {
     expect(isPeakVisible(resolved, 0)).toBe(true);
   });
 });
+
+/**
+ * A SUMMIT MUST NOT BECOME ITS OWN OCCLUDER ON A COIN TOSS.
+ *
+ * The cutoff in `maxAltitudeNearerThanDeg` is the peak's `distanceKm`, and the
+ * comparison against a staircase step is strict so that the terrain sample AT
+ * the summit does not occlude the summit. But the two numbers come from
+ * different computations of the same physical distance:
+ *
+ *   peak    haversine(observer, peak.lat/lon)
+ *   sample  the range step the ray walk asked for
+ *
+ * so they differ in the last few bits, with an arbitrary sign. Bearing 090° at
+ * 10 000 m from 47°N 11°E round-trips through `destinationPoint` to
+ * 10 000.000000000091 m — three parts in 10¹⁵ LONG — and the peak's own step is
+ * then "nearer than" it. `horizonAltitudeDeg` becomes the peak's own angle and
+ * the clearance collapses to ~0: a peak that clears by half a degree reported
+ * as only just scraping in.
+ *
+ * The verdict does not flip (an equal angle still passes `>= -tolerance`), which
+ * is exactly why this needs a test — it is a wrong NUMBER that nothing else
+ * complains about.
+ *
+ * Geometry is the cone of fixtures/scenes/conical-peak.ts, whose angles are
+ * derived longhand there (drop model, R_eff = 6 371 008.8/0.87):
+ *
+ *   apex   1500 m at 10 000 m: c = 6.82780 → atan(1491.17220/10000) = 8.481293°
+ *   flank  1375 m at  9 750 m: c = 6.490681 → atan(1366.509319/9750) = 7.978309°
+ *   clearance = 0.502983°
+ */
+describe('a peak coinciding with a terrain sample', () => {
+  const observer: Observer = { lat: 47, lon: 11, groundElevationM: 0, eyeHeightM: 2 };
+  const APEX_DISTANCE_M = 10_000;
+  const APEX_BEARING_DEG = 90;
+  const APEX_DEG = 8.481293;
+  const FLANK_DEG = 7.978309;
+
+  const profile = buildHorizonProfile(2, [
+    {
+      bearingDeg: APEX_BEARING_DEG,
+      samples: [
+        { distanceM: 9_750, elevationM: 1375 },
+        { distanceM: APEX_DISTANCE_M, elevationM: 1500 },
+      ],
+    },
+  ]);
+
+  const apexPoint = destinationPoint(observer, APEX_BEARING_DEG, APEX_DISTANCE_M);
+  const apex: Peak = {
+    id: 'node/apex',
+    name: 'Cone Apex',
+    lat: apexPoint.lat,
+    lon: apexPoint.lon,
+    elevationM: 1500,
+    elevationSource: 'srtm',
+  };
+  const sighted = sightPeak(observer, apex);
+
+  it('really does land on the far side of the sample distance', () => {
+    // Guard on the guard: if this ever stopped being true the test below would
+    // pass without exercising anything. The peak is 9e-11 m FARTHER than the
+    // sample that represents it.
+    expect(sighted.distanceKm).toBeGreaterThan(APEX_DISTANCE_M / 1000);
+    expect(sighted.distanceKm - APEX_DISTANCE_M / 1000).toBeLessThan(1e-9);
+    expect(sighted.altitudeDeg).toBeCloseTo(APEX_DEG, 5);
+  });
+
+  it('is measured against the flank in front of it, not against itself', () => {
+    const resolved = resolveAgainstHorizon(sighted, profile);
+
+    expect(resolved.horizonAltitudeDeg).toBeCloseTo(FLANK_DEG, 5);
+    expect(resolved.horizonAltitudeDeg).not.toBeCloseTo(APEX_DEG, 3);
+    expect(resolved.clearanceDeg).toBeCloseTo(0.502983, 5);
+    expect(isPeakVisible(resolved, 0)).toBe(true);
+  });
+
+  it('gives the same answer whichever side of the sample the noise falls', () => {
+    // The bug's signature is that the answer depends on the sign of a rounding
+    // error, so both signs are asserted explicitly — and a bearing where the
+    // round trip lands SHORT (045°) must not be treated differently.
+    const short = destinationPoint(observer, 45, APEX_DISTANCE_M);
+    const shortSighting = sightPeak(observer, { ...apex, lat: short.lat, lon: short.lon });
+    expect(shortSighting.distanceKm).toBeLessThan(APEX_DISTANCE_M / 1000);
+
+    const shortProfile = buildHorizonProfile(2, [
+      {
+        bearingDeg: 45,
+        samples: [
+          { distanceM: 9_750, elevationM: 1375 },
+          { distanceM: APEX_DISTANCE_M, elevationM: 1500 },
+        ],
+      },
+    ]);
+    expect(resolveAgainstHorizon(shortSighting, shortProfile).horizonAltitudeDeg).toBeCloseTo(
+      FLANK_DEG,
+      5,
+    );
+  });
+
+  it('still lets genuinely nearer terrain occlude, down to metres', () => {
+    // The slack must not swallow real occluders. A wall 1 m nearer than the
+    // peak is 1e-7 of the range — a hundred times the slack — and still hides
+    // it. (Terrain postings are ~30 m apart, so this is already unreachably
+    // fine in practice.)
+    const wallProfile = buildHorizonProfile(2, [
+      {
+        bearingDeg: APEX_BEARING_DEG,
+        samples: [
+          { distanceM: 9_999, elevationM: 2000 },
+          { distanceM: APEX_DISTANCE_M, elevationM: 1500 },
+        ],
+      },
+    ]);
+    const resolved = resolveAgainstHorizon(sighted, wallProfile);
+    expect(resolved.horizonAltitudeDeg).toBeCloseTo(
+      altitudeAngleDeg(2, 2000, 9_999),
+      12,
+    );
+    expect(resolved.clearanceDeg).toBeLessThan(0);
+    expect(isPeakVisible(resolved, 0)).toBe(false);
+  });
+});

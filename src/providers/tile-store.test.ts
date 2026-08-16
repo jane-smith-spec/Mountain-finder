@@ -20,6 +20,7 @@ import {
   tileNamesForBounds,
 } from './tile-store.js';
 import { bilinearTerrain, buildSyntheticHgtBytes, buildSyntheticTile } from './synthetic-tile.js';
+import { normaliseLongitudeDeg } from '../core/geodesy.js';
 
 describe('tileNameFor', () => {
   const cases: readonly (readonly [number, number, string, string])[] = [
@@ -247,5 +248,56 @@ describe('parseNamedTile', () => {
     expect(tile.sampleAt(0, 0)).toBe(1234);
     expect(tile.sampleAt(10, 10)).toBe(1234);
     expect(tile.nearest(-0.5, -0.5)).toEqual({ status: 'ok', elevationM: 1234, method: 'nearest' });
+  });
+});
+
+/**
+ * THE SEAM, END TO END — naming and reading have to agree at ±180.
+ *
+ * `normaliseLon` here folds onto [−180, 180) and `src/core/geodesy`'s
+ * `normaliseLongitudeDeg` folds onto (−180, +180]. Both are deliberate and both
+ * are documented (tile-store.ts's header explains why they must differ), which
+ * makes the JOIN between them the thing that needs a test: a coordinate
+ * produced by core's convention must be readable through the store's.
+ */
+describe('the antimeridian, from coordinate to elevation', () => {
+  const tile = buildSyntheticTile({
+    name: 'N45W180',
+    gridSize: 11,
+    // 100 m per degree east of −180: the seam itself is exactly 0 m.
+    terrain: bilinearTerrain({
+      originLat: 45,
+      originLon: -180,
+      baseM: 0,
+      perLatDegM: 0,
+      perLonDegM: 100,
+    }),
+  });
+
+  it('names, loads and reads the same tile from both signs of 180', () => {
+    const store = new MemoryTileStore().set('N45W180', tile);
+
+    expect(tileNameFor(45.5, 180)).toBe('N45W180');
+    expect(tileNameFor(45.5, -180)).toBe('N45W180');
+    expect(normaliseLon(180)).toBe(-180);
+    // core's opposite convention: normaliseLongitudeDeg(-180) === 180, so a
+    // destinationPoint stepping east across the seam hands us exactly +180.
+    expect(normaliseLongitudeDeg(-180)).toBe(180);
+
+    return Promise.all([store.tileFor(45.5, 180), store.tileFor(45.5, -180)]).then(
+      ([east, west]) => {
+        expect(east).not.toBeNull();
+        expect(west).toBe(east);
+        // The bug this covers: the store used to hand back the tile and the
+        // tile used to refuse the coordinate, so the answer was an honest but
+        // wrong "no data" over bytes we were holding.
+        expect(east?.read(45.5, 180)).toEqual({
+          status: 'ok',
+          elevationM: 0,
+          method: 'bilinear',
+        });
+        expect(east?.read(45.5, -179.25).elevationM).toBe(75);
+      },
+    );
   });
 });

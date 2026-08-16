@@ -426,3 +426,91 @@ describe('parseHgtTile', () => {
     expect(tile.nearest(-34, -43).elevationM).toBe(4);
   });
 });
+
+/* ------------------------------------------------------------------ *
+ * The antimeridian
+ * ------------------------------------------------------------------ */
+
+/**
+ * LONGITUDE IS PERIODIC AND THE TWO MODULES PICK OPPOSITE SEAMS.
+ *
+ * `tile-store.normaliseLon` folds onto [−180, 180) so that the meridian is
+ * named `W180` — there is no `E180` tile, so it has to. `src/core/geodesy`
+ * folds onto (−180, +180] so that a step east from 179.9° reports −179.9°
+ * rather than 180.1°, and `destinationPoint` can therefore emit exactly +180.
+ *
+ * Both conventions are right for their own job (see tile-store.ts's header),
+ * which leaves the join between them: the store names and loads `N45W180`, and
+ * the tile then has to accept +180 as a coordinate inside `westLon = −180 …
+ * eastLon = −179`. A raw `>=`/`<=` comparison says it is outside, and the
+ * provider returns "no data" while holding the very bytes asked for.
+ *
+ * Terrain here is 100 m per degree of longitude east of −180, so the value at
+ * the seam is exactly 0 m and the arithmetic is checkable by eye.
+ */
+describe('longitude at the antimeridian', () => {
+  const tile = buildSyntheticTile({
+    name: 'N45W180',
+    gridSize: 11,
+    terrain: bilinearTerrain({
+      originLat: 45,
+      originLon: -180,
+      baseM: 0,
+      perLatDegM: 0,
+      perLonDegM: 100,
+    }),
+  });
+
+  it('accepts +180 as the same meridian as −180', () => {
+    expect(tile.geometry.westLon).toBe(-180);
+    expect(tile.eastLon).toBe(-179);
+
+    expect(tile.contains(45.5, -180)).toBe(true);
+    expect(tile.contains(45.5, 180)).toBe(true);
+    expect(tile.indexFor(45.5, 180)?.col).toBe(0);
+    expect(tile.indexFor(45.5, 180)?.row).toBeCloseTo(5, 9);
+  });
+
+  it('reads the same elevation from either side of the seam', () => {
+    // West edge of the tile: 0 m by construction.
+    expect(tile.read(45.5, -180)).toEqual({ status: 'ok', elevationM: 0, method: 'bilinear' });
+    expect(tile.read(45.5, 180)).toEqual({ status: 'ok', elevationM: 0, method: 'bilinear' });
+    expect(tile.nearest(45.5, 180)).toEqual({ status: 'ok', elevationM: 0, method: 'nearest' });
+    // And a hair west of the seam is 179.95°E ≡ −180.05°, genuinely outside.
+    expect(tile.read(45.5, 179.95)).toEqual({ status: 'outside', elevationM: null });
+  });
+
+  it('still refuses a longitude that is nowhere near the tile', () => {
+    expect(tile.contains(45.5, -178)).toBe(false);
+    expect(tile.contains(45.5, 0)).toBe(false);
+    expect(tile.contains(45.5, 90)).toBe(false);
+    // Latitude is not periodic and is untouched by the fix.
+    expect(tile.contains(47, -179.5)).toBe(false);
+    expect(tile.contains(44, -179.5)).toBe(false);
+  });
+
+  it('treats an unnormalised longitude as the meridian it actually is', () => {
+    // −180.5 ≡ +179.5 (outside this tile) and +180.5 ≡ −179.5 (inside it).
+    // Longitude is periodic; a caller working in one seam convention must not
+    // get a different answer from a caller working in the other.
+    expect(tile.contains(45.5, -180.5)).toBe(false);
+    expect(tile.contains(45.5, 180.5)).toBe(true);
+    expect(tile.read(45.5, 180.5).elevationM).toBe(50);
+    expect(tile.read(45.5, -179.5).elevationM).toBe(50);
+  });
+
+  it('is unaffected away from the seam, edges and epsilon included', () => {
+    const inland = buildSyntheticTile({
+      name: 'N45E007',
+      gridSize: 11,
+      terrain: constantTerrain(1500),
+    });
+    expect(inland.contains(45.5, 7)).toBe(true);
+    expect(inland.contains(45.5, 8)).toBe(true);
+    // Inside the 1e-9° edge tolerance on either side.
+    expect(inland.contains(45.5, 7 - 5e-10)).toBe(true);
+    expect(inland.contains(45.5, 8 + 5e-10)).toBe(true);
+    expect(inland.contains(45.5, 6.999)).toBe(false);
+    expect(inland.contains(45.5, 8.001)).toBe(false);
+  });
+});
