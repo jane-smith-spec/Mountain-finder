@@ -172,11 +172,7 @@ async function writeRealWindow(WINDOW: WindowSpec): Promise<void> {
     name: WINDOW.name,
     data: dataName,
     format: 'int16-be-row-major-north-first',
-    description:
-      'A 256×256 rectangle of real SRTM1 data around the Matterhorn, cut byte-for-byte ' +
-      'out of the source tile. Same format as a .hgt file, but a window rather than a ' +
-      'whole degree, so its geometry is written down here instead of derived from the ' +
-      'file length.',
+    description: WINDOW.description,
     source: {
       tile: WINDOW.tile,
       url: `${S3_BASE}/${WINDOW.tile.slice(0, 3)}/${WINDOW.tile}.hgt.gz`,
@@ -212,10 +208,11 @@ async function writeRealWindow(WINDOW: WindowSpec): Promise<void> {
         'code path is covered by the synthetic fixtures instead.',
     },
     accuracyCaveat:
-      'SRTM under-reads AND displaces sharp summits: the highest posting here is 4230 m ' +
-      'against the Matterhorn\'s surveyed 4478 m, and it sits ~320 m WSW of the surveyed ' +
-      'summit position (which itself reads 3567 m, already down the east side). Use these ' +
-      "tiles for the terrain horizon; take summit heights from the peak database's ele tag.",
+      'SRTM under-reads AND displaces sharp summits. In N45E007 the Matterhorn tops out at ' +
+      '4230 m against a surveyed 4478 m, and that posting sits ~320 m WSW of the surveyed ' +
+      'summit position (which itself reads 3567 m, already down the east side); Dent ' +
+      "d'Hérens 3835 vs 4171 m; the broad Grand Combin 4287 vs 4314 m. Use these tiles for " +
+      "the terrain horizon; take summit heights from the peak database's ele tag.",
   };
   await writeFile(join(FIXTURE_DIR, `${WINDOW.name}.json`), `${JSON.stringify(meta, null, 2)}\n`);
 
@@ -333,7 +330,7 @@ async function writeSynthetic(): Promise<Record<string, unknown>[]> {
 async function main(): Promise<void> {
   await mkdir(FIXTURE_DIR, { recursive: true });
   process.stdout.write(`Writing ${FIXTURE_DIR}\n`);
-  await writeRealWindow();
+  for (const window of WINDOWS) await writeRealWindow(window);
   const synthetic = await writeSynthetic();
   await writeFile(
     join(FIXTURE_DIR, 'synthetic-manifest.json'),

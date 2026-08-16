@@ -63,6 +63,12 @@ export class DirectoryTileStore implements TileStore {
     }
     const loading = this.load(key);
     this.cache.set(key, loading);
+    // Do not cache a failure: an unreadable file may be a half-finished download
+    // that succeeds on the next attempt, and a permanently broken one will just
+    // fail again. The `.catch` here also keeps the stored rejection handled.
+    void loading.catch(() => {
+      if (this.cache.get(key) === loading) this.cache.delete(key);
+    });
     this.evictIfNeeded();
     return loading;
   }
@@ -146,6 +152,12 @@ export function parseTileWindowMeta(value: unknown, label: string): TileWindowMe
     throw new ProviderError('bad-tile', `${label}: sidecar is not an object`);
   }
   const raw = value as Record<string, unknown>;
+  if (raw['format'] !== 'int16-be-row-major-north-first') {
+    throw new ProviderError(
+      'bad-tile',
+      `${label}: unsupported window format ${String(raw['format'])}`,
+    );
+  }
   const geometry = raw['geometry'];
   const source = raw['source'];
   if (typeof geometry !== 'object' || geometry === null) {
@@ -153,12 +165,6 @@ export function parseTileWindowMeta(value: unknown, label: string): TileWindowMe
   }
   if (typeof source !== 'object' || source === null) {
     throw new ProviderError('bad-tile', `${label}: sidecar has no source provenance`);
-  }
-  if (raw['format'] !== 'int16-be-row-major-north-first') {
-    throw new ProviderError(
-      'bad-tile',
-      `${label}: unsupported window format ${String(raw['format'])}`,
-    );
   }
   const g = geometry as Record<string, unknown>;
   const s = source as Record<string, unknown>;

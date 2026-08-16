@@ -1,41 +1,41 @@
 {
-  "name": "matterhorn-window",
-  "data": "matterhorn-window.i16be",
+  "name": "zermatt-window",
+  "data": "zermatt-window.i16be",
   "format": "int16-be-row-major-north-first",
-  "description": "A 256×256 rectangle of real SRTM1 data around the Matterhorn, cut byte-for-byte out of the source tile. Same format as a .hgt file, but a window rather than a whole degree, so its geometry is written down here instead of derived from the file length.",
+  "description": "A 64×64 rectangle of real SRTM1 data over Zermatt village, cut byte-for-byte out of N46E007. Committed as the offline evidence that this mirror is void-filled: the valley floor reads a real elevation here, not the −32768 void marker.",
   "source": {
-    "tile": "N45E007",
-    "url": "https://s3.amazonaws.com/elevation-tiles-prod/skadi/N45/N45E007.hgt.gz",
+    "tile": "N46E007",
+    "url": "https://s3.amazonaws.com/elevation-tiles-prod/skadi/N46/N46E007.hgt.gz",
     "dataset": "SRTM1 (1 arc-second) via the AWS elevation-tiles-prod \"skadi\" mirror",
     "sourceGridSize": 3601,
-    "extractedFromRow": 64,
-    "extractedFromCol": 2240,
+    "extractedFromRow": 3494,
+    "extractedFromCol": 2665,
     "extractedOn": "2026-08-16",
     "license": "SRTM is public domain (NASA/USGS); the AWS mirror is a public dataset."
   },
   "geometry": {
-    "northLat": 45.98222222222222,
-    "westLon": 7.622222222222222,
-    "rows": 256,
-    "cols": 256,
+    "northLat": 46.029444444444444,
+    "westLon": 7.740277777777778,
+    "rows": 64,
+    "cols": 64,
     "latStepDeg": 0.0002777777777777778,
     "lonStepDeg": 0.0002777777777777778
   },
   "bounds": {
-    "north": 45.98222222222222,
-    "south": 45.91138888888889,
-    "west": 7.622222222222222,
-    "east": 7.6930555555555555
+    "north": 46.029444444444444,
+    "south": 46.011944444444445,
+    "west": 7.740277777777778,
+    "east": 7.757777777777778
   },
   "statistics": {
     "voidSamples": 0,
-    "minElevationM": 1970,
-    "maxElevationM": 4230,
+    "minElevationM": 1587,
+    "maxElevationM": 2284,
     "maxAt": {
-      "row": 24,
-      "col": 117,
-      "lat": 45.97555555555555,
-      "lon": 7.6547222222222215
+      "row": 0,
+      "col": 0,
+      "lat": 46.029444444444444,
+      "lon": 7.740277777777778
     },
     "note": "voidSamples is 0 because the skadi mirror is void-filled — verified across N45E007, N46E007, N27E086, N28E086 (0 voids in 51 868 804 samples). The void code path is covered by the synthetic fixtures instead."
   },

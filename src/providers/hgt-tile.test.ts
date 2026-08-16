@@ -248,14 +248,20 @@ describe('bilinear interpolation', () => {
     expect(reading.elevationM).not.toBeCloseTo(793.5625, 3);
   });
 
-  it('reports an exact hit on a sample as method "exact"', () => {
+  it('returns the sample value when the query lands on a sample line', () => {
+    // Sample (7, 13) = h(0.65, 0.65) = 994. Sample lines are multiples of 1/20
+    // here but of 1/3600 in real tiles, so this must hold to within float noise
+    // rather than exactly — hence toBeCloseTo, and no "exact" method flag.
     const reading = tile.bilinear(0.65, 0.65);
-    expect(reading).toEqual({ status: 'ok', elevationM: 994, method: 'exact' });
+    expect(reading.status).toBe('ok');
+    expect(reading.elevationM).toBeCloseTo(994, 9);
   });
 
   it('works on the south and east edges, where the cell must step back', () => {
     // Exactly on the south-east corner: h(0,1) = 700.
-    expect(tile.bilinear(0, 1)).toEqual({ status: 'ok', elevationM: 700, method: 'exact' });
+    const corner = tile.bilinear(0, 1);
+    expect(corner.status).toBe('ok');
+    expect(corner.elevationM).toBeCloseTo(700, 9);
     // Half a cell in from the south edge, along it: lat 0, lon 0.025 →
     // h = 500 + 0 + 5 + 0 = 505.
     const south = tile.bilinear(0, 0.025);
@@ -286,8 +292,8 @@ describe('nearest-sample lookup', () => {
     expect(tile.nearest(0.9, 0.19)).toEqual({ status: 'ok', elevationM: 882, method: 'nearest' });
   });
 
-  it('marks a lookup that lands exactly on a sample', () => {
-    expect(tile.nearest(0.9, 0.2)).toEqual({ status: 'ok', elevationM: 882, method: 'exact' });
+  it('returns that sample when the lookup lands on one', () => {
+    expect(tile.nearest(0.9, 0.2)).toEqual({ status: 'ok', elevationM: 882, method: 'nearest' });
   });
 });
 

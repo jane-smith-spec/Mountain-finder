@@ -23,6 +23,24 @@ Live checklist. Check items only after their self-check has been run and passed 
       recording was possible. Fixtures are HAND-AUTHORED against documented schemas and
       labelled as such. Must be re-recorded once egress is allowed. See "Blocked" below.
 
+## Phase 2b — Offline elevation from local SRTM tiles (D7) ✅ 108 tests
+- [x] P2.5 HGT tile reader — `.hgt`/`.hgt.gz`, grid size from file length, bilinear + nearest.
+      Voids are `null`, never a number; interpolation touching a void falls back to the
+      highest-weight VALID corner (`method: 'nearest-valid'`), or returns `'void'` when all
+      four corners are void. `voidPolicy: 'no-data'` opts into the strict rule.
+- [x] P2.6 Tile store — `floor` naming verified across all four hemispheres, the antimeridian,
+      the poles and exact integer degrees; directory loader with an LRU cache; gzip.
+- [x] P2.7 Tile fetcher — `npm run fetch:tiles` from `elevation-tiles-prod/skadi`; validates the
+      grid size before the file lands under its final name, so a truncated download cannot pass.
+- [x] P2.8 Real-data fixtures — `fixtures/tiles/matterhorn-window` (N45E007) and `zermatt-window`
+      (N46E007): real bytes + provenance sidecars, reproducible via `npm run fixtures:tiles`.
+- [x] Verified against the real 25 MB tiles: Grand Combin 4287 m, Matterhorn 4230 m,
+      N45E007 row 0 == N46E007 row 3600 on all 3601 shared-edge samples.
+- **Correction to the briefing:** this mirror is **void-filled**. Zermatt (46.0207, 7.7491) reads
+  **1608 m, not −32768**, and N45E007/N46E007/N27E086/N28E086 contain 0 voids in 51 868 804
+  samples. The void code path is real and tested, but on SYNTHETIC tiles — no honest real
+  fixture from this source can contain a void.
+
 ## Phase 3 — Photo ingestion (group C) ✅ 69 tests
 - [x] P3.1 EXIF extraction — real JPEGs authored byte-wise; `GPSImgDirectionRef` honoured
 - [x] P3.2 Fallback + override merge — 9 pose fields, each resolved or explicitly needs-manual

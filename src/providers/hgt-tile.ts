@@ -26,7 +26,8 @@
  *   it is never averaged in — an average that includes −32768 is meaningless.
  *   Instead:
  *     `'nearest-valid'` — return the VALID corner of that cell with the largest
- *        bilinear weight, reported as `method: 'nearest-valid'`. The answer is
+ *        bilinear weight (ties break toward the north-west, in the fixed corner
+ *        order NW, NE, SW, SE, so the result is deterministic). The answer is
  *        displaced by at most one sample spacing (~30 m for SRTM1), and the
  *        caller can see the degradation in `method`. This only ever applies at
  *        the FRINGE of a void: inside a void larger than one cell all four
@@ -79,10 +80,17 @@ export interface GridGeometry {
   readonly lonStepDeg: number;
 }
 
-/** How an elevation was obtained. */
+/**
+ * How an elevation was obtained.
+ *
+ * There is deliberately no `'exact'` value for "the query landed on a sample".
+ * Sample lines sit at multiples of 1/3600°, which is not representable in binary
+ * floating point, so `(northLat − lat) / latStepDeg` is only ever *nearly* an
+ * integer and an exactness flag would be a coin toss. Landing on a sample is
+ * already handled correctly by both methods — bilinear gives that sample's value
+ * because the other three weights are ~0.
+ */
 export type TileReadingMethod =
-  /** The query landed exactly on a grid sample. */
-  | 'exact'
   /** Weighted average of four valid corner samples. */
   | 'bilinear'
   /** Nearest-neighbour lookup that the caller asked for. */
@@ -232,8 +240,7 @@ export class HgtTile {
     const col = Math.round(index.col);
     const value = this.sampleAt(row, col);
     if (value === null) return VOID_READING;
-    const exact = index.row === row && index.col === col;
-    return { status: 'ok', elevationM: value, method: exact ? 'exact' : 'nearest' };
+    return { status: 'ok', elevationM: value, method: 'nearest' };
   }
 
   /**
@@ -271,10 +278,7 @@ export class HgtTile {
       if (best === null || corner.weight > best.weight) best = { value, weight: corner.weight };
     }
 
-    if (!voidSeen) {
-      const exact = fRow === 0 && fCol === 0;
-      return { status: 'ok', elevationM: sum, method: exact ? 'exact' : 'bilinear' };
-    }
+    if (!voidSeen) return { status: 'ok', elevationM: sum, method: 'bilinear' };
     if (voidPolicy === 'no-data' || best === null) return VOID_READING;
     return { status: 'ok', elevationM: best.value, method: 'nearest-valid' };
   }

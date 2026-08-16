@@ -32,27 +32,37 @@ Consequences of the directive:
 | D6 | v1 Expo code | **Archived, not deleted** | `archive/v1-expo/` — the geodesy/LoS math is sound as reference material and gets re-derived with tests in v2. |
 | D7 | Elevation data source | **Offline-first: local SRTM `.hgt` tiles** | User preference, and correct on the merits — mountain photos are taken where there is no signal. Live JSON APIs demote from a runtime dependency to an acquisition step. Also unblocks this environment, where `api.opentopodata.org` and `overpass-api.de` are 403 at the egress proxy but `s3.amazonaws.com` is reachable. |
 
-### What the real SRTM data taught us (verified against a downloaded tile, 2026-08-16)
+### What the real SRTM data taught us (verified 2026-08-16)
 
-Sampling a real 1-arc-second tile (`N45E007`, Zermatt) against independently known summit
-elevations produced three findings that shape the design:
+> **Correction.** An earlier revision of this section claimed voids are common in this source,
+> citing a Zermatt sample reading `−32768`. **That was wrong, and the error was mine.** Zermatt
+> sits at 46.0207°N, which is *north* of tile `N45E007` (that tile covers 45–46°N). I sampled it
+> in the wrong tile; the negative row index read out of bounds and my scan returned the sentinel.
+> Read from the correct tile `N46E007`, Zermatt reports **1608 m — its true elevation.**
+> Independently re-verified: **0 voids in 25,934,402 samples** across both tiles.
+> The lesson is the one this project keeps relearning: a plausible number from a buggy read is
+> more dangerous than a crash, which is exactly why tile-edge and hemisphere cases are tested.
 
-| Location | SRTM reads | Known | Δ |
-|---|---|---|---|
-| Grand Combin (broad summit) | 4287 m | 4314 m | −27 m |
-| Matterhorn (sharp pyramid) | 4230 m | 4478 m | −248 m |
-| Dent d'Hérens | 3835 m | 4171 m | −336 m |
-| Zermatt valley floor | **−32768** (void) | 1608 m | *no data* |
+| Location | Tile | SRTM reads | Known | Δ |
+|---|---|---|---|---|
+| Grand Combin (broad summit) | `N45E007` | 4287 m | 4314 m | −27 m |
+| Matterhorn (sharp pyramid) | `N45E007` | 4230 m | 4478 m | −248 m |
+| Dent d'Hérens | `N45E007` | 3835 m | 4171 m | −336 m |
+| Zermatt village | `N46E007` | **1608 m** | 1608 m | **0 m** ✓ |
 
-1. **Voids are real and common.** `−32768` marks radar shadow, which steep alpine valleys are
-   full of. A void coerced to 0 m — or worse, treated as −32768 metres of altitude — silently
-   corrupts the skyline. This is the highest-risk detail in the data path and must be an
-   explicit no-data state, never a number.
-2. **SRTM systematically underestimates sharp summits** by 250–350 m, because a 30 m grid
-   cannot resolve a pyramid. Therefore: use SRTM for the *terrain horizon*, but take *summit
-   heights* from the peak database's tagged elevation. Sampling peak heights from SRTM would
-   place every alpine label hundreds of metres too low.
-3. **Broad terrain is trustworthy** (−27 m), so the horizon profile itself is sound.
+1. **This source is void-filled.** The AWS `elevation-tiles-prod/skadi` mirror contains no voids
+   (0 in 51.8 M samples across four tiles, including the Everest region). Void handling is still
+   implemented and tested, because other SRTM distributions (USGS SRTMGL1 v2) *do* carry voids
+   and a `−32768` silently treated as an elevation would corrupt the skyline. But that code is
+   **defensive, exercised only by synthetic fixtures** — not a response to observed data. Said
+   plainly so nobody later mistakes it for evidence.
+2. **SRTM underestimates sharp summits** by 250–350 m, because a 30 m grid cannot resolve a
+   pyramid — *and it displaces them*: the Matterhorn's highest posting sits ~320 m WSW of the
+   surveyed summit, which itself reads only 3567 m. Therefore: use SRTM for the *terrain
+   horizon*, but take *summit heights* from the peak database's tagged elevation. Sampling peak
+   heights from SRTM would place every alpine label hundreds of metres too low **and sideways**.
+3. **Broad terrain and valley floors are trustworthy** (−27 m at Grand Combin; exact at Zermatt),
+   so the horizon profile itself is sound.
 
 ## What success looks like
 
