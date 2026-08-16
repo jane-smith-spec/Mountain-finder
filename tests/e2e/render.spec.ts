@@ -77,7 +77,7 @@ function peak(
     bearingDeg,
     altitudeDeg,
     distanceKm,
-    horizonAltitudeDeg: altitudeDeg - 1,
+    occludingAltitudeDeg: altitudeDeg - 1,
     clearanceDeg: 1,
   };
 }

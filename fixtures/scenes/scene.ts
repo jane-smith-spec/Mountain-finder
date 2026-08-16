@@ -55,25 +55,17 @@ export interface ExpectedPeakVerdict {
   /** The closed-form angle of the peak itself (exact sphere model). */
   peakAltitudeDeg: number;
   /**
-   * The closed-form OCCLUDING angle for this peak: the highest angle reached
-   * by terrain at the peak's bearing that lies STRICTLY NEARER to the observer
-   * than the peak. That — not the skyline — is what decides visibility under
-   * the corrected P1.5 rule, because terrain behind a peak is backdrop and
-   * cannot hide it.
+   * The closed-form angle of the terrain that can occlude this peak: the
+   * highest angle reached at the peak's bearing by terrain lying STRICTLY
+   * NEARER to the observer than the peak. Terrain behind a peak is backdrop
+   * and cannot hide it, so this — and not the skyline, which is a maximum over
+   * ALL distances — is what decides visibility (P1.5).
    *
-   * It equals the skyline angle only when the peak is farther out than
-   * everything that forms the skyline at its bearing. When something taller
-   * stands BEHIND the peak (twin-ridges variant A's near crest) or the peak IS
-   * the skyline (the cone's apex, occluded only by its own flank) the two
-   * differ, and using the skyline there is the pre-P1.5 bug: it makes a summit
-   * its own occluder and reports a clearance of exactly zero.
-   *
-   * The name is the pre-P1.5 one and is scheduled to become
-   * `occludingAltitudeDeg`; the meaning is as described here, and both
-   * twin-ridges.ts and conical-peak.ts populate it accordingly.
+   * The two coincide only when the peak is farther out than everything that
+   * forms the skyline at its bearing.
    */
-  skylineAltitudeDeg: number;
-  /** peakAltitudeDeg − skylineAltitudeDeg. Sign decides `visible`. */
+  occludingAltitudeDeg: number;
+  /** peakAltitudeDeg − occludingAltitudeDeg. Sign decides `visible`. */
   clearanceDeg: number;
   reason: string;
 }

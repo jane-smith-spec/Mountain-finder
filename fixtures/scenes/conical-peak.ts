@@ -81,11 +81,14 @@
  * DERIVATION 4 — WHAT OCCLUDES THE APEX (the P1.5 nearer-terrain rule)
  * ───────────────────────────────────────────────────────────────────────────
  * CORRECTED 2026-08-16. This fixture previously stated the apex's verdict as
- * `skylineAltitudeDeg = 8.479576, clearanceDeg = 0` — the apex measured against
- * ITSELF. That is the superseded pre-P1.5 rule ("a peak is visible iff it
- * clears the skyline at its bearing"), which twin-ridges.ts was migrated off
+ * an occluding angle of 8.479576 deg with clearanceDeg = 0 — the apex measured
+ * against ITSELF. That is the superseded pre-P1.5 rule ("a peak is visible iff
+ * it clears the skyline at its bearing"), which twin-ridges.ts was migrated off
  * when P1.5 was fixed and this scene was missed. It passed only because the
  * self-consistency check is `visible === (clearance >= 0)` and `0 >= 0` holds.
+ * The verdict field was then named for the skyline, which is how one file could
+ * mean the skyline and the other the nearer-terrain maximum without anything
+ * complaining; it is now `occludingAltitudeDeg`.
  *
  * The rule is: a peak is occluded only by terrain NEARER to the observer than
  * the peak itself. Terrain behind it is backdrop and cannot hide it. So the
@@ -332,7 +335,7 @@ const expectedPeakVerdicts: readonly ExpectedPeakVerdict[] = [
     peakAltitudeDeg: EXPECTED_APEX_ALTITUDE_DEG,
     // The OCCLUDING angle — terrain strictly nearer than the apex — not the
     // skyline, which the apex forms itself. See DERIVATION 4.
-    skylineAltitudeDeg: EXPECTED_APEX_OCCLUDING_ALTITUDE_DEG,
+    occludingAltitudeDeg: EXPECTED_APEX_OCCLUDING_ALTITUDE_DEG,
     clearanceDeg: EXPECTED_APEX_ALTITUDE_DEG - EXPECTED_APEX_OCCLUDING_ALTITUDE_DEG,
     reason:
       'The apex IS the skyline on its bearing, and the only terrain in front of ' +

@@ -44,7 +44,7 @@ import type { RaySample, SightlineOptions } from './sightline';
 import type { HorizonProfile, PeakSighting, PeakVisibility, VisiblePeak } from './types';
 
 /**
- * The angle reported as `horizonAltitudeDeg` when no terrain at all lies nearer
+ * The angle reported as `occludingAltitudeDeg` when no terrain at all lies nearer
  * than the peak, so nothing can occlude it.
  *
  * −90° is the nadir: the floor of the altitude scale, which every real sighting
@@ -92,11 +92,11 @@ export function resolveAgainstHorizon(
     sighting.bearingDeg,
     sighting.distanceKm,
   );
-  const horizonAltitudeDeg = nearerTerrainDeg ?? NO_NEARER_TERRAIN_ALTITUDE_DEG;
+  const occludingAltitudeDeg = nearerTerrainDeg ?? NO_NEARER_TERRAIN_ALTITUDE_DEG;
   return {
     ...sighting,
-    horizonAltitudeDeg,
-    clearanceDeg: sighting.altitudeDeg - horizonAltitudeDeg,
+    occludingAltitudeDeg,
+    clearanceDeg: sighting.altitudeDeg - occludingAltitudeDeg,
   };
 }
 

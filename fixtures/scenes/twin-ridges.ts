@@ -384,12 +384,15 @@ function buildVariant(variant: TwinRidgeVariant): SyntheticScene {
     },
   ];
 
-  // `skylineAltitudeDeg` on a verdict is the angle the peak is MEASURED
+  // `occludingAltitudeDeg` on a verdict is the angle the peak is MEASURED
   // AGAINST, i.e. the occluding terrain that actually applies to it — terrain
   // strictly nearer than the peak. For a peak beyond everything that forms the
   // skyline (the far crest in variant B) that is the skyline angle itself; for
   // a peak with a taller backdrop (the near crest, and the far crest in
   // variant A) it is lower, and the difference is the bug this scene found.
+  // Note that the local `skylineAltitudeDeg` above is a different quantity: it
+  // is the genuine skyline, the maximum over ALL distances, and it belongs to
+  // `expectedSkyline`, never to a verdict.
   const inFrontOfNearCrestDeg = occludingAltitudeDegNearerThan(NEAR_RIDGE_DISTANCE_M);
   const inFrontOfFarCrestDeg = occludingAltitudeDegNearerThan(FAR_RIDGE_DISTANCE_M);
 
@@ -398,7 +401,7 @@ function buildVariant(variant: TwinRidgeVariant): SyntheticScene {
       peakId: farPeakId,
       visible: farRidgeWins,
       peakAltitudeDeg: farAltitudeDeg,
-      skylineAltitudeDeg: inFrontOfFarCrestDeg,
+      occludingAltitudeDeg: inFrontOfFarCrestDeg,
       clearanceDeg: farAltitudeDeg - inFrontOfFarCrestDeg,
       reason: farRidgeWins
         ? 'Far crest angle exceeds everything nearer than it — the highest of ' +
@@ -419,7 +422,7 @@ function buildVariant(variant: TwinRidgeVariant): SyntheticScene {
       peakId: nearPeakId,
       visible: true,
       peakAltitudeDeg: nearAltitudeDeg,
-      skylineAltitudeDeg: inFrontOfNearCrestDeg,
+      occludingAltitudeDeg: inFrontOfNearCrestDeg,
       clearanceDeg: nearAltitudeDeg - inFrontOfNearCrestDeg,
       reason: farRidgeWins
         ? 'The near crest sits 0.79 deg BELOW the skyline and is still visible: ' +

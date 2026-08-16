@@ -31,9 +31,10 @@ pipeline built from the fixtures is *likely* to feed one.
 in the business of rejecting bad input — it just accepts `distanceM === 0` silently.
 
 ### 2. MEDIUM-HIGH — `conical-peak.ts` ground truth still encodes the superseded occlusion rule
-`fixtures/scenes/conical-peak.ts` states `skylineAltitudeDeg = 8.479576, clearanceDeg = 0` —
-the apex measured against *itself*, which is the pre-P1.5 "compare against the skyline" rule.
-`twin-ridges.ts` was migrated when P1.5 was fixed; the cone was missed.
+`fixtures/scenes/conical-peak.ts` states an occluding angle of `8.479576` with
+`clearanceDeg = 0` — the apex measured against *itself*, which is the pre-P1.5 "compare against
+the skyline" rule. `twin-ridges.ts` was migrated when P1.5 was fixed; the cone was missed.
+(At review time the field was named `skylineAltitudeDeg`; see "Decision taken".)
 
 Under the corrected nearer-terrain rule the apex's occluder is the cone's own flank at 9750 m:
 
@@ -118,3 +119,20 @@ wires the hooks, or merely correct the cone's numbers.
 **Decision: rename.** Findings 2 and 3 both stem from one field carrying two meanings across two
 files after the P1.5 migration. A rename converts that silent semantic drift into a compile
 error at every use site, which is exactly what we want and is cheap now and expensive later.
+
+**Carried out, 2026-08-16.** The numbers were corrected first (TODO.md Q2); the rename followed
+once it no longer collided with a live agent's surface:
+
+- `ExpectedPeakVerdict.skylineAltitudeDeg` → **`occludingAltitudeDeg`** (`fixtures/scenes/`).
+- `VisiblePeak.horizonAltitudeDeg` → **`occludingAltitudeDeg`** (`src/core/types.ts`). Included
+  deliberately, though it widened the diff: it is the same field one layer down, and its doc
+  comment already spent a paragraph insisting it was *not* the skyline angle. A name that has to
+  be defended in prose is the exact condition that let finding 2 happen. The paragraph is gone.
+- Nothing that genuinely means *skyline* was touched: `HorizonPoint.altitudeDeg`,
+  `HorizonPoint.skylineSteps`, `ExpectedSkylinePoint`, `interpolateHorizonAltitudeDeg` and
+  twin-ridges.ts's local `skylineAltitudeDeg` (which feeds `expectedSkyline`) are all maxima
+  over *all* distances and keep their names. Renaming those would be the mirror image of the
+  bug being fixed.
+
+`tsc` located all 39 call sites; no expected value changed anywhere, and `check` (38 files /
+746 tests), `test:acceptance` (148) and Playwright (13) are unchanged and green.

@@ -58,22 +58,22 @@ describe('resolveAgainstHorizon', () => {
     horizonPoint(270, 1),
   ]);
 
-  it('records the skyline angle and the clearance for a peak that clears it', () => {
+  it('records the occluding angle and the clearance for a peak that clears it', () => {
     const resolved = resolveAgainstHorizon(sighting('Exposed', 270, 4), profile);
-    expect(resolved.horizonAltitudeDeg).toBe(1);
+    expect(resolved.occludingAltitudeDeg).toBe(1);
     expect(resolved.clearanceDeg).toBe(3);
   });
 
   it('records a negative clearance for a peak the ridge hides', () => {
     const resolved = resolveAgainstHorizon(sighting('Hidden', 90, 4), profile);
-    expect(resolved.horizonAltitudeDeg).toBe(6);
+    expect(resolved.occludingAltitudeDeg).toBe(6);
     expect(resolved.clearanceDeg).toBe(-2);
   });
 
-  it('uses the interpolated skyline between samples', () => {
-    // 45° is midway 0°(+3) → 90°(+6), so the skyline there is +4.5°.
+  it('interpolates the occluding angle between bearing samples', () => {
+    // 45° is midway 0°(+3) → 90°(+6), so the terrain there reaches +4.5°.
     const resolved = resolveAgainstHorizon(sighting('Between', 45, 5), profile);
-    expect(resolved.horizonAltitudeDeg).toBeCloseTo(4.5, 12);
+    expect(resolved.occludingAltitudeDeg).toBeCloseTo(4.5, 12);
     expect(resolved.clearanceDeg).toBeCloseTo(0.5, 12);
   });
 
@@ -102,7 +102,7 @@ describe('isPeakVisible — tolerance', () => {
     expect(isPeakVisible(resolved, 0)).toBe(true);
   });
 
-  it('rejects a peak below the skyline unless the tolerance covers the shortfall', () => {
+  it('rejects a peak below the terrain in front of it unless the tolerance covers the shortfall', () => {
     // Half a degree short of the ridge (3 − 2.5, both exactly representable,
     // so the boundary comparisons below are exact rather than epsilon-fudged).
     const resolved = resolveAgainstHorizon(sighting('Marginal', 0, 2.5), profile);
@@ -235,13 +235,13 @@ describe('synthetic scene — one exposed peak, one ridge-hidden peak', () => {
     const visible = filterVisiblePeaks([hidden, exposed], profile);
     expect(visible).toHaveLength(1);
     expect(visible[0]?.name).toBe('Exposed Peak');
-    expect(visible[0]?.horizonAltitudeDeg).toBeCloseTo(WEST_SKYLINE_DEG, 5);
+    expect(visible[0]?.occludingAltitudeDeg).toBeCloseTo(WEST_SKYLINE_DEG, 5);
     expect(visible[0]?.clearanceDeg).toBeCloseTo(SUMMIT_ALTITUDE_DEG - WEST_SKYLINE_DEG, 5);
   });
 
   it('explains the hidden summit with a negative clearance of ~2.89°', () => {
     const resolved = resolveAgainstHorizon(hidden, profile);
-    expect(resolved.horizonAltitudeDeg).toBeCloseTo(EAST_SKYLINE_DEG, 5);
+    expect(resolved.occludingAltitudeDeg).toBeCloseTo(EAST_SKYLINE_DEG, 5);
     expect(resolved.clearanceDeg).toBeCloseTo(SUMMIT_ALTITUDE_DEG - EAST_SKYLINE_DEG, 5);
     expect(resolved.clearanceDeg).toBeLessThan(0);
   });
@@ -436,7 +436,7 @@ describe('occlusion by NEARER terrain only — the twin-ridges scene', () => {
     const nearCrest = crest('Near Crest', NEAR_CREST_DEG, 5);
     const resolved = resolveAgainstHorizon(nearCrest, profileA);
 
-    expect(resolved.horizonAltitudeDeg).toBeCloseTo(IN_FRONT_OF_NEAR_CREST_DEG, 5);
+    expect(resolved.occludingAltitudeDeg).toBeCloseTo(IN_FRONT_OF_NEAR_CREST_DEG, 5);
     expect(resolved.clearanceDeg).toBeCloseTo(0.963920, 5);
     expect(isPeakVisible(resolved, 0)).toBe(true);
     expect(filterVisiblePeaks([nearCrest], profileA).map((p) => p.name)).toEqual(['Near Crest']);
@@ -453,7 +453,7 @@ describe('occlusion by NEARER terrain only — the twin-ridges scene', () => {
       profileA,
     );
     expect(visible.map((p) => p.name)).toEqual(['Far Crest', 'Near Crest']);
-    expect(visible[0]?.horizonAltitudeDeg).toBeCloseTo(IN_FRONT_OF_FAR_CREST_A_DEG, 5);
+    expect(visible[0]?.occludingAltitudeDeg).toBeCloseTo(IN_FRONT_OF_FAR_CREST_A_DEG, 5);
     expect(visible[0]?.clearanceDeg).toBeCloseTo(0.614909, 5);
   });
 
@@ -464,7 +464,7 @@ describe('occlusion by NEARER terrain only — the twin-ridges scene', () => {
     const farCrest = crest('Far Crest', FAR_CREST_B_DEG, 20);
     const resolved = resolveAgainstHorizon(farCrest, profileB);
 
-    expect(resolved.horizonAltitudeDeg).toBeCloseTo(NEAR_CREST_DEG, 5);
+    expect(resolved.occludingAltitudeDeg).toBeCloseTo(NEAR_CREST_DEG, 5);
     expect(resolved.clearanceDeg).toBeCloseTo(-0.343143, 5);
     expect(isPeakVisible(resolved, 0)).toBe(false);
     // Not rescued by any plausible error budget either.
@@ -481,14 +481,14 @@ describe('occlusion by NEARER terrain only — the twin-ridges scene', () => {
     const resolved = resolveAgainstHorizon(farCrest, profileB);
     const oldRuleHorizonDeg = interpolateHorizonAltitudeDeg(profileB, farCrest.bearingDeg);
 
-    expect(resolved.horizonAltitudeDeg).toBe(oldRuleHorizonDeg);
+    expect(resolved.occludingAltitudeDeg).toBe(oldRuleHorizonDeg);
     expect(resolved.clearanceDeg).toBe(farCrest.altitudeDeg - oldRuleHorizonDeg);
 
     // Same guard for a peak beyond everything in variant A, where the skyline
     // is formed at 20 km: anything past 20 km sees the identical skyline.
     for (const distanceKm of [20.25, 25, 40, 120]) {
       const beyond = crest('Beyond', 6, distanceKm);
-      expect(resolveAgainstHorizon(beyond, profileA).horizonAltitudeDeg).toBe(
+      expect(resolveAgainstHorizon(beyond, profileA).occludingAltitudeDeg).toBe(
         interpolateHorizonAltitudeDeg(profileA, beyond.bearingDeg),
       );
     }
@@ -500,7 +500,7 @@ describe('occlusion by NEARER terrain only — the twin-ridges scene', () => {
     for (const bearingDeg of [0, 22.5, 90, 137.25, 180, 270, 315, 359.75]) {
       const beyond = crest('Beyond', 6, 40);
       expect(
-        resolveAgainstHorizon({ ...beyond, bearingDeg }, profileA).horizonAltitudeDeg,
+        resolveAgainstHorizon({ ...beyond, bearingDeg }, profileA).occludingAltitudeDeg,
       ).toBe(interpolateHorizonAltitudeDeg(profileA, bearingDeg));
     }
   });
@@ -545,7 +545,7 @@ describe('occlusion at exactly the peak distance — the boundary case', () => {
     // The summit IS the terrain sample at 10 km; it cannot hide itself. Only
     // the 1 km step counts, so the peak clears by 5 − 3 = 2 exactly.
     const resolved = resolveAgainstHorizon(peakAt(10), profile);
-    expect(resolved.horizonAltitudeDeg).toBe(3);
+    expect(resolved.occludingAltitudeDeg).toBe(3);
     expect(resolved.clearanceDeg).toBe(2);
     expect(isPeakVisible(resolved, 0)).toBe(true);
   });
@@ -554,7 +554,7 @@ describe('occlusion at exactly the peak distance — the boundary case', () => {
     // Move the peak a metre beyond the ridge and the ridge is now in front of
     // it: 5 − 7 = −2, hidden. The verdict flips exactly at the boundary.
     const resolved = resolveAgainstHorizon(peakAt(10.001), profile);
-    expect(resolved.horizonAltitudeDeg).toBe(7);
+    expect(resolved.occludingAltitudeDeg).toBe(7);
     expect(resolved.clearanceDeg).toBe(-2);
     expect(isPeakVisible(resolved, 0)).toBe(false);
     // Only a tolerance at least as large as the shortfall rescues it.
@@ -565,8 +565,8 @@ describe('occlusion at exactly the peak distance — the boundary case', () => {
   it('reports the nadir when nothing at all stands in front of the peak', () => {
     // A peak nearer than every recorded sample has nothing that can occlude it.
     const resolved = resolveAgainstHorizon(peakAt(1), profile);
-    expect(resolved.horizonAltitudeDeg).toBe(NO_NEARER_TERRAIN_ALTITUDE_DEG);
-    expect(resolved.horizonAltitudeDeg).toBe(-90);
+    expect(resolved.occludingAltitudeDeg).toBe(NO_NEARER_TERRAIN_ALTITUDE_DEG);
+    expect(resolved.occludingAltitudeDeg).toBe(-90);
     expect(resolved.clearanceDeg).toBe(95);
     expect(isPeakVisible(resolved, 0)).toBe(true);
   });
@@ -585,14 +585,14 @@ describe('staircase-free profiles keep their old meaning', () => {
 
   it('compares a farther peak against the recorded occluder, as it always did', () => {
     const resolved = resolveAgainstHorizon(sighting('Behind', 0, 4, 20), profile);
-    expect(resolved.horizonAltitudeDeg).toBe(6);
+    expect(resolved.occludingAltitudeDeg).toBe(6);
     expect(resolved.clearanceDeg).toBe(-2);
     expect(isPeakVisible(resolved, 0)).toBe(false);
   });
 
   it('does not invent terrain in front of a nearer peak', () => {
     const resolved = resolveAgainstHorizon(sighting('InFront', 0, 4, 3), profile);
-    expect(resolved.horizonAltitudeDeg).toBe(NO_NEARER_TERRAIN_ALTITUDE_DEG);
+    expect(resolved.occludingAltitudeDeg).toBe(NO_NEARER_TERRAIN_ALTITUDE_DEG);
     expect(isPeakVisible(resolved, 0)).toBe(true);
   });
 });
@@ -611,7 +611,7 @@ describe('staircase-free profiles keep their old meaning', () => {
  * so they differ in the last few bits, with an arbitrary sign. Bearing 090° at
  * 10 000 m from 47°N 11°E round-trips through `destinationPoint` to
  * 10 000.000000000091 m — three parts in 10¹⁵ LONG — and the peak's own step is
- * then "nearer than" it. `horizonAltitudeDeg` becomes the peak's own angle and
+ * then "nearer than" it. `occludingAltitudeDeg` becomes the peak's own angle and
  * the clearance collapses to ~0: a peak that clears by half a degree reported
  * as only just scraping in.
  *
@@ -666,8 +666,8 @@ describe('a peak coinciding with a terrain sample', () => {
   it('is measured against the flank in front of it, not against itself', () => {
     const resolved = resolveAgainstHorizon(sighted, profile);
 
-    expect(resolved.horizonAltitudeDeg).toBeCloseTo(FLANK_DEG, 5);
-    expect(resolved.horizonAltitudeDeg).not.toBeCloseTo(APEX_DEG, 3);
+    expect(resolved.occludingAltitudeDeg).toBeCloseTo(FLANK_DEG, 5);
+    expect(resolved.occludingAltitudeDeg).not.toBeCloseTo(APEX_DEG, 3);
     expect(resolved.clearanceDeg).toBeCloseTo(0.502983, 5);
     expect(isPeakVisible(resolved, 0)).toBe(true);
   });
@@ -689,7 +689,7 @@ describe('a peak coinciding with a terrain sample', () => {
         ],
       },
     ]);
-    expect(resolveAgainstHorizon(shortSighting, shortProfile).horizonAltitudeDeg).toBeCloseTo(
+    expect(resolveAgainstHorizon(shortSighting, shortProfile).occludingAltitudeDeg).toBeCloseTo(
       FLANK_DEG,
       5,
     );
@@ -710,7 +710,7 @@ describe('a peak coinciding with a terrain sample', () => {
       },
     ]);
     const resolved = resolveAgainstHorizon(sighted, wallProfile);
-    expect(resolved.horizonAltitudeDeg).toBeCloseTo(
+    expect(resolved.occludingAltitudeDeg).toBeCloseTo(
       altitudeAngleDeg(2, 2000, 9_999),
       12,
     );

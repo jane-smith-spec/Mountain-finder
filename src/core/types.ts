@@ -112,19 +112,17 @@ export interface PeakSighting extends Peak {
 /** A sighting that survived the horizon occlusion test. */
 export interface VisiblePeak extends PeakSighting {
   /**
-   * The occluding-terrain angle that actually applies to this peak: the highest
-   * angle reached by terrain at this peak's bearing that is NEARER than the
-   * peak. Terrain farther away is excluded, because it stands behind the peak
-   * and cannot hide it — so this is generally NOT the skyline angle, which is a
-   * maximum over all distances. The two coincide exactly when the peak is
-   * farther out than everything that forms the skyline at its bearing.
+   * The angle of the terrain that can occlude this peak: the highest angle
+   * reached at this peak's bearing by terrain NEARER than the peak. Terrain
+   * farther away is excluded, because it stands behind the peak and cannot
+   * hide it.
    *
    * When no terrain at all lies nearer than the peak, nothing can occlude it
    * and this reports the nadir, −90° (see `NO_NEARER_TERRAIN_ALTITUDE_DEG` in
    * visibility.ts), which every real peak clears.
    */
-  horizonAltitudeDeg: number;
-  /** altitudeDeg − horizonAltitudeDeg. Near zero = only just clearing the ridge. */
+  occludingAltitudeDeg: number;
+  /** altitudeDeg − occludingAltitudeDeg. Near zero = only just clearing the ridge. */
   clearanceDeg: number;
 }
 

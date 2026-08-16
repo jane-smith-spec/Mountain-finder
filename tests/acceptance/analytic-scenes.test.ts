@@ -241,7 +241,7 @@ describe('every analytic scene is internally well-formed', () => {
 
           // `visible` must follow from the angles, never be asserted alongside
           // numbers that contradict it.
-          const clearance = verdict.peakAltitudeDeg - verdict.skylineAltitudeDeg;
+          const clearance = verdict.peakAltitudeDeg - verdict.occludingAltitudeDeg;
           expect(clearance).toBeCloseTo(verdict.clearanceDeg, 9);
           expect(verdict.visible).toBe(clearance >= 0);
           expect(verdict.reason.length).toBeGreaterThan(20);
@@ -434,13 +434,13 @@ describe('scene 2 — twin ridges: angle decides visibility, not height', () => 
     // And it is measured against what actually stands in front of it: the
     // near ridge's own inner flank, recomputed here from the scene's geometry
     // kit rather than trusted from the verdict.
-    expect(nearVerdict?.skylineAltitudeDeg).toBeCloseTo(
+    expect(nearVerdict?.occludingAltitudeDeg).toBeCloseTo(
       apparentAltitudeDeg(eyeM, 799.6, inFrontOfNearCrestDistanceM),
       9,
     );
     // Cross-checked against the independent longhand (curvature-drop) chain.
     expect(
-      Math.abs((nearVerdict?.skylineAltitudeDeg ?? NaN) - HAND_DERIVED_DEG.inFrontOfNearCrest),
+      Math.abs((nearVerdict?.occludingAltitudeDeg ?? NaN) - HAND_DERIVED_DEG.inFrontOfNearCrest),
     ).toBeLessThan(MODEL_AGREEMENT_TOLERANCE_DEG);
     expect(nearVerdict?.clearanceDeg ?? 0).toBeGreaterThan(0.96);
   });
@@ -455,7 +455,7 @@ describe('scene 2 — twin ridges: angle decides visibility, not height', () => 
       v.peakId.endsWith('/near-crest'),
     );
     expect(b?.visible).toBe(true);
-    expect(b?.skylineAltitudeDeg).toBeCloseTo(a?.skylineAltitudeDeg ?? NaN, 12);
+    expect(b?.occludingAltitudeDeg).toBeCloseTo(a?.occludingAltitudeDeg ?? NaN, 12);
     expect(b?.clearanceDeg).toBeCloseTo(a?.clearanceDeg ?? NaN, 12);
   });
 
@@ -470,8 +470,8 @@ describe('scene 2 — twin ridges: angle decides visibility, not height', () => 
     const [skyline] = twinRidgesFarHiddenScene.expectedSkyline;
     expect(farVerdict?.visible).toBe(false);
     expect(skyline?.distanceM).toBe(NEAR_RIDGE_DISTANCE_M);
-    expect(farVerdict?.skylineAltitudeDeg).toBeCloseTo(skyline?.altitudeDeg ?? NaN, 12);
-    expect(farVerdict?.skylineAltitudeDeg).toBeCloseTo(
+    expect(farVerdict?.occludingAltitudeDeg).toBeCloseTo(skyline?.altitudeDeg ?? NaN, 12);
+    expect(farVerdict?.occludingAltitudeDeg).toBeCloseTo(
       apparentAltitudeDeg(eyeM, NEAR_RIDGE_CREST_M, NEAR_RIDGE_DISTANCE_M),
       12,
     );
@@ -608,10 +608,10 @@ describe('scene 3 — conical peak: the apex angle is closed form', () => {
     );
     expect(verdict).toBeDefined();
     expect(verdict?.visible).toBe(true);
-    expect(verdict?.skylineAltitudeDeg).toBeCloseTo(CONE_EXPECTED_APEX_OCCLUDING_ALTITUDE_DEG, 12);
+    expect(verdict?.occludingAltitudeDeg).toBeCloseTo(CONE_EXPECTED_APEX_OCCLUDING_ALTITUDE_DEG, 12);
 
     // The apex is NOT its own occluder, and the clearance is not zero.
-    expect(verdict?.skylineAltitudeDeg).not.toBeCloseTo(CONE_EXPECTED_APEX_ALTITUDE_DEG, 3);
+    expect(verdict?.occludingAltitudeDeg).not.toBeCloseTo(CONE_EXPECTED_APEX_ALTITUDE_DEG, 3);
     expect(verdict?.clearanceDeg ?? 0).toBeCloseTo(0.50275, 5);
     // 50x the scene's own declared tolerance, in the safe direction.
     expect(verdict?.clearanceDeg ?? 0).toBeGreaterThan(conicalPeakScene.toleranceDeg * 50);

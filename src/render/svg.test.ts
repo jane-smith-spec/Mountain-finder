@@ -27,7 +27,7 @@ function peak(overrides: Partial<VisiblePeak> & Pick<VisiblePeak, 'id' | 'name'>
     bearingDeg: 105,
     altitudeDeg: 3,
     distanceKm: 12.3,
-    horizonAltitudeDeg: 1,
+    occludingAltitudeDeg: 1,
     clearanceDeg: 2,
     ...overrides,
   };

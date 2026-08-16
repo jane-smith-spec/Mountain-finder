@@ -40,9 +40,18 @@
       EXIF (lat, lon, eyeHeightM ≥ 0, hFov/vFov in (0,180)); 5 `HgtTile` compares longitude mod 360
       so lon +180 reads from `W180`; 6 a peak coinciding with a terrain sample is no longer its own
       occluder (`COINCIDENT_DISTANCE_TOLERANCE`).
-      Still open: rename `skylineAltitudeDeg` → `occludingAltitudeDeg` across
-      `fixtures/scenes` + `src/core` (deferred — it collides with two live agents' surface); the
-      review's unverified suspicions 1 and 2 (gap bridging, `nearest-valid` reporting).
+      **The deferred rename is done (2026-08-16), no behaviour change:**
+      `ExpectedPeakVerdict.skylineAltitudeDeg` → `.occludingAltitudeDeg` in `fixtures/scenes`,
+      and `VisiblePeak.horizonAltitudeDeg` → `.occludingAltitudeDeg` in `src/core/types.ts`,
+      which carried the identical misnomer one layer down — its doc comment had to spend a
+      paragraph insisting it was not the skyline, and that paragraph is now unnecessary.
+      Both fields mean "highest angle reached by terrain NEARER than the peak". Genuine
+      skylines keep the name: `HorizonPoint.altitudeDeg`, `HorizonPoint.skylineSteps`,
+      `ExpectedSkylinePoint`, `interpolateHorizonAltitudeDeg` and twin-ridges.ts's local
+      `skylineAltitudeDeg` (which feeds `expectedSkyline` and IS the maximum over all
+      distances). Every expected value is byte-identical; only identifiers and prose moved.
+      Still open: the review's unverified suspicions 1 and 2 (gap bridging, `nearest-valid`
+      reporting).
 - [x] **Q3 — The demo PNG.** `npm run demo -- gornergrat` writes `out/annotated.png`: the real
       pipeline over the full `data/tiles/N45E007.hgt`, laid out by `src/render` and composited by
       `src/render/composite.ts` in Chromium (`scripts/rasterise.ts` + `src/render/composite-page.html`
@@ -59,8 +68,39 @@
       9.58 km is ~327 m, so the picture reproduces the documented DEM error rather than a
       labelling bug. Broad summits do not show it: in the wide framing
       (`--heading 238 --hfov 85`) the Breithorn flag sits 0.27° above its own ridge, on it.
-- [ ] **Q4 — v2.0 ship gate.** `check` + `test:e2e` + `test:acceptance` green, demo PNG inspected,
-      and every high-confidence ground-truth case passing (or its failure understood, not silenced).
+- [x] **Q4 — v2.0 ship gate MET (2026-08-16).** Every gate verified at the coordinator, not
+      taken from an agent's report:
+
+      | Gate | Result |
+      |---|---|
+      | `npm run check` | 38 files, **746 tests** ✅ |
+      | `npm run test:acceptance` | **148 passed, 0 todo, 0 failing** ✅ |
+      | `npx playwright test` | **13 e2e** ✅ |
+      | `npm run build` | production bundle ✅ |
+      | Demo artifact | produced, **opened and inspected**, committed to `docs/artifacts/` ✅ |
+      | High-confidence ground truth | all passing, incl. Cow Hill now passing *honestly* ✅ |
+
+      **Two things v2.0 ships with, stated rather than buried:**
+
+      1. **P2.4's self-check is unmet** and is recorded `[~]`, not ticked. The live fixture
+         recorder cannot run while egress 403s OpenTopoData and Overpass. The elevation
+         fixtures it would have produced are superseded anyway — real SRTM bytes from AWS are
+         better evidence than recorded JSON — but the Overpass recording genuinely never happened.
+      2. **Peak coverage is the binding constraint, not the code.** The bundled database holds
+         three alpine summits, which is why the demo shows one label rather than a skyline of
+         them. Everything downstream of the database is finished and tested; the database is
+         what stops this being usable anywhere. See Q5.
+
+- [ ] **Q5 — Peak coverage (next phase).** Every peak source is blocked from here
+      (`download.geonames.org`, geofabrik, naturalearthdata, `planet.openstreetmap.org`,
+      taginfo all fail at the proxy; Overpass 403) — **but `s3.amazonaws.com` is reachable and
+      both `osm-pds` and the Overture Maps distribution list from here.** Overture's `base`
+      theme carries peaks in `type=land`.
+      Parts are ~800 MB each, so a bulk download is the wrong shape. Parquet footers carry
+      per-row-group statistics including bbox, and S3 honours HTTP Range requests, so fetching
+      only the row groups covering a bounding box is both feasible and the correct design — and
+      it matches the existing architecture exactly: an acquisition step that writes a local
+      dataset, never a runtime dependency, like `fetch:tiles`.
 
 **Deferred by decision, not forgotten:** Phase 7 CV skyline alignment (v2.1, decision D3) and
 Phase 8 live view (v3, decision D5). Neither starts before v2.0 ships.
@@ -248,7 +288,7 @@ Live checklist. Check items only after their self-check has been run and passed 
       summit normally IS the terrain sample at its own range; `src/core` excludes terrain at
       exactly the peak's distance (strict `<`) so a peak cannot hide itself, but the peak's
       range comes from a haversine and the sample's from the requested step, so the two differ
-      in the last bits and the tie-break is luck. When the sample counts, `horizonAltitudeDeg`
+      in the last bits and the tie-break is luck. When the sample counts, `occludingAltitudeDeg`
       becomes the peak's own angle and `clearanceDeg` collapses to ~0 (twin-ridges near-crest:
       4.554485° reported vs 3.590173° expected). **The verdict is unaffected** — an equal angle
       still clears — so the gates stand, but any UI sorting or thresholding on `clearanceDeg`

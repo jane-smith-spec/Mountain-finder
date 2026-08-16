@@ -221,7 +221,7 @@ describe('annotateScene — the ring-ridge scene', () => {
     expect(high.altitudeDeg).toBeCloseTo(23.611, 3);
     expect(high.distanceKm).toBeCloseTo(10, 6);
     expect(high.bearingDeg).toBeCloseTo(90, 9);
-    expect(high.horizonAltitudeDeg).toBeCloseTo(RIDGE_ALTITUDE_DEG, 9);
+    expect(high.occludingAltitudeDeg).toBeCloseTo(RIDGE_ALTITUDE_DEG, 9);
     expect(high.clearanceDeg).toBeCloseTo(HIGH_ALTITUDE_DEG - RIDGE_ALTITUDE_DEG, 9);
     expect(high.clearanceDeg).toBeCloseTo(14.54, 2);
     expect(high.occludedBy).toBeUndefined();

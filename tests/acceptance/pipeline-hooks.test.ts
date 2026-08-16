@@ -347,12 +347,13 @@ describe('P6.3 hooks — synthetic scenes through the real pipeline', () => {
           ).toBeLessThan(scene.toleranceDeg);
 
           // ── The occluding-terrain angle: REPORTED, not gated ────────────
-          // `horizonAltitudeDeg` is the angle the peak was measured against —
-          // the highest terrain NEARER than it, which is not the skyline
-          // whenever something taller stands behind it. Comparing it with the
-          // fixture's `skylineAltitudeDeg` turns out to be a comparison across
-          // an exact tie, for two separate reasons, so it is printed rather
-          // than asserted. Both are written up in the hand-off findings:
+          // `occludingAltitudeDeg`, on the pipeline's peak and on the fixture's
+          // verdict alike, is the angle the peak was measured against — the
+          // highest terrain NEARER than it, which is not the skyline whenever
+          // something taller stands behind it. Comparing the two turns out to
+          // be a comparison across an exact tie, for two separate reasons, so
+          // it is printed rather than asserted. Both are written up in the
+          // hand-off findings:
           //
           //  1. TIE-BREAK LUCK. A summit normally IS the terrain sample at its
           //     own distance. src/core excludes terrain at exactly the peak's
@@ -372,13 +373,13 @@ describe('P6.3 hooks — synthetic scenes through the real pipeline', () => {
           //     cone's remaining gap is cause 1 above: 8.481293 deg, which is
           //     the apex measured against ITSELF. Nothing here was worked
           //     around and nothing was copied into src/core.
-          const occluderGapDeg = Math.abs(peak.horizonAltitudeDeg - verdict.skylineAltitudeDeg);
-          const selfTie = Math.abs(peak.horizonAltitudeDeg - peak.altitudeDeg) < scene.toleranceDeg;
+          const occluderGapDeg = Math.abs(peak.occludingAltitudeDeg - verdict.occludingAltitudeDeg);
+          const selfTie = Math.abs(peak.occludingAltitudeDeg - peak.altitudeDeg) < scene.toleranceDeg;
           if (occluderGapDeg >= scene.toleranceDeg) {
             report(
               `  ${verdict.peakId} [occluding angle, not gated] pipeline ` +
-                `${peak.horizonAltitudeDeg.toFixed(6)} deg vs fixture ` +
-                `${verdict.skylineAltitudeDeg.toFixed(6)} deg (gap ` +
+                `${peak.occludingAltitudeDeg.toFixed(6)} deg vs fixture ` +
+                `${verdict.occludingAltitudeDeg.toFixed(6)} deg (gap ` +
                 `${occluderGapDeg.toFixed(6)} deg)` +
                 (selfTie
                   ? ' — the peak was measured against its OWN terrain sample at its own range: tie-break luck'

@@ -2,7 +2,7 @@
  * Naming the terrain that hides a peak.
  *
  * `filterVisiblePeaks` answers *whether* a peak clears the ground in front of
- * it, and `VisiblePeak.horizonAltitudeDeg` says what angle it lost to. Neither
+ * it, and `VisiblePeak.occludingAltitudeDeg` says what angle it lost to. Neither
  * says WHICH ridge won, and that is the first thing anyone asks when a label
  * they expected is missing — "Ben Nevis is hidden" is an assertion, "Ben Nevis
  * is hidden by 250 m of ground 1.2 km away on bearing 112°" is a diagnosis
