@@ -82,6 +82,14 @@ Live checklist. Check items only after their self-check has been run and passed 
       own distance, so `<=` would make every peak hide itself and leave the verdict to
       floating-point luck); and a mixed bracket returns the real occluder rather than
       interpolating toward an invented floor.
+- [x] **Gate verification (independent of the fixing agent).** A throwaway suite was written
+      against a hand-built two-step profile (+2° at 5 km, taller +8° at 20 km), run, and
+      discarded. It confirmed all four directions, which matters because the danger in fixing
+      over-occlusion is over-correcting into a filter that shows everything:
+      near peak +4° @10 km in front of the far ridge → **visible** (the original bug);
+      far peak +4° @30 km behind it → **hidden** (not permissive);
+      peak nearer than all terrain → −90° nadir, nothing can occlude it;
+      terrain at exactly the peak's range → does not occlude (no self-occlusion).
 
 <details><summary>Original bug description (kept for the record)</summary>
 
