@@ -1,5 +1,31 @@
 # TODO
 
+## Queue (as of 2026-08-16)
+
+**In flight — 4 agents, disjoint ownership:**
+
+| # | Task | Owns | Delivers |
+|---|---|---|---|
+| 1 | Renderer | `src/render/`, `tests/e2e/render.spec.ts` | P4.1 SVG overlay (collision-avoided labels, XML escaping), P4.2 PNG export via Playwright Chromium |
+| 2 | Pipeline | `src/pipeline/`, `peak-store.ts`, `fixtures/peaks/`, `scripts/demo.ts`, `pipeline-hooks.test.ts` | Offline peak DB, end-to-end orchestration, switches on Group F's 26 `it.todo` hooks, real `npm run demo` |
+| 3 | Adversarial review | read-only + `tests/scratch/` | The review gate PLAN.md requires and we skipped. Must *demonstrate* each finding with a failing test — an undemonstrated finding is a hypothesis |
+| 4 | Web app shell | `src/app/`, `tests/e2e/app.spec.ts`, `index.html` | P5.1 drop-zone + EXIF autofill + honest provenance panel + trim sliders, P5.2 export seam |
+
+**Queued behind them, in order:**
+
+- [ ] **Q1 — Integration.** Wire app ↔ pipeline ↔ renderer across the seams tasks 1/2/4 leave.
+      Mechanical if the seams are honest; the first real test of whether they are.
+- [ ] **Q2 — Fix review findings** from task 3, by severity: silent-wrong-answer bugs first.
+- [ ] **Q3 — The demo PNG.** `npm run demo -- gornergrat` producing an annotated image with
+      flags on real summits. This is v2.0's whole point — the first artifact a human can look at
+      and judge. Needs fetched tiles (`npm run fetch:tiles`), which is fine: acquisition, not runtime.
+- [ ] **Q4 — v2.0 ship gate.** `check` + `test:e2e` + `test:acceptance` green, demo PNG inspected,
+      and every high-confidence ground-truth case passing (or its failure understood, not silenced).
+
+**Deferred by decision, not forgotten:** Phase 7 CV skyline alignment (v2.1, decision D3) and
+Phase 8 live view (v3, decision D5). Neither starts before v2.0 ships.
+
+
 Live checklist. Check items only after their self-check has been run and passed (see PLAN.md for each check's definition).
 
 ## Phase 0 — Scaffold ✅
