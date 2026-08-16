@@ -57,6 +57,17 @@ export interface OverlayRequest {
   readonly observer: Observer;
   /** Orientation and optics, WITH the trim sliders already applied. */
   readonly pose: CameraPose;
+  /**
+   * Draw summits that are self-occluded — hidden behind a shoulder of their own
+   * hill — de-emphasised (decision D8). The builder passes the flag straight
+   * through to the renderer as `OverlayPeak.visibility`; when false those peaks
+   * are simply left out of the scene.
+   *
+   * There is no flag for foreground-occluded peaks and there must not be one:
+   * the pipeline never offers them, because a label on a mountain that is
+   * behind a different hill is a fabrication, not a display option.
+   */
+  readonly showObscuredPeaks: boolean;
   /** Aborted when the pose changes again before the previous run finishes. */
   readonly signal?: AbortSignal;
 }

@@ -18,6 +18,7 @@ import {
   isInvalidDraft,
   overridesFromState,
   parseDraft,
+  obscuredPeaksNote,
   reducer,
   type AppState,
   type LoadedPhoto,
@@ -351,5 +352,44 @@ describe('exportDisabledReason — the button tells the truth', () => {
   it('admits that the compositor and the pipeline are not wired up yet', () => {
     expect(exportDisabledReason({ ...ready, hasExporter: false })).toMatch(/compositor/i);
     expect(exportDisabledReason({ ...ready, hasOverlay: false })).toMatch(/no overlay/i);
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * D8 — the "show obscured peaks" control
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+describe('obscured-peak visibility setting', () => {
+  it('defaults to SHOWN, which is the user decision D8 records', () => {
+    expect(INITIAL_STATE.showObscuredPeaks).toBe(true);
+  });
+
+  it('toggles, and survives loading another photo', () => {
+    const off = reducer(INITIAL_STATE, { type: 'obscured-peaks-toggled', enabled: false });
+    expect(off.showObscuredPeaks).toBe(false);
+
+    // Same reasoning as `useStandardAssumptions`: this is a preference about how
+    // the viewer wants to be shown results, not a claim about the photograph, so
+    // a new photo must not silently switch it back on.
+    const withPhoto = reducer(off, { type: 'photo-loaded', photo: photoWith({}) });
+    expect(withPhoto.showObscuredPeaks).toBe(false);
+    expect(reducer(withPhoto, { type: 'photo-cleared' }).showObscuredPeaks).toBe(false);
+  });
+
+  it('travels to the pipeline in the overlay request', () => {
+    const ready = stateWith(photoWith(CHAMONIX_EXIF), { useStandardAssumptions: true });
+    expect(deriveSession(ready)?.overlayRequest?.showObscuredPeaks).toBe(true);
+    expect(
+      deriveSession({ ...ready, showObscuredPeaks: false })?.overlayRequest?.showObscuredPeaks,
+    ).toBe(false);
+  });
+
+  it('explains what each position of the switch means, in provenance-first terms', () => {
+    expect(obscuredPeaksNote(true)).toContain('behind its own hill');
+    expect(obscuredPeaksNote(false)).toContain('hidden');
+    // Neither position may promise something the pipeline does not do: a peak
+    // behind a DIFFERENT hill is never drawn, whichever way the switch is set.
+    expect(obscuredPeaksNote(true)).toContain('never');
+    expect(obscuredPeaksNote(false)).toContain('never');
   });
 });

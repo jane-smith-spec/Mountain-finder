@@ -56,6 +56,19 @@ export interface AppState {
   readonly declinationDraft: string;
   /** Opt-in to STANDARD_DEFAULTS. Off by default: assumptions are never silent. */
   readonly useStandardAssumptions: boolean;
+  /**
+   * Draw summits that are hidden behind their OWN hill, de-emphasised
+   * (decision D8). ON by default, which is the user's call: the hill is
+   * unmistakably in the photograph, so naming it is information rather than
+   * invention. Turning it off leaves only summits whose own point clears the
+   * ground in front of it.
+   *
+   * It is deliberately NOT a switch for "show hidden peaks" in general. A
+   * summit behind a DIFFERENT landform is never drawn in either position — that
+   * is not a display preference, it is the difference between a label and a
+   * fabrication, and the pipeline settles it before the UI sees it.
+   */
+  readonly showObscuredPeaks: boolean;
   readonly trim: TrimState;
 }
 
@@ -64,6 +77,7 @@ export const INITIAL_STATE: AppState = {
   drafts: {},
   declinationDraft: '',
   useStandardAssumptions: false,
+  showObscuredPeaks: true,
   trim: NO_TRIM,
 };
 
@@ -76,6 +90,7 @@ export type Action =
   | { readonly type: 'draft-reverted'; readonly field: PoseField }
   | { readonly type: 'declination-changed'; readonly text: string }
   | { readonly type: 'assumptions-toggled'; readonly enabled: boolean }
+  | { readonly type: 'obscured-peaks-toggled'; readonly enabled: boolean }
   | { readonly type: 'trim-changed'; readonly axis: keyof TrimState; readonly valueDeg: number }
   | { readonly type: 'trim-reset' };
 
@@ -92,11 +107,16 @@ export function reducer(state: AppState, action: Action): AppState {
         status: 'ready',
         photo: action.photo,
         useStandardAssumptions: state.useStandardAssumptions,
+        showObscuredPeaks: state.showObscuredPeaks,
       };
     case 'photo-failed':
       return { ...state, status: 'error', errorMessage: action.message };
     case 'photo-cleared':
-      return { ...INITIAL_STATE, useStandardAssumptions: state.useStandardAssumptions };
+      return {
+        ...INITIAL_STATE,
+        useStandardAssumptions: state.useStandardAssumptions,
+        showObscuredPeaks: state.showObscuredPeaks,
+      };
     case 'draft-changed':
       return { ...state, drafts: { ...state.drafts, [action.field]: action.text } };
     case 'draft-reverted': {
@@ -111,6 +131,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, declinationDraft: action.text };
     case 'assumptions-toggled':
       return { ...state, useStandardAssumptions: action.enabled };
+    case 'obscured-peaks-toggled':
+      return { ...state, showObscuredPeaks: action.enabled };
     case 'trim-changed':
       return { ...state, trim: { ...state.trim, [action.axis]: action.valueDeg } };
     case 'trim-reset':
@@ -136,6 +158,25 @@ export function isInvalidDraft(text: string | undefined): boolean {
   if (text === undefined) return false;
   const trimmed = text.trim();
   return trimmed !== '' && !Number.isFinite(Number(trimmed));
+}
+
+/**
+ * What the obscured-peak switch is currently promising, in one sentence.
+ *
+ * Lives here rather than in the component for the same reason the pose fields'
+ * provenance copy lives in `pose-fields.ts`: what the UI claims about the
+ * system is a rule, it can be wrong, and a rule that can be wrong gets a test.
+ * Both positions state the limit as well as the effect, because a control that
+ * says "show hidden peaks" when the app will never show most of them is a
+ * control that lies.
+ */
+export function obscuredPeaksNote(showObscuredPeaks: boolean): string {
+  return showObscuredPeaks
+    ? 'A summit tucked just behind its own hill is labelled and greyed. A peak ' +
+        'hidden behind a different, nearer hill is never labelled either way.'
+    : 'Only summits that clear the ground in front of them are labelled; one ' +
+        'hidden behind its own hill is left off. A peak hidden behind a ' +
+        'different, nearer hill is never labelled either way.';
 }
 
 /** Where the pixel dimensions in play came from. */
@@ -269,6 +310,7 @@ export function deriveSession(state: AppState): DerivedSession | undefined {
       frame: { widthPx: photo.widthPx, heightPx: photo.heightPx },
       observer,
       pose: effectivePose,
+      showObscuredPeaks: state.showObscuredPeaks,
     },
   };
 }

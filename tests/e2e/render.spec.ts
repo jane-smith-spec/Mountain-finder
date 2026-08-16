@@ -313,3 +313,107 @@ test('exports the same bytes twice for the same scene', async ({ page }) => {
 
   expect(await render()).toBe(await render());
 });
+
+/**
+ * D8 — a greyed label has to survive the raster, not just the SVG string.
+ *
+ * The unit tests prove the markup says the right things. What they cannot prove
+ * is that a de-emphasised label is still READABLE once it has been composited
+ * over a photograph, which is the only property that matters to a person
+ * looking at the export. So this probes the delivered pixels:
+ *
+ *   • the summit marker is a hollow RING — the pixel at its exact centre is NOT
+ *     the marker fill, while a solid peak's is. A shape difference, visible to
+ *     a reader who cannot separate the two colours at all.
+ *   • the pole is DASHED and HALOED — walking down it finds both bright pole
+ *     ink and dark halo, and both stand well clear of the sky behind them.
+ *     A faded halo would show up here as a pole that washes into the sky.
+ */
+test('a greyed label stays legible in the exported raster', async ({ page }) => {
+  const OBSCURED_XPX = MATTERHORN_XPX;
+  const OBSCURED_YPX = MATTERHORN_YPX;
+  // A second peak far to the left, drawn at full strength, as the control.
+  const SOLID_DELTA_DEG = -15;
+  const SOLID_XPX = WIDTH_PX - MATTERHORN_XPX;
+
+  const scene: OverlayScene = {
+    widthPx: WIDTH_PX,
+    heightPx: HEIGHT_PX,
+    pose: POSE,
+    horizon: HORIZON,
+    peaks: [
+      { ...peak('node/1', 'Cow Hill', 105, 3, 287, 1), visibility: 'self-occluded' },
+      {
+        ...peak('node/2', 'Ben Nevis', 100, 2.6, 1345, 6.7),
+        visibility: 'foreground-occluded',
+      },
+      peak('node/3', 'Solid Peak', 90 + SOLID_DELTA_DEG, 3, 4478, 12.3),
+    ],
+  };
+
+  await page.goto('/src/render/harness.html');
+  await page.waitForFunction(() => 'mfRenderHarness' in window);
+
+  // Probe the length of the pole: the dash pattern's phase is a detail of the
+  // renderer, so rather than compute which millimetre is ink, walk it and
+  // require BOTH kinds of pixel to be present.
+  const poleProbes = Array.from({ length: 41 }, (_, index) => ({
+    label: `pole-${String(index)}`,
+    xPx: OBSCURED_XPX,
+    yPx: OBSCURED_YPX - 8 - index,
+  }));
+
+  const result = await page.evaluate(
+    (input) => (window as unknown as HarnessWindow).mfRenderHarness.render(input),
+    {
+      scene,
+      options: OPTIONS,
+      probesPx: [
+        { label: 'obscured-centre', xPx: OBSCURED_XPX, yPx: OBSCURED_YPX },
+        { label: 'solid-centre', xPx: SOLID_XPX, yPx: OBSCURED_YPX },
+        { label: 'sky', xPx: OBSCURED_XPX - 100, yPx: OBSCURED_YPX },
+        ...poleProbes,
+      ],
+    },
+  );
+
+  expect(result.svgParseError).toBeNull();
+
+  // The peak hidden behind a DIFFERENT hill never reaches the picture.
+  expect(result.overlaySvg).not.toContain('Ben Nevis');
+  expect(result.markers.map((marker) => marker.name).sort()).toEqual(['Cow Hill', 'Solid Peak']);
+  // ...and the greyed one says so in words, in the delivered document.
+  expect(result.overlaySvg).toContain('summit obscured');
+
+  // Shape: filled dot versus hollow ring, at the same relative position.
+  const solidCentre = sampleNamed(result, 'solid-centre');
+  const obscuredCentre = sampleNamed(result, 'obscured-centre');
+  expect(channelDistance(solidCentre.rgba, MARKER_RGB)).toBeLessThanOrEqual(12);
+  expect(channelDistance(obscuredCentre.rgba, MARKER_RGB)).toBeGreaterThan(40);
+
+  // Legibility: the sky here is bright, and the greyed pole has to stand out
+  // against it in both of its states.
+  const sky = sampleNamed(result, 'sky');
+  const skyLuma = sky.rgba[0] + sky.rgba[1] + sky.rgba[2];
+  expect(skyLuma).toBeGreaterThan(450);
+
+  const poleLumas = poleProbes.map((probe) => {
+    const sample = sampleNamed(result, probe.label);
+    return sample.rgba[0] + sample.rgba[1] + sample.rgba[2];
+  });
+
+  // Both thresholds come from the compositing algebra, not from a measurement.
+  // In a dash GAP the only ink is the halo: black at `haloOpacity` 0.6 over the
+  // sky, so the pixel is 0.4·sky and the drop below sky is 0.6·sky. Requiring
+  // only half of that leaves ample room for antialiasing while failing loudly
+  // if the halo were ever faded along with the greyed ink — which is the whole
+  // legibility claim, and the reason this assertion is in the raster and not in
+  // a unit test.
+  expect(skyLuma - Math.min(...poleLumas)).toBeGreaterThan(0.5 * skyLuma);
+
+  // In a dash ITSELF the pole is white at `obscuredOpacity` 0.7 over that halo:
+  // 0.7·255 + 0.3·0.4·sky per channel, i.e. ~607 of luma against ~240 in the
+  // gap. A modulation of 200 is comfortably under that and impossible without a
+  // real dash pattern — a solid pole would read flat.
+  expect(Math.max(...poleLumas) - Math.min(...poleLumas)).toBeGreaterThan(200);
+});

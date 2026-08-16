@@ -26,6 +26,16 @@
  *   `disputed`             INFORMATIONAL. The verdict is printed so a human can
  *                          weigh in. Never asserted, never promoted.
  *
+ * ───────────────────────────────────────────────────────────────────────────
+ * WHAT SATISFIES A CLAIM, AFTER DECISION D8
+ * ───────────────────────────────────────────────────────────────────────────
+ * A must-see peak is satisfied by being LABELLED — `visible`, or
+ * `self-occluded` and therefore drawn greyed. A must-NOT-see peak must be
+ * absent from the overlay altogether: classified `foreground-occluded` and
+ * missing from `scene.labelled`. That is strictly STRONGER than the old
+ * "not visible" gate, which a greyed label would now satisfy, so the two halves
+ * of D8 move in opposite directions on purpose.
+ *
  * No expectation in tests/acceptance/cases was weakened to make anything pass.
  * Where the pipeline contradicts a 'high' claim the assertion is left failing
  * and the finding is written up — that is the outcome this suite exists to
@@ -55,6 +65,7 @@ import {
 import { groundTruthPeakStore } from '../../fixtures/peaks';
 import { interpolateHorizonAltitudeDeg } from '../../src/core/horizon';
 import type { CameraPose } from '../../src/core/types';
+import { isLabelled } from '../../src/core/visibility';
 import { annotateScene } from '../../src/pipeline/annotate';
 import { loadCaseTerrain, caseTerrainSpec } from '../../src/pipeline/testing/case-terrain';
 import {
@@ -234,7 +245,8 @@ function expectedGeometry(
 function describeVerdict(peak: AnnotatedPeak | undefined): string {
   if (peak === undefined) return 'NOT IN THE PEAK DATABASE';
   return (
-    `${peak.visible ? 'VISIBLE' : 'HIDDEN '} ` +
+    `${peak.visibility.toUpperCase().padEnd(19)} ` +
+    `[${isLabelled(peak.visibility) ? 'LABELLED' : 'not labelled'}] ` +
     `${peak.distanceKm.toFixed(2)} km, bearing ${peak.bearingDeg.toFixed(1)} deg, ` +
     `alt ${peak.altitudeDeg >= 0 ? '+' : ''}${peak.altitudeDeg.toFixed(3)} deg, ` +
     `clearance ${peak.clearanceDeg >= 0 ? '+' : ''}${peak.clearanceDeg.toFixed(3)} deg` +
@@ -242,7 +254,15 @@ function describeVerdict(peak: AnnotatedPeak | undefined): string {
       ? ''
       : ` — behind ${peak.occludedBy.elevationM.toFixed(0)} m at ` +
         `${peak.occludedBy.distanceKm.toFixed(2)} km reaching ` +
-        `${peak.occludedBy.altitudeDeg.toFixed(2)} deg`)
+        `${peak.occludedBy.altitudeDeg.toFixed(2)} deg`) +
+    (peak.occlusion === undefined
+      ? ''
+      : `; ${peak.occlusion.evidence}` +
+        (peak.occlusion.colDepthM === undefined
+          ? ''
+          : ` (col ${peak.occlusion.colDepthM.toFixed(1)} m below a crest of ` +
+            `${(peak.occlusion.crestElevationM ?? Number.NaN).toFixed(0)} m at ` +
+            `${(peak.occlusion.crestDistanceKm ?? Number.NaN).toFixed(2)} km)`))
   );
 }
 
@@ -502,7 +522,20 @@ describe('P6.3 hooks — real viewpoints end to end (committed SRTM windows, off
           // Summit height comes from the peak database, NEVER from the DEM.
           expect(peak.elevationM).toBe(expectation.elevationM);
 
-          if (!peak.visible) {
+          // ── WHAT SATISFIES A MUST-SEE CLAIM (decision D8) ────────────────
+          // Being LABELLED, which is `visible` OR `self-occluded`. A must-see
+          // claim is a claim about the MOUNTAIN being there to point at, not
+          // about its single summit posting clearing the ground: Cow Hill's
+          // case file says so in as many words ("the hill immediately behind
+          // the town"). A summit tucked behind a shoulder of its own hill,
+          // with the hill's own mass filling the frame, is pointed at
+          // correctly by a de-emphasised label.
+          //
+          // This is a genuine loosening of the gate, so note precisely what it
+          // does NOT admit: a peak hidden by a DIFFERENT landform stays
+          // `foreground-occluded` and unlabelled, and the must-NOT-see gates
+          // below are tightened rather than left alone to prove it.
+          if (!isLabelled(peak.visibility)) {
             // Report before asserting, so the finding survives in the summary
             // even though the assertion below stops this test.
             report(
@@ -512,13 +545,22 @@ describe('P6.3 hooks — real viewpoints end to end (committed SRTM windows, off
             );
           }
           expect(
-            peak.visible,
+            isLabelled(peak.visibility),
             `${testCase.id}: HIGH-confidence must-see "${expectation.name}" came out ` +
               `${describeVerdict(peak)}.\n    Rationale on file: ${expectation.rationale}\n` +
               `    Terrain: ${run.coverageNote}`,
           ).toBe(true);
+          expect(run.scene.labelled.map((labelled) => labelled.name)).toContain(expectation.name);
           expect(Number.isFinite(peak.image.x)).toBe(true);
           expect(Number.isFinite(peak.image.y)).toBe(true);
+
+          if (peak.visibility === 'self-occluded') {
+            report(
+              `  ${testCase.id} [HIGH, must-see] ${expectation.name}: ${describeVerdict(peak)}` +
+                '\n      satisfied by a GREYED label: the summit point is behind its own ' +
+                'hill, and the hill is what the claim is about (D8).',
+            );
+          }
         }
       });
     }
@@ -575,6 +617,25 @@ describe('P6.3 hooks — real viewpoints end to end (committed SRTM windows, off
             peak.occludedBy,
             `${testCase.id}: "${expectation.name}" is hidden but no occluding terrain was named`,
           ).toBeDefined();
+
+          // ── D8 TIGHTENS THIS GATE RATHER THAN LEAVING IT ALONE ───────────
+          // "Not visible" is no longer enough, because a self-occluded peak IS
+          // drawn. The claim these cases encode is that the peak is ABSENT
+          // from the picture, so the gate is now absence from the overlay:
+          // classified as foreground occlusion, and nowhere in `labelled`.
+          expect(
+            peak.visibility,
+            `${testCase.id}: HIGH-confidence must-NOT-see "${expectation.name}" was ` +
+              `classified ${peak.visibility}, which WOULD BE DRAWN. ` +
+              `${describeVerdict(peak)}`,
+          ).toBe('foreground-occluded');
+          expect(isLabelled(peak.visibility)).toBe(false);
+          expect(run.scene.labelled.map((labelled) => labelled.name)).not.toContain(
+            expectation.name,
+          );
+          expect(run.scene.foregroundOccluded.map((hidden) => hidden.name)).toContain(
+            expectation.name,
+          );
         }
       });
     }
@@ -619,6 +680,98 @@ describe('P6.3 hooks — real viewpoints end to end (committed SRTM windows, off
   }
 });
 
+/* ══════════════════════════════════════════════════════════════════════════
+ * D8 — the three real cases the self-occlusion rule is pinned by
+ * ══════════════════════════════════════════════════════════════════════════
+ *
+ * The rule itself is argued from geometry and unit-tested on hand-built
+ * terrain in src/core/visibility.test.ts. These three are the REAL cases it has
+ * to get right, asserted by name so that a future change to the rule cannot
+ * quietly re-classify them:
+ *
+ *   Cow Hill      SELF-occluded. Standing in Fort William at the foot of the
+ *                 hill, its own shoulder at 0.84 km hides the summit posting at
+ *                 0.99 km. The ground climbs from the shoulder to the summit
+ *                 without once dropping back, so there is no col and one
+ *                 landform. Labelled, greyed.
+ *   Ben Nevis     FOREGROUND. Hidden by Cow Hill's lower flank at 0.63 km,
+ *                 with Glen Nevis — over a hundred metres below that flank —
+ *                 in between. Two landforms. Not labelled.
+ *   Mount Baker   FOREGROUND. 134 km away behind Queen Anne Hill. Not labelled.
+ *
+ * The col depths are NOT asserted to particular metre values here: they are
+ * readings of the committed DEM, not independent ground truth, and pinning them
+ * would be pinning the tiles rather than the rule. What is asserted is the
+ * classification, its evidence, and the SIGN of the discriminating quantity —
+ * zero col for the shoulder, a col deeper than the whole obstruction for the
+ * other two.
+ */
+
+describe('P6.3 hooks — D8 self-occlusion vs foreground occlusion, on the real cases', () => {
+  it('fort-william: Cow Hill is self-occluded by its own shoulder', async () => {
+    const fortWilliam = groundTruthCases.find((testCase) => testCase.id === 'fort-william');
+    expect(fortWilliam, 'the fort-william case must exist').toBeDefined();
+    if (fortWilliam === undefined) return;
+
+    const run = await runCase(fortWilliam);
+    const cowHill = peakByName(run.scene, 'Cow Hill');
+    expect(cowHill).toBeDefined();
+    if (cowHill === undefined) return;
+
+    // Still hidden. Nothing about the visibility rule was relaxed to get here.
+    expect(cowHill.visible).toBe(false);
+    expect(cowHill.clearanceDeg).toBeLessThan(0);
+
+    expect(cowHill.visibility).toBe('self-occluded');
+    expect(cowHill.occlusion?.evidence).toBe('unbroken-rise-to-summit');
+    expect(cowHill.occlusion?.colDepthM).toBe(0);
+    // The blocker is on the same hill: nearer than the summit, but not by much.
+    const crestKm = cowHill.occlusion?.crestDistanceKm ?? Number.NaN;
+    expect(crestKm).toBeLessThan(cowHill.distanceKm);
+    expect(crestKm).toBeGreaterThan(0.5 * cowHill.distanceKm);
+    expect(run.scene.labelled.map((peak) => peak.name)).toContain('Cow Hill');
+  });
+
+  it('fort-william: Ben Nevis is foreground-occluded across Glen Nevis', async () => {
+    const fortWilliam = groundTruthCases.find((testCase) => testCase.id === 'fort-william');
+    expect(fortWilliam).toBeDefined();
+    if (fortWilliam === undefined) return;
+
+    const run = await runCase(fortWilliam);
+    const benNevis = peakByName(run.scene, 'Ben Nevis');
+    expect(benNevis).toBeDefined();
+    if (benNevis === undefined) return;
+
+    expect(benNevis.visibility).toBe('foreground-occluded');
+    expect(benNevis.occlusion?.evidence).toBe('col-between-occluder-and-summit');
+    // The col is deeper than the blocking flank stands above the town: the two
+    // are unambiguously different hills, not one slope.
+    const crestM = benNevis.occlusion?.crestElevationM ?? Number.NaN;
+    const colM = benNevis.occlusion?.colDepthM ?? Number.NaN;
+    expect(colM).toBeGreaterThan(0.5 * crestM);
+    expect(run.scene.labelled.map((peak) => peak.name)).not.toContain('Ben Nevis');
+  });
+
+  it('kerry-park-seattle: Mount Baker is foreground-occluded and never labelled', async () => {
+    const kerryPark = groundTruthCases.find((testCase) => testCase.id === 'kerry-park-seattle');
+    expect(kerryPark).toBeDefined();
+    if (kerryPark === undefined) return;
+
+    const run = await runCase(kerryPark);
+    const baker = peakByName(run.scene, 'Mount Baker');
+    expect(baker).toBeDefined();
+    if (baker === undefined) return;
+
+    expect(baker.visibility).toBe('foreground-occluded');
+    // Baker is 134 km out and this window stops at 3 km, so the classifier
+    // refuses on COVERAGE rather than on a measured col — the honest answer
+    // when the terrain between simply was not sampled. Either way it is not
+    // drawn, and the reason is recorded rather than assumed.
+    expect(baker.occlusion?.evidence).toBe('unsampled-gap-between-occluder-and-summit');
+    expect(run.scene.labelled.map((peak) => peak.name)).not.toContain('Mount Baker');
+  });
+});
+
 afterAll(() => {
   const sceneCount = analyticScenes.length;
   const caseCount = groundTruthCases.length;
@@ -647,6 +800,8 @@ afterAll(() => {
       '     fixtures/tiles/cases/ — no data/tiles/, no network',
       '   • high-confidence claims gate the build; medium claims are reported',
       '     below; disputed peaks are reported and never asserted',
+      '   • D8: Cow Hill self-occluded (labelled, greyed); Ben Nevis and Mount',
+      '     Baker foreground-occluded (absent from the overlay entirely)',
       '',
       ' STILL NOT TESTED:',
       '   • the SVG overlay (P4.1) — src/render is being built in parallel, so',

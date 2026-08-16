@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { DropZone } from './components/DropZone';
 import { ExifSummary } from './components/ExifSummary';
 import { ExportControl } from './components/ExportControl';
+import { ObscuredPeaksControl } from './components/ObscuredPeaksControl';
 import { OverridePanel } from './components/OverridePanel';
 import { PhotoView } from './components/PhotoView';
 import { PoseReadout } from './components/PoseReadout';
@@ -192,6 +193,12 @@ export function App({ overlayBuilder, pngExporter }: AppProps = {}): JSX.Element
             <PoseReadout
               request={session.overlayRequest}
               missing={session.missing}
+            />
+            <ObscuredPeaksControl
+              showObscuredPeaks={state.showObscuredPeaks}
+              onToggle={(enabled) => {
+                dispatch({ type: 'obscured-peaks-toggled', enabled });
+              }}
             />
             <ExportControl
               disabledReason={disabledReason}

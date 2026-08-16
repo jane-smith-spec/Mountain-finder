@@ -14,7 +14,11 @@
 
 import { angularDifferenceDeg } from '../core/geodesy.js';
 import { skylineStepsOf } from '../core/horizon.js';
+import type { BearingRay } from '../core/horizon.js';
+import type { SightlineOptions } from '../core/sightline.js';
 import type { HorizonPoint, HorizonProfile, PeakSighting } from '../core/types.js';
+import { classifyOcclusion } from '../core/visibility.js';
+import type { OcclusionClassification } from '../core/visibility.js';
 
 import type { OccluderNote } from './types.js';
 
@@ -70,4 +74,62 @@ export function describeOccluder(
     }
   }
   return tallestNearer;
+}
+
+/**
+ * The sampled ray whose bearing is closest to `bearingDeg`, seam included.
+ *
+ * The sibling of {@link nearestProfilePoint}, and nearest for the same reason:
+ * an occlusion is a real piece of ground on a real bearing, and averaging two
+ * rays' elevations together would produce a terrain profile that exists on
+ * neither of them. Where the interpolated pair and the single nearest ray
+ * disagree, {@link classifyPeakOcclusion} resolves it by NOT labelling — see
+ * the `'occluder-not-on-this-ray'` evidence in src/core/visibility.ts.
+ */
+export function nearestRay(
+  rays: readonly BearingRay[],
+  bearingDeg: number,
+): BearingRay | undefined {
+  let best: BearingRay | undefined;
+  let bestSeparationDeg = Number.POSITIVE_INFINITY;
+  for (const ray of rays) {
+    const separationDeg = Math.abs(angularDifferenceDeg(ray.bearingDeg, bearingDeg));
+    if (separationDeg < bestSeparationDeg) {
+      bestSeparationDeg = separationDeg;
+      best = ray;
+    }
+  }
+  return best;
+}
+
+/**
+ * Classify one occluded peak against the terrain actually walked (D8).
+ *
+ * All the geometry lives in `classifyOcclusion` in src/core; this is the thin
+ * layer that finds the peak's own ray and states the sampling spacing the
+ * coverage check needs. A peak on a bearing with no ray at all — possible only
+ * when the sweep covered a sector the peak sits outside of — is reported as
+ * foreground-occluded on the honest grounds that no terrain was examined.
+ */
+export function classifyPeakOcclusion(
+  eyeElevationM: number,
+  sighting: PeakSighting,
+  rays: readonly BearingRay[],
+  options: {
+    readonly sampleSpacingM: number;
+    readonly toleranceDeg: number;
+    readonly colToleranceM: number;
+    readonly sightline?: SightlineOptions;
+  },
+): OcclusionClassification {
+  const ray = nearestRay(rays, sighting.bearingDeg);
+  if (ray === undefined) {
+    return { kind: 'foreground-occluded', evidence: 'occluder-not-on-this-ray' };
+  }
+  return classifyOcclusion(eyeElevationM, sighting, ray.samples, {
+    sampleSpacingM: options.sampleSpacingM,
+    toleranceDeg: options.toleranceDeg,
+    colToleranceM: options.colToleranceM,
+    ...(options.sightline === undefined ? {} : { sightline: options.sightline }),
+  });
 }

@@ -17,6 +17,17 @@
  * eating into it. The result reads as light-on-dark against sky and
  * dark-on-light against snow without knowing anything about the image.
  *
+ * ## De-emphasising an obscured summit (D8)
+ *
+ * A summit hidden behind its own hill is still named, but drawn as secondary.
+ * The distinction is carried four times over, and only one of those is colour:
+ * the pole is DASHED, the summit marker is a hollow RING rather than a filled
+ * dot, the detail line SAYS "summit obscured", and the bright marks are drawn at
+ * `obscuredOpacity`. What is deliberately NOT reduced is the halo — the dark
+ * under-layer is emitted at full strength for obscured and solid markers alike,
+ * so a faded label over blown-out haze keeps exactly the contrast a solid one
+ * has. Fading the halo too would turn "de-emphasised" into "unreadable".
+ *
  * The accent colour is a warm amber. It is chosen against the actual
  * backgrounds this renderer faces: sky and snow shadows are blue, distant haze
  * is blue-grey, so the accent that separates furthest from all of them is their
@@ -42,6 +53,23 @@ export interface OverlayTheme {
   haloSpreadPx: number;
   fontFamily: string;
   fontWeight: string;
+  /**
+   * Opacity of the BRIGHT marks of an obscured peak (D8) — the pole, the summit
+   * ring and the glyph fills. The dark halo underneath keeps its own full
+   * strength, which is the whole reason a faded label stays readable over blown
+   * out haze: contrast comes from the halo, not from the ink being opaque.
+   *
+   * 0.7 is chosen to read as clearly secondary while leaving a white glyph
+   * comfortably above its dark outline. It is never the only cue — see
+   * `obscuredDashPx` and the label's own "summit obscured" text.
+   */
+  obscuredOpacity: number;
+  /**
+   * Dash and gap length of an obscured peak's pole, as a multiple of the pole's
+   * stroke width. A dashed pole survives greyscale printing, colour blindness
+   * and a hostile background, none of which opacity does.
+   */
+  obscuredDashFactor: number;
 }
 
 export const DEFAULT_THEME: OverlayTheme = {
@@ -56,6 +84,8 @@ export const DEFAULT_THEME: OverlayTheme = {
   haloSpreadPx: 3,
   fontFamily: 'Helvetica Neue, Helvetica, Arial, sans-serif',
   fontWeight: '600',
+  obscuredOpacity: 0.7,
+  obscuredDashFactor: 3,
 };
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
@@ -90,12 +120,17 @@ function textElement(
   fill: string,
   theme: OverlayTheme,
   content: string,
+  obscured: boolean,
 ): string {
   return `<text${attributes({
     x,
     y,
     'font-size': formatCoordinate(fontSizePx),
     fill,
+    // `fill-opacity`, never `opacity`: the latter would fade the halo stroke
+    // along with the glyph and hand back exactly the illegibility the halo
+    // exists to prevent.
+    ...(obscured ? { 'fill-opacity': theme.obscuredOpacity } : {}),
     stroke: theme.haloColor,
     'stroke-opacity': formatCoordinate(theme.haloOpacity + 0.2),
     'stroke-width': formatCoordinate(Math.max(2, fontSizePx * 0.18)),
@@ -148,6 +183,20 @@ export function buildOverlaySvgFromLayout(
       }),
     );
   }
+  // An obscured summit is a hollow ring rather than a filled dot, so unlike the
+  // filled marker — which carries its own dark outline — it needs a halo of its
+  // own to stay visible against snow.
+  for (const marker of layout.markers) {
+    if (!marker.obscured) continue;
+    lines.push(
+      `<circle${attributes({
+        cx: marker.summitPx.xPx,
+        cy: marker.summitPx.yPx,
+        r: layout.options.summitDotRadiusPx,
+        'stroke-width': formatCoordinate(widths.polePx + 2 * theme.haloSpreadPx),
+      })}/>`,
+    );
+  }
   lines.push('</g>');
 
   // Pass 2 — the bright marks.
@@ -175,9 +224,27 @@ export function buildOverlaySvgFromLayout(
     })}>`,
   );
   for (const marker of layout.markers) {
+    if (marker.obscured) continue;
     lines.push(poleLine(marker, {}));
   }
   lines.push('</g>');
+
+  const obscuredMarkers = layout.markers.filter((marker) => marker.obscured);
+  if (obscuredMarkers.length > 0) {
+    const dashPx = widths.polePx * theme.obscuredDashFactor;
+    lines.push(
+      `<g${attributes({
+        class: 'mf-poles mf-poles--obscured',
+        stroke: theme.poleColor,
+        'stroke-width': formatCoordinate(widths.polePx),
+        'stroke-opacity': formatCoordinate(theme.obscuredOpacity),
+        'stroke-dasharray': `${formatCoordinate(dashPx)} ${formatCoordinate(dashPx)}`,
+        'stroke-linecap': 'butt',
+      })}>`,
+    );
+    for (const marker of obscuredMarkers) lines.push(poleLine(marker, {}));
+    lines.push('</g>');
+  }
 
   lines.push(
     `<g${attributes({
@@ -188,6 +255,7 @@ export function buildOverlaySvgFromLayout(
     })}>`,
   );
   for (const marker of layout.markers) {
+    if (marker.obscured) continue;
     lines.push(
       `<circle${attributes({
         cx: marker.summitPx.xPx,
@@ -197,6 +265,28 @@ export function buildOverlaySvgFromLayout(
     );
   }
   lines.push('</g>');
+
+  if (obscuredMarkers.length > 0) {
+    lines.push(
+      `<g${attributes({
+        class: 'mf-summits mf-summits--obscured',
+        fill: 'none',
+        stroke: theme.summitFillColor,
+        'stroke-opacity': formatCoordinate(theme.obscuredOpacity),
+        'stroke-width': formatCoordinate(Math.max(1.25, widths.polePx)),
+      })}>`,
+    );
+    for (const marker of obscuredMarkers) {
+      lines.push(
+        `<circle${attributes({
+          cx: marker.summitPx.xPx,
+          cy: marker.summitPx.yPx,
+          r: layout.options.summitDotRadiusPx,
+        })}/>`,
+      );
+    }
+    lines.push('</g>');
+  }
 
   lines.push(
     `<g${attributes({
@@ -215,6 +305,7 @@ export function buildOverlaySvgFromLayout(
         theme.nameColor,
         theme,
         marker.nameText,
+        marker.obscured,
       ),
     );
     lines.push(
@@ -225,6 +316,7 @@ export function buildOverlaySvgFromLayout(
         theme.detailColor,
         theme,
         marker.detailText,
+        marker.obscured,
       ),
     );
   }

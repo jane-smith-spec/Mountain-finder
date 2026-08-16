@@ -10,7 +10,9 @@ import type { BearingRay } from './horizon';
 import { altitudeAngleDeg, sightPeak } from './sightline';
 import type { RaySample } from './sightline';
 import {
+  classifyOcclusion,
   filterVisiblePeaks,
+  isLabelled,
   isPeakVisible,
   resolveAgainstHorizon,
   NO_NEARER_TERRAIN_ALTITUDE_DEG,
@@ -714,5 +716,193 @@ describe('a peak coinciding with a terrain sample', () => {
     );
     expect(resolved.clearanceDeg).toBeLessThan(0);
     expect(isPeakVisible(resolved, 0)).toBe(false);
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * Occlusion classification (D8): self-occluded vs foreground-occluded
+ * ══════════════════════════════════════════════════════════════════════════
+ *
+ * Every scene below is hand-built so that the ANSWER follows from the shape of
+ * the terrain and not from any number this code produces. Curvature drop is
+ * 0.07 m at 1 km and 0.6 m at 3 km, so all the margins here (tens of metres)
+ * are decided long before the third decimal place of any angle; the closed-form
+ * quantities that ARE asserted numerically (`colDepthM`, the crest's distance)
+ * are exact differences of the integers written into the fixtures.
+ */
+
+/** Terrain samples every `spacingM` metres, from a list of elevations. */
+function evenRay(spacingM: number, elevationsM: readonly number[]): RaySample[] {
+  return elevationsM.map((elevationM, index) => ({
+    distanceM: (index + 1) * spacingM,
+    elevationM,
+  }));
+}
+
+describe('classifyOcclusion', () => {
+  /**
+   * THE COW HILL SHAPE. A convex hill the observer stands at the foot of:
+   * ground rises without interruption from the near shoulder that gets in the
+   * way (100 m out, 30 m up, subtending atan(0.30) = 16.7°) to the summit
+   * (1000 m out, 180 m up, subtending atan(0.18) = 10.2°). The summit is
+   * behind the shoulder of its OWN hill: there is no col anywhere between the
+   * two, so both belong to one landform.
+   */
+  const convexHill = evenRay(100, [30, 60, 90, 115, 135, 150, 160, 168, 174, 178]);
+
+  it('calls an unbroken rise from the blocking shoulder to the summit self-occlusion', () => {
+    const classification = classifyOcclusion(
+      0,
+      { distanceKm: 1, altitudeDeg: altitudeAngleDeg(0, 180, 1000) },
+      convexHill,
+      { sampleSpacingM: 100 },
+    );
+
+    expect(classification.kind).toBe('self-occluded');
+    expect(classification.evidence).toBe('unbroken-rise-to-summit');
+    // The FIRST sample that gets in the way, not the highest: 30 m at 100 m
+    // already out-angles the summit, so that is where the sightline enters the
+    // ground.
+    expect(classification.crestDistanceKm).toBe(0.1);
+    expect(classification.crestElevationM).toBe(30);
+    // Lowest ground between the crest and the summit is the 60 m sample, which
+    // is ABOVE the crest — no col at all.
+    expect(classification.colDepthM).toBe(0);
+  });
+
+  /**
+   * THE BEN NEVIS / MOUNT BAKER SHAPE. The same 30 m shoulder at 100 m hides a
+   * far bigger mountain 5 km away, but the ground between the two collapses to
+   * a 5 m valley floor: a col 25 m below the crest separates the two landforms
+   * completely. What you would be labelling is the near shoulder, not the
+   * mountain.
+   */
+  const valleyThenMountain: RaySample[] = Array.from({ length: 49 }, (_, index) => {
+    const distanceM = (index + 1) * 100;
+    // 30 m shoulder at 100 m; a 5 m valley floor out to 1 km; then the far
+    // mountain's flank climbing 1 m in 5 to 785 m at 4.9 km.
+    if (distanceM === 100) return { distanceM, elevationM: 30 };
+    if (distanceM <= 1000) return { distanceM, elevationM: 5 };
+    return { distanceM, elevationM: 5 + (distanceM - 1000) * 0.2 };
+  });
+
+  it('calls a col between the blocker and the summit foreground occlusion', () => {
+    const classification = classifyOcclusion(
+      0,
+      { distanceKm: 5, altitudeDeg: altitudeAngleDeg(0, 800, 5000) },
+      valleyThenMountain,
+      { sampleSpacingM: 100 },
+    );
+
+    expect(classification.kind).toBe('foreground-occluded');
+    expect(classification.evidence).toBe('col-between-occluder-and-summit');
+    expect(classification.crestElevationM).toBe(30);
+    // Crest 30 m, valley floor 5 m: a 25 m col, exactly.
+    expect(classification.colDepthM).toBe(25);
+  });
+
+  it('refuses to call it self-occlusion when the terrain between was never sampled', () => {
+    // The same convex hill with the 400-700 m samples missing — an unfilled
+    // void, or water the tile has no data for. Absence of a col in the record
+    // is not evidence that there is no col.
+    const gapped = convexHill.filter(
+      (sample) => sample.distanceM < 400 || sample.distanceM > 700,
+    );
+
+    const classification = classifyOcclusion(
+      0,
+      { distanceKm: 1, altitudeDeg: altitudeAngleDeg(0, 180, 1000) },
+      gapped,
+      { sampleSpacingM: 100 },
+    );
+
+    expect(classification.kind).toBe('foreground-occluded');
+    expect(classification.evidence).toBe('unsampled-gap-between-occluder-and-summit');
+  });
+
+  it('refuses to call it self-occlusion when nothing on this ray blocks at all', () => {
+    // Flat 5 m ground: the caller's interpolated profile judged the peak
+    // hidden (by a neighbouring ray), but THIS ray cannot show what by, so
+    // self-occlusion is unproven and the peak stays unlabelled.
+    const classification = classifyOcclusion(
+      0,
+      { distanceKm: 5, altitudeDeg: altitudeAngleDeg(0, 800, 5000) },
+      evenRay(100, [5, 5, 5, 5, 5, 5, 5, 5, 5, 5]),
+      { sampleSpacingM: 100 },
+    );
+
+    expect(classification.kind).toBe('foreground-occluded');
+    expect(classification.evidence).toBe('occluder-not-on-this-ray');
+    expect(classification.crestDistanceKm).toBeUndefined();
+  });
+
+  it('does not let the summit\'s own under-read terrain sample count as a col', () => {
+    // SRTM reads sharp summits 250-350 m low (MISSION.md), so the sample at
+    // the peak's OWN range routinely sits below the terrain leading up to it.
+    // That sample is the peak, not a col in front of it — the same reason
+    // `maxAltitudeNearerThanDeg` excludes terrain at exactly the peak's range.
+    const underReadSummit: RaySample[] = [
+      { distanceM: 200, elevationM: 150 },
+      { distanceM: 400, elevationM: 220 },
+      { distanceM: 600, elevationM: 260 },
+      { distanceM: 800, elevationM: 280 },
+      { distanceM: 1000, elevationM: 140 },
+    ];
+
+    const classification = classifyOcclusion(
+      0,
+      { distanceKm: 1, altitudeDeg: altitudeAngleDeg(0, 300, 1000) },
+      underReadSummit,
+      { sampleSpacingM: 200 },
+    );
+
+    expect(classification.kind).toBe('self-occluded');
+    expect(classification.colDepthM).toBe(0);
+  });
+
+  it('grants a col allowance only when the caller asks for one', () => {
+    // A 6 m dip past the crest. At the default zero allowance that is a col and
+    // the peak is not labelled; a caller who states a 10 m DEM noise budget
+    // gets the other answer. Nothing is tuned silently.
+    const dippedHill: RaySample[] = [
+      { distanceM: 100, elevationM: 30 },
+      { distanceM: 200, elevationM: 24 },
+      { distanceM: 300, elevationM: 90 },
+      { distanceM: 400, elevationM: 130 },
+    ];
+    // atan(30/100) = 16.70 deg beats the summit's atan(140/500) = 15.64 deg, so
+    // the 100 m shoulder is the crest and the 24 m sample is a col behind it.
+    const target = { distanceKm: 0.5, altitudeDeg: altitudeAngleDeg(0, 140, 500) };
+
+    expect(classifyOcclusion(0, target, dippedHill, { sampleSpacingM: 100 }).kind).toBe(
+      'foreground-occluded',
+    );
+    expect(
+      classifyOcclusion(0, target, dippedHill, { sampleSpacingM: 100, colToleranceM: 10 }).kind,
+    ).toBe('self-occluded');
+    expect(classifyOcclusion(0, target, dippedHill, { sampleSpacingM: 100 }).colDepthM).toBe(6);
+  });
+
+  it('is undefined about nothing: every classification names its evidence', () => {
+    const kinds = new Set<string>();
+    for (const ray of [convexHill, valleyThenMountain]) {
+      const classification = classifyOcclusion(
+        0,
+        { distanceKm: 1, altitudeDeg: altitudeAngleDeg(0, 180, 1000) },
+        ray,
+        { sampleSpacingM: 100 },
+      );
+      kinds.add(classification.kind);
+      expect(classification.evidence.length).toBeGreaterThan(0);
+    }
+    expect(kinds.size).toBeGreaterThan(0);
+  });
+});
+
+describe('isLabelled', () => {
+  it('labels visible and self-occluded peaks, never foreground-occluded ones', () => {
+    expect(isLabelled('visible')).toBe(true);
+    expect(isLabelled('self-occluded')).toBe(true);
+    expect(isLabelled('foreground-occluded')).toBe(false);
   });
 });

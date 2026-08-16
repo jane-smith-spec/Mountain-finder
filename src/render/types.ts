@@ -12,7 +12,29 @@
  * moment `projectToImage` returns, and the field names say so.
  */
 
-import type { CameraPose, HorizonProfile, VisiblePeak } from '../core/types';
+import type { CameraPose, HorizonProfile, PeakVisibility, VisiblePeak } from '../core/types';
+
+/**
+ * A peak as the overlay receives it: the geometry `src/core` resolved, plus
+ * what the pipeline decided about drawing it (decision D8).
+ *
+ * Additive by design — `VisiblePeak` is assignable to this, so every caller and
+ * fixture that predates D8 keeps working and keeps meaning what it meant.
+ * `visibility` is optional and DEFAULTS TO `'visible'`, which is the only safe
+ * default: a caller that knows nothing about occlusion states is a caller
+ * handing over peaks it has already decided to show.
+ */
+export interface OverlayPeak extends VisiblePeak {
+  /**
+   * `'visible'` (or absent) draws the marker at full strength.
+   * `'self-occluded'` draws it de-emphasised — see {@link PeakMarker.obscured}.
+   * `'foreground-occluded'` is NOT DRAWN: {@link layoutOverlay} moves it to
+   * {@link OverlayLayout.foregroundOccludedPeaks} instead. The pipeline already
+   * withholds these; the renderer refuses them again because "never name a
+   * mountain that is not in the picture" is the one rule worth enforcing twice.
+   */
+  visibility?: PeakVisibility;
+}
 
 /** A point in image pixel space. x right, y down, origin at the top-left. */
 export interface PointPx {
@@ -46,7 +68,7 @@ export interface OverlayScene {
   pose: CameraPose;
   /** Terrain skyline. May be empty — then no horizon line is drawn. */
   horizon: HorizonProfile;
-  peaks: readonly VisiblePeak[];
+  peaks: readonly OverlayPeak[];
 }
 
 /**
@@ -97,7 +119,7 @@ export type LabelDirection = 'up' | 'down';
  * 1") and not merely on the pixel side effects of it.
  */
 export interface PeakMarker {
-  peak: VisiblePeak;
+  peak: OverlayPeak;
   /** Projected summit position — where the dot goes. */
   summitPx: PointPx;
   /** Far end of the flag pole; the label sits just beyond it. */
@@ -119,6 +141,14 @@ export interface PeakMarker {
    * test) can tell "there was room" from "the sky was full".
    */
   overlapped: boolean;
+  /**
+   * True for a summit whose own hill hides it (D8) — drawn de-emphasised:
+   * dashed pole, hollow summit ring, a "summit obscured" note in the detail
+   * line, and reduced opacity on the bright marks only. Four channels, three of
+   * them not colour, because a viewer who cannot separate the two colours must
+   * still be able to separate the two states.
+   */
+  obscured: boolean;
   /** Peak name, unescaped. */
   nameText: string;
   /** Elevation and distance, e.g. `4478 m · 12.3 km`, unescaped. */
@@ -141,6 +171,14 @@ export interface OverlayLayout {
    * the camera). Reported so the caller can say "3 peaks are off-frame to the
    * left" rather than silently losing them.
    */
-  offFramePeaks: readonly VisiblePeak[];
+  offFramePeaks: readonly OverlayPeak[];
+  /**
+   * Peaks refused because they are `'foreground-occluded'` — hidden behind a
+   * different landform entirely. Reported rather than silently dropped, and
+   * kept apart from `offFramePeaks` because the two say completely different
+   * things: one is "outside the picture", the other is "inside the picture and
+   * behind something else".
+   */
+  foregroundOccludedPeaks: readonly OverlayPeak[];
   options: ResolvedOverlayOptions;
 }

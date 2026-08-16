@@ -29,6 +29,16 @@ numbers instead of as substrings.
   when the line leaves and re-enters, never a false chord across the gap;
 - per visible peak: a dot on the projected summit, a vertical flag pole, and a
   two-line label (name, then `elevation · distance`);
+- per **self-occluded** peak (`OverlayPeak.visibility`, decision D8): the same
+  marker de-emphasised — dashed pole, hollow summit ring, `· summit obscured`
+  appended to the detail line, and reduced opacity on the bright marks only.
+  The dark halo keeps full strength, so a greyed label stays as readable over
+  blown-out haze as a solid one; three of the four cues survive with no colour
+  at all;
+- **foreground-occluded** peaks are refused outright and returned in
+  `foregroundOccludedPeaks`. The pipeline already withholds them; the renderer
+  refuses again, because naming a mountain that is behind a different hill is
+  the one mistake worth guarding twice;
 - peaks that project outside the frame or behind the camera are not drawn, and
   are returned in `offFramePeaks` rather than silently dropped.
 

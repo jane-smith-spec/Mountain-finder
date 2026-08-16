@@ -597,3 +597,73 @@ describe('formatPeakDetail', () => {
     );
   });
 });
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * D8 — obscured (self-occluded) peaks
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+describe('layoutOverlay — obscured peaks (D8)', () => {
+  it('lays out a self-occluded peak exactly where a visible one would go', () => {
+    // The de-emphasis is a STYLE difference, never a position one: the summit
+    // is at the same bearing and altitude whether or not its last few metres
+    // are behind the hill's own shoulder, so it must land on the same pixel.
+    const summit = peak({ id: 'node/1', name: 'Cow Hill', bearingDeg: 90, altitudeDeg: 0 });
+    const visible = layoutOverlay(scene({ peaks: [summit] }), PINNED);
+    const obscured = layoutOverlay(
+      scene({ peaks: [{ ...summit, visibility: 'self-occluded' }] }),
+      PINNED,
+    );
+
+    expect(obscured.markers).toHaveLength(1);
+    expect(obscured.markers[0]?.summitPx).toEqual(visible.markers[0]?.summitPx);
+    expect(obscured.markers[0]?.poleTipPx).toEqual(visible.markers[0]?.poleTipPx);
+    expect(obscured.markers[0]?.obscured).toBe(true);
+    expect(visible.markers[0]?.obscured).toBe(false);
+  });
+
+  it('says "obscured" in words, so the distinction is not carried by colour alone', () => {
+    const layout = layoutOverlay(
+      scene({
+        peaks: [
+          {
+            ...peak({ id: 'node/1', name: 'Cow Hill', bearingDeg: 90, altitudeDeg: 0 }),
+            visibility: 'self-occluded',
+          },
+        ],
+      }),
+      PINNED,
+    );
+    expect(layout.markers[0]?.detailText).toContain('summit obscured');
+    // The name itself is left alone: it is what the label is for.
+    expect(layout.markers[0]?.nameText).toBe('Cow Hill');
+  });
+
+  it('never draws a foreground-occluded peak, and says it dropped it', () => {
+    const layout = layoutOverlay(
+      scene({
+        peaks: [
+          peak({ id: 'node/1', name: 'Cow Hill', bearingDeg: 90, altitudeDeg: 0 }),
+          {
+            ...peak({ id: 'node/2', name: 'Ben Nevis', bearingDeg: 92, altitudeDeg: 0 }),
+            visibility: 'foreground-occluded',
+          },
+        ],
+      }),
+      PINNED,
+    );
+
+    expect(layout.markers.map((marker) => marker.nameText)).toEqual(['Cow Hill']);
+    expect(layout.foregroundOccludedPeaks.map((peak) => peak.name)).toEqual(['Ben Nevis']);
+    // Not confused with the off-frame bucket: this one was in frame and refused.
+    expect(layout.offFramePeaks).toHaveLength(0);
+  });
+
+  it('treats a peak with no stated visibility as visible', () => {
+    const layout = layoutOverlay(
+      scene({ peaks: [peak({ id: 'node/1', name: 'Matterhorn', bearingDeg: 90, altitudeDeg: 0 })] }),
+      PINNED,
+    );
+    expect(layout.markers[0]?.obscured).toBe(false);
+    expect(layout.markers[0]?.detailText).not.toContain('obscured');
+  });
+});

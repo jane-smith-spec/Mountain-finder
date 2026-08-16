@@ -143,7 +143,47 @@ Live checklist. Check items only after their self-check has been run and passed 
       `high` gates, `medium` reports, `disputed` informs. **One hard gate is FAILING and was
       left failing** — see below.
 
+## Phase 4b — D8: obscured summits labelled, greyed (2026-08-16) ✅ +24 tests
+- [x] **The rule, in `src/core/visibility.ts` (pure).** `classifyOcclusion` splits an
+      occluded summit by WHAT hides it, using the topographic definition of one landform:
+      walk the peak's own ray from the FIRST crest that out-angles it to the peak's own
+      range, and if no sampled ground falls below that crest there is **no col**, so the
+      blocker is a shoulder of the peak itself → `self-occluded` (labelled, greyed). A col
+      → `foreground-occluded` (never drawn). Two refusals err the same way: a gap in the
+      sampled record wide enough to hide a col, and a bearing whose nearest ray has no
+      blocker at all, both report foreground occlusion for want of evidence.
+      Deliberately NOT a distance ratio (unitless, and wrong for two ridges 15 km apart at
+      85 and 100 km) and NOT an angular deficit (scales with how close the observer stands,
+      not with whose hill it is). `colToleranceM` defaults to **0** — a col is a col.
+- [x] **Threaded through `src/pipeline`.** `AnnotatedPeak.visibility` + `.occlusion`
+      (evidence, crest, col depth); `AnnotatedScene.selfOccluded` / `.foregroundOccluded` /
+      `.labelled`. `visible` and `clearanceDeg` are untouched — the split is of the losers.
+- [x] **Rendered in `src/render`.** `OverlayPeak.visibility`; obscured markers get a dashed
+      pole, a hollow summit ring, `· summit obscured` in the detail line and reduced opacity
+      on the BRIGHT marks only — the halo stays full strength, proven in the exported raster
+      (`tests/e2e/render.spec.ts`). Foreground-occluded peaks are refused a second time here.
+- [x] **Surfaced in `src/app`.** "Label summits hidden behind their own hill", ON by default
+      per the user's decision, its copy a tested pure function (`obscuredPeaksNote`) and its
+      state carried to the pipeline in `OverlayRequest.showObscuredPeaks`. There is
+      deliberately no switch for foreground-occluded peaks.
+- [x] **Pinned by the three real cases** in `tests/acceptance/pipeline-hooks.test.ts`:
+      Cow Hill self-occluded (col 0.0 m), Ben Nevis foreground (col 128.5 m over Glen Nevis),
+      Mount Baker foreground. Acceptance semantics updated: a high-confidence must-see peak
+      is satisfied by being LABELLED; a must-NOT-see peak must be absent from `labelled`
+      entirely — **strictly stronger** than the old "not visible", which a greyed label
+      would now satisfy.
+
 ## ⚠ Open findings from switching on the acceptance hooks (2026-08-16)
+- [x] **fort-william: HIGH-confidence must-see "Cow Hill" comes out HIDDEN.** RESOLVED
+      HONESTLY, without touching the visibility rule: the summit point is still hidden
+      (clearance −0.356°) and is now LABELLED GREYED because the DEM shows the ground
+      rising unbroken from the blocking crest (248 m at 0.84 km) to the summit — deepest
+      col 0.0 m — while the hill dominates the skyline at +17.02°. The case file records
+      the measured figures. The alternatives the finding offered (replace the coordinate,
+      restate the expectation) were NOT needed and were not taken.
+
+<details><summary>Original finding (kept for the record)</summary>
+
 - [ ] **fort-william: HIGH-confidence must-see "Cow Hill" comes out HIDDEN.** Not weakened,
       not skipped. Diagnosis: the quoted coordinate (56.813052, −5.094644, from a walking-route
       aggregator — the case file already calls it the least authoritative position in the set)
@@ -157,6 +197,8 @@ Live checklist. Check items only after their self-check has been run and passed 
       its summit point clearing the foreground. Decide one of: replace the coordinate with the
       Ordnance Survey grid reference, or restate the expectation as "Cow Hill's mass forms the
       skyline at this bearing". Do NOT relax the visibility rule to fix it.
+
+</details>
 - [ ] **kerry-park-seattle: the Mount Baker gate is NOT insensitive to the observer height**,
       contrary to that case file's header. SRTM reads Kerry Park at **103.8 m**; the case cites
       an estimated 113 ± 15 m. With the DEM value Baker is correctly HIDDEN (clearance −1.67°);

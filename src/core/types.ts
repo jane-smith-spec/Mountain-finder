@@ -129,6 +129,39 @@ export interface VisiblePeak extends PeakSighting {
 }
 
 /**
+ * What a peak's summit point does against the terrain in front of it, and
+ * therefore whether the overlay is entitled to name it.
+ *
+ * ADDED for decision D8 (MISSION.md). It does not replace or reinterpret
+ * anything: `VisiblePeak.clearanceDeg` still answers the single geometric
+ * question "does the summit point clear the ground in front of it", and
+ * `'visible'` here means exactly that and nothing more. The two occluded
+ * states split what used to be one bucket, because a hidden summit is hidden in
+ * one of two physically different ways:
+ *
+ *   `'self-occluded'`
+ *     The summit point is behind a shoulder of ITS OWN landform: the ground
+ *     runs unbroken from the piece that gets in the way out to the summit, with
+ *     no col between them. Standing at the foot of a smooth convex hill is the
+ *     ordinary case — the hill fills the view, it is unmistakably there, and
+ *     only the last few metres of its top are tucked behind its own curve.
+ *     Naming it is honest, so the renderer labels it and de-emphasises it.
+ *
+ *   `'foreground-occluded'`
+ *     A DIFFERENT landform, nearer and separated from the peak by a col, stands
+ *     in the way — a volcano 160 km off behind the hill at the end of the
+ *     street. Nothing of the peak is in the picture. A label here would put a
+ *     mountain's name on somebody else's hillside, which is the one failure
+ *     this project exists to prevent, so such peaks are never drawn.
+ *
+ * The classifier that decides between the two, and the geometric argument for
+ * the rule it uses, live in {@link classifyOcclusion} in visibility.ts. Use
+ * {@link isLabelled} rather than comparing strings at call sites, so the
+ * "may this be drawn?" question has exactly one implementation.
+ */
+export type PeakVisibility = 'visible' | 'self-occluded' | 'foreground-occluded';
+
+/**
  * Camera orientation and optics. Angles in degrees.
  * headingDeg is where the optical axis points (true north referenced).
  */

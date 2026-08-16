@@ -35,7 +35,12 @@ export {
 } from './terrain.js';
 export type { TerrainSweepResult } from './terrain.js';
 
-export { describeOccluder, nearestProfilePoint } from './occlusion.js';
+export {
+  classifyPeakOcclusion,
+  describeOccluder,
+  nearestProfilePoint,
+  nearestRay,
+} from './occlusion.js';
 
 export type {
   AnnotateSceneRequest,

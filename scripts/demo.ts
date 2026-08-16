@@ -115,6 +115,31 @@ function describePeak(peak: AnnotatedPeak): string {
   );
 }
 
+/** One occluded peak: the verdict, the terrain that beat it, and the D8 evidence. */
+function describeOccludedPeak(peak: AnnotatedPeak): void {
+  line(`    ${describePeak(peak)}`);
+  const by = peak.occludedBy;
+  line(
+    by === undefined
+      ? '      hidden by terrain the profile interpolated between rays'
+      : `      hidden by terrain ${by.elevationM} m at ${by.distanceKm.toFixed(2)} km on ` +
+        `bearing ${by.rayBearingDeg.toFixed(1)} deg, reaching ${deg(by.altitudeDeg)} deg`,
+  );
+  const occlusion = peak.occlusion;
+  if (occlusion === undefined) return;
+  line(
+    `      ${occlusion.evidence}` +
+      (occlusion.crestDistanceKm === undefined
+        ? ''
+        : `: first blocked at ${occlusion.crestDistanceKm.toFixed(2)} km by ` +
+          `${(occlusion.crestElevationM ?? Number.NaN).toFixed(0)} m of ground reaching ` +
+          `${deg(occlusion.crestAltitudeDeg ?? Number.NaN)} deg`) +
+      (occlusion.colDepthM === undefined
+        ? ''
+        : `; deepest col between there and the summit ${occlusion.colDepthM.toFixed(1)} m`),
+  );
+}
+
 function report(testCase: GroundTruthCase, scene: AnnotatedScene, provenance: string): void {
   const eyeM = scene.observer.groundElevationM + scene.observer.eyeHeightM;
 
@@ -168,22 +193,23 @@ function report(testCase: GroundTruthCase, scene: AnnotatedScene, provenance: st
   line();
   line(`PEAKS CONSIDERED — ${scene.peaks.length} within ${scene.config.peakRadiusKm} km`);
   line();
-  line(`  VISIBLE (${scene.visible.length})`);
+  line(`  VISIBLE — LABELLED (${scene.visible.length})`);
   if (scene.visible.length === 0) line('    (none)');
   for (const peak of scene.visible) line(`    ${describePeak(peak)}`);
   line();
-  line(`  OCCLUDED (${scene.occluded.length})`);
-  if (scene.occluded.length === 0) line('    (none)');
-  for (const peak of scene.occluded) {
-    line(`    ${describePeak(peak)}`);
-    const by = peak.occludedBy;
-    line(
-      by === undefined
-        ? '      hidden by terrain the profile interpolated between rays'
-        : `      hidden by terrain ${by.elevationM} m at ${by.distanceKm.toFixed(2)} km on ` +
-          `bearing ${by.rayBearingDeg.toFixed(1)} deg, reaching ${deg(by.altitudeDeg)} deg`,
-    );
-  }
+  line(`  SELF-OCCLUDED — LABELLED, GREYED (${scene.selfOccluded.length})`);
+  line('    The summit point is behind a shoulder of its OWN hill: the ground runs');
+  line('    unbroken from the blocker to the summit, so the hill filling the view IS');
+  line('    the peak, and the label belongs on it (decision D8).');
+  if (scene.selfOccluded.length === 0) line('    (none)');
+  for (const peak of scene.selfOccluded) describeOccludedPeak(peak);
+  line();
+  line(`  FOREGROUND-OCCLUDED — NOT LABELLED (${scene.foregroundOccluded.length})`);
+  line('    A different, nearer landform is in the way, or the terrain between could');
+  line('    not be shown continuous. Drawing these would name a mountain that is not');
+  line('    in the picture.');
+  if (scene.foregroundOccluded.length === 0) line('    (none)');
+  for (const peak of scene.foregroundOccluded) describeOccludedPeak(peak);
 
   if (scene.warnings.length > 0) {
     line();

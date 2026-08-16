@@ -21,9 +21,11 @@ import type {
   LatLng,
   Observer,
   Peak,
+  PeakVisibility,
   VisiblePeak,
 } from '../core/types.js';
 import type { SightlineOptions } from '../core/sightline.js';
+import type { OcclusionClassification } from '../core/visibility.js';
 import type { ElevationProvider } from '../providers/elevation.js';
 
 /**
@@ -77,6 +79,13 @@ export interface PipelineConfig {
    * 0.05 km. Dropped peaks are reported in `warnings`, never silently.
    */
   readonly minPeakDistanceKm?: number;
+  /**
+   * How far the ground may dip below a blocking crest and still count as one
+   * unbroken landform, metres — the slack in the self-occlusion rule (D8).
+   * Default 0; see `OcclusionOptions.colToleranceM` in src/core/visibility.ts
+   * for why raising it is paid for in the dangerous direction.
+   */
+  readonly colToleranceM?: number;
   /** Source of the timestamp on the result. Default `() => new Date()`. */
   readonly clock?: () => Date;
 }
@@ -88,6 +97,7 @@ export interface ResolvedPipelineConfig {
   readonly toleranceDeg: number;
   readonly peakRadiusKm: number;
   readonly minPeakDistanceKm: number;
+  readonly colToleranceM: number;
 }
 
 /**
@@ -121,6 +131,23 @@ export interface ObserverResolution {
 export interface AnnotatedPeak extends VisiblePeak {
   /** Did it clear the terrain standing in front of it? */
   readonly visible: boolean;
+  /**
+   * The three-way state the overlay renders from (decision D8): visible,
+   * self-occluded (hidden behind a shoulder of its own hill — labelled and
+   * de-emphasised), or foreground-occluded (hidden behind a different landform
+   * — never labelled).
+   *
+   * `visible === (visibility === 'visible')` always: this field SPLITS the
+   * occluded half and reinterprets nothing. `isLabelled(visibility)` from
+   * src/core/visibility.ts is the one place that answers "may this be drawn".
+   */
+  readonly visibility: PeakVisibility;
+  /**
+   * The terrain evidence behind an occluded verdict: which crest got in the
+   * way and how deep the col between it and the summit is. Absent for a visible
+   * peak, because there is no occlusion to classify.
+   */
+  readonly occlusion?: OcclusionClassification;
   /**
    * Where it lands on the photograph, normalised. Computed for occluded peaks
    * too — a renderer showing "what you would see if the ridge were not there"
@@ -167,8 +194,26 @@ export interface AnnotatedScene {
   readonly peaks: readonly AnnotatedPeak[];
   /** The subset that cleared the terrain in front of it, in the same order. */
   readonly visible: readonly AnnotatedPeak[];
-  /** The subset that did not. */
+  /** The subset that did not. Equals `selfOccluded` ∪ `foregroundOccluded`. */
   readonly occluded: readonly AnnotatedPeak[];
+  /**
+   * Occluded peaks whose summit is tucked behind a shoulder of their own hill.
+   * The overlay draws these, de-emphasised (D8).
+   */
+  readonly selfOccluded: readonly AnnotatedPeak[];
+  /**
+   * Occluded peaks hidden by a different, nearer landform — or by terrain the
+   * run could not prove continuous with them. The overlay must NOT draw these:
+   * a label here names a mountain that is not in the picture.
+   */
+  readonly foregroundOccluded: readonly AnnotatedPeak[];
+  /**
+   * Everything the overlay is entitled to name: exactly the peaks for which
+   * `isLabelled(peak.visibility)` holds, in the same nearest-first order as
+   * `peaks`. Computed once, so no caller has to reconstruct the rule and get it
+   * subtly wrong — and so "which peaks may be drawn" has a single answer.
+   */
+  readonly labelled: readonly AnnotatedPeak[];
   /** Anything the caller should know: missing tiles, dropped peaks, empty rays. */
   readonly warnings: readonly string[];
   readonly config: ResolvedPipelineConfig;

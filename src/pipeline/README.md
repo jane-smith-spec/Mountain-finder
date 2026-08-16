@@ -46,6 +46,16 @@ skyline the visibility filter judged against.
    `occlusion.ts` then names the piece of ground responsible, which is what
    turns "not labelled" into "hidden by a 250 m shoulder at 1.2 km".
 
+3. **An occluded peak is only labelled when its OWN hill is what hides it**
+   (decision D8). `classifyOcclusion` in `src/core/visibility.ts` walks the
+   peak's own ray from the first crest that gets in the way out to the summit:
+   if the ground never drops below that crest there is no col, so the two are
+   one landform and `AnnotatedScene.selfOccluded` carries the peak for the
+   renderer to draw greyed. If a col intervenes — or the terrain between was
+   never sampled — it lands in `foregroundOccluded` and is never drawn, because
+   the label would sit on a different hill's face. `labelled` is the union the
+   renderer should consume.
+
 ## Refusals
 
 The pipeline throws rather than inventing a plausible number:

@@ -10,12 +10,21 @@
  *   4. fetch named peaks             from the peak database, NEVER from the DEM
  *   5. sight each peak               bearing, range, altitude angle
  *   6. filter by the NEARER-terrain rule
- *   7. project each peak to the image
+ *   7. classify each occlusion    self-occluded (labelled, greyed) or
+ *                                 foreground-occluded (never drawn) — D8
+ *   8. project each peak to the image
  *
  * Every outside dependency is an argument: the elevation source, the peak
  * source, the tolerances, and the clock. There is no module-level state and no
  * default provider, so a test run is exactly the production run with fixtures
  * in place of tiles.
+ *
+ * Step 7 is the decision D8 rests on and is described in full on
+ * `classifyOcclusion` in src/core/visibility.ts: a summit behind a shoulder of
+ * its OWN hill, with no col between the two, is still named — the hill fills
+ * the view and the label lands on ground continuous with the summit. A summit
+ * behind a DIFFERENT landform is not named at all, because the label would sit
+ * on somebody else's hillside. It changes no verdict; it splits the losers.
  *
  * Step 6 is the one worth restating, because it is the bug this project already
  * found and fixed once: a peak is occluded ONLY by terrain NEARER than itself.
@@ -32,10 +41,15 @@ import { buildHorizonProfile } from '../core/horizon.js';
 import { projectToImage } from '../core/projection.js';
 import { sightPeak } from '../core/sightline.js';
 import type { HorizonProfile, PeakSighting } from '../core/types.js';
-import { filterVisiblePeaks, isPeakVisible, resolveAgainstHorizon } from '../core/visibility.js';
+import {
+  filterVisiblePeaks,
+  isLabelled,
+  isPeakVisible,
+  resolveAgainstHorizon,
+} from '../core/visibility.js';
 
 import { PipelineError, throwIfAborted } from './errors.js';
-import { describeOccluder } from './occlusion.js';
+import { classifyPeakOcclusion, describeOccluder } from './occlusion.js';
 import { eyeElevationM, resolveObserver } from './observer.js';
 import { buildTerrainRays, resolveSweep } from './terrain.js';
 import type {
@@ -65,12 +79,17 @@ export function resolveConfig(config: PipelineConfig = {}): ResolvedPipelineConf
   if (toleranceDeg < 0) {
     throw new RangeError(`toleranceDeg must be >= 0, received ${toleranceDeg}`);
   }
+  const colToleranceM = config.colToleranceM ?? 0;
+  if (colToleranceM < 0) {
+    throw new RangeError(`colToleranceM must be >= 0, received ${colToleranceM}`);
+  }
   return {
     sweep: resolveSweep(config.sweep),
     sightline: config.sightline ?? {},
     toleranceDeg,
     peakRadiusKm: config.peakRadiusKm ?? DEFAULT_PEAK_RADIUS_KM,
     minPeakDistanceKm: config.minPeakDistanceKm ?? DEFAULT_MIN_PEAK_DISTANCE_KM,
+    colToleranceM,
   };
 }
 
@@ -153,16 +172,31 @@ export async function annotateScene(request: AnnotateSceneRequest): Promise<Anno
   }
   sightings.sort((a, b) => a.distanceKm - b.distanceKm);
 
+  const eyeM = eyeElevationM(observer);
   const peaks: AnnotatedPeak[] = sightings.map((sighting) => {
     const resolved = resolveAgainstHorizon(sighting, horizon);
     const visible = isPeakVisible(resolved, config.toleranceDeg);
     const image = projectToImage(request.camera, sighting.bearingDeg, sighting.altitudeDeg);
     const occludedBy = visible ? undefined : describeOccluder(horizon, sighting);
+    // D8: an occluded summit is split by WHAT hides it — its own hill's
+    // shoulder (labelled, de-emphasised) or a different landform (not drawn).
+    // The visible/hidden verdict above is untouched by this; the classifier is
+    // asked only about peaks that already lost.
+    const occlusion = visible
+      ? undefined
+      : classifyPeakOcclusion(eyeM, sighting, rays, {
+          sampleSpacingM: config.sweep.rangeStepM,
+          toleranceDeg: config.toleranceDeg,
+          colToleranceM: config.colToleranceM,
+          sightline: config.sightline,
+        });
     return {
       ...resolved,
       visible,
+      visibility: occlusion?.kind ?? 'visible',
       image,
       ...(occludedBy === undefined ? {} : { occludedBy }),
+      ...(occlusion === undefined ? {} : { occlusion }),
     };
   });
 
@@ -189,6 +223,9 @@ export async function annotateScene(request: AnnotateSceneRequest): Promise<Anno
     peaks,
     visible,
     occluded: peaks.filter((peak) => !peak.visible),
+    selfOccluded: peaks.filter((peak) => peak.visibility === 'self-occluded'),
+    foregroundOccluded: peaks.filter((peak) => peak.visibility === 'foreground-occluded'),
+    labelled: peaks.filter((peak) => isLabelled(peak.visibility)),
     warnings,
     config,
     generatedAt: clock(),

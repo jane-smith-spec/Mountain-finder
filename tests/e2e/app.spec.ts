@@ -341,3 +341,27 @@ test('every control is labelled and reachable from the keyboard', async ({ page 
   expect(describedBy).toBe('pose-groundElevationM-state');
   await expect(page.getByTestId('state-groundElevationM')).toContainText('eye height');
 });
+
+test('the obscured-summit switch is on by default and says what each position means', async ({
+  page,
+}) => {
+  await pickPhoto(page, CHAMONIX);
+
+  const toggle = page.getByTestId('input-show-obscured');
+  // Decision D8: shown by default. The user asked for obscured summits to be
+  // labelled, so the app must not quietly ship them switched off.
+  await expect(toggle).toBeChecked();
+  await expect(page.getByLabel('Label summits hidden behind their own hill')).toBeVisible();
+
+  const note = page.getByTestId('obscured-note');
+  await expect(note).toHaveAttribute('data-showing', 'true');
+  await expect(note).toContainText('behind its own hill');
+  // Both positions state the limit as well as the effect: a peak behind a
+  // DIFFERENT hill is never drawn either way, and the control must not imply
+  // otherwise.
+  await expect(note).toContainText('never labelled either way');
+
+  await toggle.uncheck();
+  await expect(page.getByTestId('obscured-note')).toHaveAttribute('data-showing', 'false');
+  await expect(page.getByTestId('obscured-note')).toContainText('never labelled either way');
+});

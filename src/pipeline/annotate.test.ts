@@ -81,9 +81,13 @@ const HIDDEN_ELEVATION_M = 1500;
  */
 const EFFECTIVE_RADIUS_M = EARTH_RADIUS_M / (1 - 0.13);
 
-function expectedAltitudeDeg(targetElevationM: number, distanceM: number): number {
+function expectedAltitudeDeg(
+  targetElevationM: number,
+  distanceM: number,
+  eyeElevationM: number = EYE_ELEVATION_M,
+): number {
   const rise =
-    targetElevationM - EYE_ELEVATION_M - (distanceM * distanceM) / (2 * EFFECTIVE_RADIUS_M);
+    targetElevationM - eyeElevationM - (distanceM * distanceM) / (2 * EFFECTIVE_RADIUS_M);
   return (Math.atan2(rise, distanceM) * 180) / Math.PI;
 }
 
@@ -401,5 +405,127 @@ describe('the scene geometry itself, stated independently', () => {
 
   it('places a due-east peak exactly on the equator at the right longitude', () => {
     expect(greatCircleDistanceM(ORIGIN, east(HIGH_DISTANCE_M))).toBeCloseTo(HIGH_DISTANCE_M, 6);
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * D8 — self-occlusion vs foreground occlusion, through the pipeline
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+describe('annotateScene — occlusion classification (D8)', () => {
+  it('calls the far peak behind the ring ridge FOREGROUND-occluded and never labels it', async () => {
+    // Hidden Peak stands 20 km out with 5 km of sea-level ground between it and
+    // the 900 m ring ridge that hides it: a 900 m col, so the ridge is a
+    // different landform entirely and the peak is not in the picture at all.
+    const scene = await annotateScene(request());
+    const hidden = byId(scene.peaks, 'test/hidden');
+
+    expect(hidden.visible).toBe(false);
+    expect(hidden.visibility).toBe('foreground-occluded');
+    expect(hidden.occlusion?.evidence).toBe('col-between-occluder-and-summit');
+    // Ridge crest 900 m, valley floor 0 m — the col is the ridge's full height.
+    expect(hidden.occlusion?.colDepthM).toBe(RIDGE_ELEVATION_M);
+
+    expect(scene.labelled.map((peak) => peak.id)).not.toContain('test/hidden');
+    expect(scene.foregroundOccluded.map((peak) => peak.id)).toContain('test/hidden');
+  });
+
+  it('classifies a visible peak as visible and labels it', async () => {
+    const scene = await annotateScene(request());
+    const high = byId(scene.peaks, 'test/high');
+
+    expect(high.visibility).toBe('visible');
+    expect(high.occlusion).toBeUndefined();
+    expect(scene.labelled.map((peak) => peak.id)).toContain('test/high');
+  });
+
+  /**
+   * THE COW HILL SHAPE, as a pipeline scene.
+   *
+   * Radially symmetric convex terrain, sea level under the observer, eye 2 m
+   * up. With a 250 m range step the ray reads:
+   *
+   *   d = 250 m,  90 m:  tanα = (90 − 2 − 0.0043)/250  = 0.351983 → +19.391°
+   *   d = 500 m, 150 m:  tanα = (150 − 2 − 0.0171)/500 = 0.295966 → +16.485°
+   *   d = 750 m, 190 m:  tanα = (190 − 2 − 0.0384)/750 = 0.250615 → +14.070°
+   *
+   * and the summit — 230 m at 1000 m, its height from the peak database rather
+   * than from the ground model, exactly as a real run takes it — subtends
+   *
+   *   tanα = (230 − 2 − 0.0683)/1000 = 0.227932 → +12.840°.
+   *
+   * So the 250 m shoulder out-angles the summit by 6.55° and the summit is
+   * hidden. But the ground climbs 90 → 150 → 190 m without once falling back:
+   * there is no col between the shoulder and the summit, so both are the same
+   * hill and the label belongs on it, greyed.
+   */
+  const CONVEX_EYE_HEIGHT_M = 2;
+  const CONVEX_SUMMIT_M = 230;
+  const convexHill: TerrainFunctionM = (point) => {
+    const distanceM = greatCircleDistanceM(ORIGIN, point);
+    if (distanceM < 125) return 0;
+    if (distanceM < 375) return 90;
+    if (distanceM < 625) return 150;
+    if (distanceM < 875) return 190;
+    if (distanceM < 1125) return 215;
+    return 0;
+  };
+
+  const convexRequest: AnnotateSceneRequest = {
+    observer: { lat: 0, lon: 0, eyeHeightM: CONVEX_EYE_HEIGHT_M },
+    camera,
+    elevation: new FunctionElevationSource(convexHill, 'convex-hill'),
+    peaks: new StaticPeakSource([
+      {
+        id: 'test/shoulder-hidden',
+        name: 'Convex Hill',
+        ...east(1000),
+        elevationM: CONVEX_SUMMIT_M,
+        elevationSource: 'unknown',
+      },
+    ]),
+    config: {
+      sweep: { bearingStepDeg: 1, rangeStepM: 250, maxRangeKm: 5 },
+      peakRadiusKm: 50,
+      clock: () => FIXED_CLOCK,
+    },
+  };
+
+  it('calls a summit behind its own hill SELF-occluded, and labels it', async () => {
+    const scene = await annotateScene(convexRequest);
+    const summit = byId(scene.peaks, 'test/shoulder-hidden');
+
+    // Still hidden by the geometry — nothing about the verdict is relaxed.
+    expect(summit.visible).toBe(false);
+    expect(summit.altitudeDeg).toBeCloseTo(
+      expectedAltitudeDeg(CONVEX_SUMMIT_M, 1000, CONVEX_EYE_HEIGHT_M),
+      6,
+    );
+
+    expect(summit.visibility).toBe('self-occluded');
+    expect(summit.occlusion?.evidence).toBe('unbroken-rise-to-summit');
+    expect(summit.occlusion?.crestDistanceKm).toBeCloseTo(0.25, 9);
+    expect(summit.occlusion?.crestElevationM).toBe(90);
+    expect(summit.occlusion?.colDepthM).toBe(0);
+
+    // Labelled but NOT in the visible list: the two questions stay separate.
+    expect(scene.labelled.map((peak) => peak.id)).toContain('test/shoulder-hidden');
+    expect(scene.selfOccluded.map((peak) => peak.id)).toContain('test/shoulder-hidden');
+    expect(scene.visible.map((peak) => peak.id)).not.toContain('test/shoulder-hidden');
+  });
+
+  it('keeps the three buckets a partition of every peak considered', async () => {
+    for (const scene of [await annotateScene(request()), await annotateScene(convexRequest)]) {
+      const counted =
+        scene.visible.length + scene.selfOccluded.length + scene.foregroundOccluded.length;
+      expect(counted).toBe(scene.peaks.length);
+      expect(scene.labelled.length).toBe(scene.visible.length + scene.selfOccluded.length);
+      expect(scene.occluded.length).toBe(
+        scene.selfOccluded.length + scene.foregroundOccluded.length,
+      );
+      for (const peak of scene.peaks) {
+        expect(peak.visible).toBe(peak.visibility === 'visible');
+      }
+    }
   });
 });

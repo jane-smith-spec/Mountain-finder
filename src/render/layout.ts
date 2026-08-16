@@ -49,13 +49,14 @@
 
 import { interpolateHorizonAltitudeDeg } from '../core/horizon';
 import { cameraAxes, projectToImage } from '../core/projection';
-import type { VisiblePeak } from '../core/types';
+import { isLabelled } from '../core/visibility';
 import { clipPolylineToFrame, isInFrontOfCamera } from './geometry';
 import { estimateTextWidthPx } from './text-metrics';
 import type {
   LabelDirection,
   OverlayLayout,
   OverlayOptions,
+  OverlayPeak,
   OverlayScene,
   PeakMarker,
   PointPx,
@@ -125,9 +126,27 @@ export function resolveOverlayOptions(
   };
 }
 
-/** Elevation and distance, the second line of a label. */
-export function formatPeakDetail(peak: VisiblePeak): string {
-  return `${Math.round(peak.elevationM)} m · ${peak.distanceKm.toFixed(1)} km`;
+/**
+ * The words appended to an obscured peak's detail line.
+ *
+ * The label carries the state in TEXT as well as in ink, because opacity and
+ * colour are both invisible to somebody reading a printed copy, a screenshot at
+ * low contrast, or a screen reader working off the SVG's text nodes.
+ */
+export const OBSCURED_DETAIL_SUFFIX = 'summit obscured';
+
+/** Whether a peak is to be drawn de-emphasised (D8). */
+export function isPeakObscured(peak: OverlayPeak): boolean {
+  return peak.visibility === 'self-occluded';
+}
+
+/**
+ * Elevation and distance, the second line of a label — plus, for a summit
+ * hidden behind its own hill, a note saying so.
+ */
+export function formatPeakDetail(peak: OverlayPeak): string {
+  const measurements = `${Math.round(peak.elevationM)} m · ${peak.distanceKm.toFixed(1)} km`;
+  return isPeakObscured(peak) ? `${measurements} · ${OBSCURED_DETAIL_SUFFIX}` : measurements;
 }
 
 /** Strict rectangle intersection: rectangles that merely touch do not overlap. */
@@ -184,7 +203,7 @@ export function buildHorizonPolylines(
 
 /** A summit that projected inside the frame, before any label placement. */
 interface Sighting {
-  peak: VisiblePeak;
+  peak: OverlayPeak;
   summitPx: PointPx;
   nameText: string;
   detailText: string;
@@ -276,6 +295,7 @@ function markerFromCandidate(
     stackLevel: candidate.level,
     direction: candidate.direction,
     overlapped,
+    obscured: isPeakObscured(sighting.peak),
     nameText: sighting.nameText,
     detailText: sighting.detailText,
   };
@@ -295,9 +315,17 @@ export function layoutOverlay(
   const resolved = resolveOverlayOptions(scene, options);
 
   const sightings: Sighting[] = [];
-  const offFramePeaks: VisiblePeak[] = [];
+  const offFramePeaks: OverlayPeak[] = [];
+  const foregroundOccludedPeaks: OverlayPeak[] = [];
 
   for (const peak of scene.peaks) {
+    // D8, enforced a second time. The pipeline already withholds these, but a
+    // renderer that would draw one if handed one is a renderer one wiring
+    // mistake away from naming a mountain nobody can see.
+    if (peak.visibility !== undefined && !isLabelled(peak.visibility)) {
+      foregroundOccludedPeaks.push(peak);
+      continue;
+    }
     const point = projectToImage(scene.pose, peak.bearingDeg, peak.altitudeDeg);
     if (!point.inFrame) {
       offFramePeaks.push(peak);
@@ -370,6 +398,7 @@ export function layoutOverlay(
     horizonPolylinesPx: buildHorizonPolylines(scene, resolved),
     markers,
     offFramePeaks,
+    foregroundOccludedPeaks,
     options: resolved,
   };
 }

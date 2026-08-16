@@ -299,3 +299,67 @@ describe('buildOverlaySvg — snapshot', () => {
     expect(svg).toMatchSnapshot();
   });
 });
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * D8 — how an obscured peak is drawn
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+describe('buildOverlaySvg — obscured peaks (D8)', () => {
+  const obscuredScene = scene({
+    peaks: [{ ...peak({ id: 'node/1', name: 'Cow Hill' }), visibility: 'self-occluded' }],
+  });
+
+  it('leaves a scene with nothing obscured byte-for-byte unchanged', () => {
+    // The whole feature has to be inert on ordinary scenes, or every existing
+    // pixel assertion in this suite silently changes meaning.
+    const withoutField = buildOverlaySvg(scene(), PINNED);
+    const withExplicitVisible = buildOverlaySvg(
+      scene({ peaks: [{ ...peak({ id: 'node/1', name: 'Matterhorn' }), visibility: 'visible' }] }),
+      PINNED,
+    );
+    expect(withExplicitVisible).toBe(withoutField);
+  });
+
+  it('de-emphasises the obscured mark without weakening its halo', () => {
+    const svg = buildOverlaySvg(obscuredScene, PINNED);
+
+    // The bright marks fade...
+    expect(svg).toContain(`class="mf-poles mf-poles--obscured"`);
+    expect(svg).toContain(`stroke-dasharray=`);
+    expect(svg).toContain(`fill-opacity="${DEFAULT_THEME.obscuredOpacity}"`);
+
+    // ...but the dark halo pass, which is what buys legibility over bright
+    // haze, is emitted at exactly the same opacity as for a solid label. A
+    // greyed label that becomes unreadable over sky is not a greyed label, it
+    // is a lost one.
+    const haloOpacities = [...svg.matchAll(/stroke-opacity="([\d.]+)"/g)].map(
+      (match) => match[1],
+    );
+    expect(haloOpacities).toContain(String(DEFAULT_THEME.haloOpacity));
+    expect(svg).toContain(`stroke-opacity="${DEFAULT_THEME.haloOpacity + 0.2}"`);
+  });
+
+  it('marks it in three ways that survive without colour: dash, ring, and words', () => {
+    const svg = buildOverlaySvg(obscuredScene, PINNED);
+
+    // 1. the pole is dashed rather than solid
+    expect(svg).toMatch(/class="mf-poles mf-poles--obscured"[\s\S]*?stroke-dasharray/);
+    // 2. the summit marker is a ring, not a filled dot
+    expect(svg).toMatch(/class="mf-summits mf-summits--obscured"[\s\S]*?fill="none"/);
+    // 3. the label says so
+    expect(svg).toContain('summit obscured');
+  });
+
+  it('refuses to draw a foreground-occluded peak at all', () => {
+    const svg = buildOverlaySvg(
+      scene({
+        peaks: [
+          { ...peak({ id: 'node/2', name: 'Ben Nevis' }), visibility: 'foreground-occluded' },
+        ],
+      }),
+      PINNED,
+    );
+    expect(svg).not.toContain('Ben Nevis');
+    expect(svg).not.toContain('<circle');
+  });
+});
