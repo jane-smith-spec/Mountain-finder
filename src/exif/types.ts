@@ -36,13 +36,34 @@ export interface PhotoExif {
   imgDirectionRef?: DirectionRef;
   /** Physical focal length in millimetres. Useless for FOV without the sensor size. */
   focalLengthMm?: number;
-  /** FocalLengthIn35mmFormat — the one that yields a field of view on its own. */
+  /**
+   * FocalLengthIn35mmFormat. Yields a field of view once the frame's shape is
+   * known — see `fovDegFromFocalLength35mm` in fov.ts for which axis the
+   * 35 mm gate's 36 mm side is attributed to, and why that is a convention.
+   */
   focalLength35mmMm?: number;
+  /**
+   * EXIF Orientation as stored, 1–8. 1 is "as recorded"; 6 and 8 are the
+   * quarter turns a phone writes when it is held upright. Values outside 1–8
+   * are dropped rather than reported.
+   */
+  orientation?: number;
+  /**
+   * DISPLAYED pixel dimensions — Orientation already applied, so a photo stored
+   * 4032x3024 with Orientation 6 reports 3024x4032. That is the frame the user
+   * sees, the frame the browser decodes, and the frame the field of view and
+   * the overlay projection are about. The raw stored pair is not reported: two
+   * pixel dimensions that mean different things would be a trap.
+   */
   imageWidthPx?: number;
   imageHeightPx?: number;
-  /** Derived from `focalLength35mmMm`; present only when that was present. */
+  /**
+   * Derived from `focalLength35mmMm` AND the displayed dimensions — both are
+   * needed, because the 36 mm gate angle belongs to the longer displayed axis
+   * and nothing in a focal length says which that is. Absent if either is.
+   */
   hFovDeg?: number;
-  /** Derived from `hFovDeg` and the pixel aspect ratio; needs both. */
+  /** The other half of the same derivation; present exactly when `hFovDeg` is. */
   vFovDeg?: number;
 }
 

@@ -10,8 +10,22 @@
  * headings or nothing at all.
  */
 
-export { extractPhotoExif, normaliseBearingDeg, photoExifFromTags, type ExifInput } from './extract';
-export { FULL_FRAME_WIDTH_MM, hFovDegFromFocalLength35mm, vFovDegFromHFov } from './fov';
+export {
+  extractPhotoExif,
+  normaliseBearingDeg,
+  orientationTransposes,
+  photoExifFromTags,
+  type ExifInput,
+} from './extract';
+export {
+  FULL_FRAME_HEIGHT_MM,
+  FULL_FRAME_WIDTH_MM,
+  fovDegFromFocalLength35mm,
+  hFovDegFromFocalLength35mm,
+  longSideFovDegFromFocalLength35mm,
+  vFovDegFromHFov,
+  type FieldOfViewDeg,
+} from './fov';
 export { resolvePose, STANDARD_DEFAULTS, type PoseResolution } from './resolve';
 export {
   POSE_FIELDS,

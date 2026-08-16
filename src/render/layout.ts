@@ -16,10 +16,14 @@
  * overlap is the default outcome, and avoiding it is a designed behaviour with
  * a stated rule rather than a lucky one:
  *
- * 1. Markers are placed in a **deterministic order**: left to right by
- *    projected summit x, ties broken by peak id. Deterministic ordering is the
- *    whole game — the same scene must lay out identically every run, or a
- *    snapshot test is worthless and a rendered PNG is unreproducible.
+ * 1. Markers are placed in a **deterministic order**: by apparent height,
+ *    highest first, ties broken by elevation and then by peak id (see
+ *    {@link compareLabelPriority}). Deterministic ordering is the whole game —
+ *    the same scene must lay out identically every run, or a snapshot test is
+ *    worthless and a rendered PNG is unreproducible. Priority rather than
+ *    left-to-right so that the summit dominating the view gets first claim on
+ *    the space around it; the *returned* markers are then sorted left to right,
+ *    which is the reading order of the picture.
  * 2. Each marker gets a **reserved box**: the label's estimated extent plus
  *    padding, centred on its pole and clamped inside the frame margins.
  * 3. A marker takes the **first free candidate placement** from a fixed list:
@@ -36,15 +40,20 @@
  *    instead of trusting the arithmetic — the search simply moves to the next
  *    level, and a level can be skipped. What is guaranteed is the *outcome*
  *    (disjoint boxes), never a particular level index.
- * 5. If nothing is free, the marker is placed at its first in-frame candidate
- *    and flagged `overlapped`. The overlay never drops a peak to keep itself
- *    tidy — losing a summit would be a lie about what is in the photograph —
- *    it reports the crowding instead.
+ * 5. If nothing is free, the label is **withheld**: the summit keeps its dot,
+ *    joins `crowdedOutSummits`, and is counted on the image. The overlay still
+ *    never drops a peak — losing a summit silently would be a lie about what is
+ *    in the photograph — but "not lost" now means *reported*, not *drawn on top
+ *    of a neighbour*. Drawing it there costs the legible label underneath and
+ *    buys nothing the count does not already give. `overlapped` survives for
+ *    one case only, and it is not crowding: a frame with no room for the label
+ *    ANYWHERE (a label taller than the photo), where withholding would empty an
+ *    overlay that has peaks in it.
  *
  * The consequence is a visible signature that tests assert on directly: a
  * cluster of near-collinear peaks comes out as a staircase of pole lengths
- * (with the occasional skipped rung), and two peaks far apart in x both stay
- * at level 0.
+ * ordered by apparent height (with the occasional skipped rung), and two peaks
+ * far apart in x both stay at level 0.
  *
  * ## What real peak density did to that, and the two rules added for it
  *
@@ -75,14 +84,17 @@
  *    dotted-and-reported, off-frame-and-reported, or refused by D8 and
  *    reported, and the four lists partition the input exactly.
  *
- * Rule 5 — place it anyway and flag `overlapped` — is untouched **below**
- * capacity. Above it, a marker that finds no free candidate is moved to
- * `crowdedOutSummits` instead. That is not a reversal of rule 5 but its
- * extension: rule 5 exists because losing a name silently is a lie, and above
- * capacity the name is not lost silently — the frame is already saying, on its
- * own face, that it is withholding names. What an overlapping label would buy
- * at that point is one unreadable name at the cost of the readable one
- * underneath it.
+ * Rule 5 used to read "place it anyway and flag `overlapped`", and that was
+ * right when it was written: there was no channel through which a withheld name
+ * could be reported, so an overlapping label was the only alternative to a
+ * silent disappearance. `crowdedOutSummits` and the count drawn on the image
+ * are that channel, so the reason has gone and the rule now withholds — and it
+ * withholds **uniformly**, not only above capacity. Making it conditional was
+ * measurably worse than either alternative: on the Gornergrat sweep, a frame of
+ * 30 summits at heading 40° came out with 9 mutually colliding labels while a
+ * fuller frame of 43 at heading 35° came out clean, because only the fuller one
+ * crossed the threshold. A slightly emptier view must not render worse than a
+ * fuller one.
  *
  * The ranking (see {@link compareLabelPriority}) is **apparent height** — the
  * altitude angle the summit rides at, which is the one quantity that combines
@@ -531,8 +543,7 @@ export function layoutOverlay(
 
   const crowdedOutSummits: UnlabelledSummit[] = [];
   let labelled = sightings;
-  const overCapacity = sightings.length > budget;
-  if (overCapacity) {
+  if (sightings.length > budget) {
     const ranked = [...sightings].sort((a, b) => compareLabelPriority(a.peak, b.peak));
     labelled = ranked.slice(0, budget);
     for (const sighting of ranked.slice(budget)) {
@@ -544,16 +555,18 @@ export function layoutOverlay(
     }
   }
 
-  // Deterministic placement order: left to right, ties broken by id with a
-  // plain code-unit comparison (never `localeCompare`, whose ordering depends
-  // on the host's locale data and would make the same scene lay out
-  // differently on a different machine).
-  const placement = [...labelled].sort((a, b) => {
-    if (a.summitPx.xPx !== b.summitPx.xPx) return a.summitPx.xPx - b.summitPx.xPx;
-    if (a.peak.id < b.peak.id) return -1;
-    if (a.peak.id > b.peak.id) return 1;
-    return 0;
-  });
+  // Placement order is PRIORITY order: the summit that dominates the view gets
+  // first claim on the space around it. Left to right was the old order, and it
+  // handed the space to whatever happened to sit further west — so a 4 219 m
+  // peak could lose its label to a jammed column beside it while a 3 250 m bump
+  // kept one. Which is not a defensible thing to tell someone about their
+  // photograph.
+  //
+  // `compareLabelPriority` ends in a plain code-unit comparison of the id —
+  // never `localeCompare`, whose ordering depends on the host's locale data —
+  // so the order is total, is fixed by the peaks themselves, and cannot depend
+  // on the order the database happened to return them in.
+  const placement = [...labelled].sort((a, b) => compareLabelPriority(a.peak, b.peak));
 
   const levels = reachableStackLevels(resolved);
   const directions: readonly LabelDirection[] = ['up', 'down'];
@@ -576,12 +589,11 @@ export function layoutOverlay(
       if (chosen !== undefined) break;
     }
 
-    if (chosen === undefined && overCapacity) {
-      // Over capacity the frame has already said on its own face that it is
-      // withholding names, so one more unnamed dot costs nothing that is not
-      // already paid for — whereas drawing this label would take a legible
-      // neighbour down with it. Under capacity no such admission exists and the
-      // older rule stands: the marker is drawn anyway and flagged `overlapped`.
+    if (chosen === undefined && fallback !== undefined) {
+      // There was room in the frame, and it was taken. Withhold the name: the
+      // summit keeps its dot, joins `crowdedOutSummits` and is counted on the
+      // image, so nothing has gone missing — and the legible label already
+      // occupying that space keeps being legible.
       crowdedOutSummits.push({
         peak: sighting.peak,
         summitPx: sighting.summitPx,
@@ -590,9 +602,12 @@ export function layoutOverlay(
       continue;
     }
 
-    // Nothing fitted in the frame at all (a label taller than the photo, or
-    // margins that swallow it): fall back to the clamped level-0 placement,
-    // which is always defined.
+    // `fallback === undefined` is a different failure entirely: not a full
+    // frame but a frame with no room for this label ANYWHERE — a label taller
+    // than the photo, or margins that swallow it. Withholding here would empty
+    // the overlay of a scene that has peaks in it, so the marker is drawn at
+    // the clamped level-0 placement and flagged `overlapped`. That is now the
+    // only thing the flag means: degenerate geometry, never crowding.
     const candidate =
       chosen ?? fallback ?? makeCandidate(sighting, 'up', 0, scene, resolved);
     markers.push(markerFromCandidate(sighting, candidate, chosen === undefined, resolved));
@@ -603,6 +618,17 @@ export function layoutOverlay(
   // or at placement: highest-riding first, so a caller naming a few names the
   // ones a viewer is most likely to be pointing at.
   crowdedOutSummits.sort((a, b) => compareLabelPriority(a.peak, b.peak));
+
+  // Placement order was a resource-allocation decision; report order is a
+  // presentation one. Markers come back left to right — the reading order of
+  // the picture, and the order a caller's "which peaks are in this photo?" list
+  // wants to be in — with the same locale-free id tie-break.
+  markers.sort((a, b) => {
+    if (a.summitPx.xPx !== b.summitPx.xPx) return a.summitPx.xPx - b.summitPx.xPx;
+    if (a.peak.id < b.peak.id) return -1;
+    if (a.peak.id > b.peak.id) return 1;
+    return 0;
+  });
 
   return {
     widthPx: scene.widthPx,

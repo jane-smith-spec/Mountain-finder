@@ -29,7 +29,14 @@
  * of radar data, and which tiles a deployment wants is a deployment decision.
  * A built app with nothing at /terrain/ says so plainly — the store raises "no
  * terrain index at /terrain/manifest.json", the app shows it, and no overlay is
- * drawn. Deploy by serving a tile directory at that path.
+ * drawn.
+ *
+ * `npm run package:deploy` (scripts/package-deploy.ts) is the step that fills
+ * that directory for a deployment. It calls `buildTerrainManifest` below rather
+ * than listing the tiles again, so a packaged app serves exactly what this
+ * plugin serves — including the synthetic-tile exclusion above, which is a rule
+ * and not a per-server preference. docs/DEPLOY.md has the sizes and the
+ * self-check.
  */
 
 import { createReadStream } from 'node:fs';

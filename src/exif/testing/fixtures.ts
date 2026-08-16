@@ -15,6 +15,9 @@
  *                   aspect, direction with no reference tag
  *   gornergrat      complete metadata over terrain this repository HOLDS, so the
  *                   whole app — EXIF, pipeline, renderer, export — runs on it
+ *   portrait-o6     stored landscape, DISPLAYED portrait (Orientation 6): the
+ *                   rotated-phone case, and the only fixture whose Orientation
+ *                   is not 1
  *   stripped        a valid JPEG with no EXIF whatsoever (the messaging-app case)
  */
 
@@ -281,6 +284,79 @@ const GORNERGRAT: PhotoFixture = {
   },
 };
 
+/**
+ * THE ROTATED PHONE PHOTO — stored landscape, DISPLAYED portrait.
+ *
+ * Every other fixture pins `Orientation = 1`, which is why nothing in the suite
+ * could see that the tag was never read at all (adversarial review 2,
+ * finding 3). A phone held upright writes its sensor's native landscape frame
+ * to disk and records `Orientation = 6` ("rotate 90° clockwise to display"), so
+ * the file says 800 x 600 while the picture is 600 x 800.
+ *
+ * That distinction decides the field of view. The 35 mm gate is 36 x 24 mm and
+ * `FocalLengthIn35mmFormat` prices the LONG side of it, so 26 mm equivalent
+ * means 2·atan(18/26) = 69.39030706246794° across the long side of the frame —
+ * which here is the frame's HEIGHT:
+ *
+ *   vFOV = 69.39030706246794°
+ *   tan(hFOV/2) = tan(vFOV/2) · (600/800) = (9/13)·0.75 = 0.51923076923…
+ *   hFOV = 2·atan(0.51923076923…) = 54.87945589639861°
+ *
+ * Applying the 36 mm angle to the width instead — what the extractor did before
+ * — gives 69.39° of horizontal view for a photo that has 54.88°, which is
+ * 12 % of the frame's width of error on a summit 15° off axis.
+ *
+ * Position is the Kerry Park viewpoint, facing 130° true (toward Mount
+ * Rainier), so the fixture is a usable end-to-end photo as well as an
+ * Orientation test.
+ */
+const PORTRAIT_ORIENTATION_6: PhotoFixture = {
+  fileName: 'portrait-orientation-6.jpg',
+  description:
+    'Stored landscape, displayed PORTRAIT via EXIF Orientation 6 — the rotated-phone case no other fixture covers.',
+  authoredNotes: [
+    'Orientation 6 (rotate 90 deg CW to display): stored 800x600, DISPLAYED 600x800',
+    'GPSLatitude  47 deg 37 min 46.20 sec, GPSLatitudeRef N  (47.629500 deg)',
+    'GPSLongitude 122 deg 21 min 35.64 sec, GPSLongitudeRef W (-122.359900 deg)',
+    'GPSAltitude 113 m, GPSAltitudeRef 0 (above sea level)',
+    'GPSImgDirection 130.0, GPSImgDirectionRef T (true north)',
+    'FocalLength 5.1 mm, FocalLengthIn35mmFormat 26 mm',
+    'PixelXDimension 800, PixelYDimension 600 — the STORED frame, before rotation',
+    'Displayed 600x800 -> vFOV 69.39030706246794 deg, hFOV 54.87945589639861 deg',
+  ],
+  spec: {
+    widthPx: 800,
+    heightPx: 600,
+    exif: {
+      ifd0: [
+        ascii(TAG_MAKE, 'MountainFinder'),
+        ascii(TAG_MODEL, 'Fixture Phone'),
+        short(TAG_ORIENTATION, 6),
+      ],
+      exif: [
+        { tag: TAG_FOCAL_LENGTH, value: { type: 'RATIONAL', values: [rational(51, 10)] } },
+        long(TAG_PIXEL_X_DIMENSION, 800),
+        long(TAG_PIXEL_Y_DIMENSION, 600),
+        short(TAG_FOCAL_LENGTH_35MM, 26),
+      ],
+      gps: [
+        byte(TAG_GPS_VERSION_ID, 2, 3, 0, 0),
+        ascii(TAG_GPS_LATITUDE_REF, 'N'),
+        dmsField(TAG_GPS_LATITUDE, { deg: 47, min: 37, sec: 46.2 }),
+        ascii(TAG_GPS_LONGITUDE_REF, 'W'),
+        dmsField(TAG_GPS_LONGITUDE, { deg: 122, min: 21, sec: 35.64 }),
+        byte(TAG_GPS_ALTITUDE_REF, 0),
+        { tag: TAG_GPS_ALTITUDE, value: { type: 'RATIONAL', values: [rational(2260, 20)] } },
+        ascii(TAG_GPS_IMG_DIRECTION_REF, 'T'),
+        {
+          tag: TAG_GPS_IMG_DIRECTION,
+          value: { type: 'RATIONAL', values: [decimalRational(130.0, 1)] },
+        },
+      ],
+    },
+  },
+};
+
 const STRIPPED: PhotoFixture = {
   fileName: 'stripped-no-exif.jpg',
   description: 'A valid JPEG with no EXIF at all — what a messaging app hands you.',
@@ -296,6 +372,7 @@ export const PHOTO_FIXTURES: readonly PhotoFixture[] = [
   ACONCAGUA,
   DEAD_SEA,
   GORNERGRAT,
+  PORTRAIT_ORIENTATION_6,
   STRIPPED,
 ] as const;
 

@@ -2,9 +2,12 @@
  * P3.1 — EXIF extraction.
  *
  * Reads one photo's metadata with `exifr` and normalises it into `PhotoExif`.
- * This module does exactly two things beyond reading tags:
+ * This module does exactly three things beyond reading tags:
  *   1. applies GPSAltitudeRef so a below-sea-level altitude comes out negative;
- *   2. derives hFov/vFov from the 35 mm-equivalent focal length.
+ *   2. applies Orientation, so the reported pixel dimensions are the ones the
+ *      picture is DISPLAYED at rather than the ones it happens to be stored at;
+ *   3. derives hFov/vFov from the 35 mm-equivalent focal length, giving the
+ *      36 mm gate angle to the longer displayed axis (see fov.ts).
  *
  * It deliberately does NOT resolve magnetic headings, invent defaults, or fall
  * back to terrain elevation — that is resolve.ts and the caller's providers.
@@ -15,7 +18,7 @@
 // under plain Node ESM.
 import exifr from 'exifr';
 
-import { hFovDegFromFocalLength35mm, vFovDegFromHFov } from './fov';
+import { fovDegFromFocalLength35mm } from './fov';
 import type { DirectionRef, PhotoExif } from './types';
 
 /** Anything exifr can read. `string` is a filesystem path (Node) or URL (browser). */
@@ -106,6 +109,22 @@ function signedAltitudeM(bag: ExifBag): number | undefined {
 }
 
 /**
+ * EXIF Orientation values that rotate the frame a quarter turn — 5 through 8 —
+ * so the displayed picture is the stored one transposed.
+ *
+ * The eight values pair a rotation with an optional mirror (1 = as stored,
+ * 3 = 180°, 6 = 90° CW, 8 = 90° CCW, and 2/4/5/7 are those with a flip). Only
+ * the quarter turns change which axis is which, and only that matters here: a
+ * mirror leaves both dimensions and both fields of view exactly where they are.
+ */
+const TRANSPOSING_ORIENTATIONS: ReadonlySet<number> = new Set([5, 6, 7, 8]);
+
+/** Whether this Orientation value swaps the frame's width and height. */
+export function orientationTransposes(orientation: number | undefined): boolean {
+  return orientation !== undefined && TRANSPOSING_ORIENTATIONS.has(orientation);
+}
+
+/**
  * Pull the pose-relevant EXIF out of a photo.
  *
  * Missing tags come back as absent properties, never as zeros or guesses.
@@ -147,19 +166,48 @@ export function photoExifFromTags(bag: ExifBag): PhotoExif {
   const focal35 = asNumber(bag['FocalLengthIn35mmFormat']);
   if (focal35 !== undefined && focal35 > 0) result.focalLength35mmMm = focal35;
 
+  // Orientation is an IFD0 SHORT in 1..8. Anything outside that range is not a
+  // value the standard defines, so it is dropped rather than acted on — a
+  // corrupt tag must not silently transpose a photograph.
+  const orientation = asNumber(bag['Orientation']);
+  if (orientation !== undefined && Number.isInteger(orientation)) {
+    if (orientation >= 1 && orientation <= 8) result.orientation = orientation;
+  }
+
   // PixelXDimension / PixelYDimension. ImageWidth / ImageHeight in IFD0 is the
   // second-best source: many cameras leave it describing the thumbnail.
-  const widthPx = asNumber(bag['ExifImageWidth']) ?? asNumber(bag['ImageWidth']);
-  const heightPx = asNumber(bag['ExifImageHeight']) ?? asNumber(bag['ImageHeight']);
+  //
+  // Both describe the STORED frame. What every consumer here wants is the
+  // DISPLAYED frame — the aspect ratio of the picture on screen, which is what
+  // the field of view and the overlay's projection are about — so a
+  // quarter-turn Orientation swaps them. A browser decoding the same file
+  // reports the displayed dimensions too (`image-orientation: from-image` is
+  // the default), so the two agree instead of contradicting each other.
+  const storedWidthPx = asNumber(bag['ExifImageWidth']) ?? asNumber(bag['ImageWidth']);
+  const storedHeightPx = asNumber(bag['ExifImageHeight']) ?? asNumber(bag['ImageHeight']);
+  const transposed = orientationTransposes(result.orientation);
+  const widthPx = transposed ? storedHeightPx : storedWidthPx;
+  const heightPx = transposed ? storedWidthPx : storedHeightPx;
   if (widthPx !== undefined && widthPx > 0) result.imageWidthPx = widthPx;
   if (heightPx !== undefined && heightPx > 0) result.imageHeightPx = heightPx;
 
   if (result.focalLength35mmMm !== undefined) {
-    const hFovDeg = hFovDegFromFocalLength35mm(result.focalLength35mmMm);
-    result.hFovDeg = hFovDeg;
     if (result.imageWidthPx !== undefined && result.imageHeightPx !== undefined) {
-      result.vFovDeg = vFovDegFromHFov(hFovDeg, result.imageWidthPx, result.imageHeightPx);
+      // Both angles together: which one gets the 36 mm gate angle depends on
+      // which displayed axis is longer, so they cannot be derived separately.
+      const fov = fovDegFromFocalLength35mm(
+        result.focalLength35mmMm,
+        result.imageWidthPx,
+        result.imageHeightPx,
+      );
+      result.hFovDeg = fov.hFovDeg;
+      result.vFovDeg = fov.vFovDeg;
     }
+    // With no dimensions there is no way to know which axis the 36 mm angle
+    // belongs to, and guessing "landscape" is what produced the bug this
+    // module was rewritten to fix. The focal length is still reported, so a
+    // caller who learns the dimensions elsewhere — the app decodes the image —
+    // can derive the pair itself.
   }
 
   return result;

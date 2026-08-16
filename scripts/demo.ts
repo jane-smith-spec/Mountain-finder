@@ -353,7 +353,7 @@ function describeOccludedPeak(peak: AnnotatedPeak): void {
     `      ${occlusion.evidence}` +
       (occlusion.crestDistanceKm === undefined
         ? ''
-        : `: first blocked at ${occlusion.crestDistanceKm.toFixed(2)} km by ` +
+        : `: skyline crest at ${occlusion.crestDistanceKm.toFixed(2)} km, ` +
           `${(occlusion.crestElevationM ?? Number.NaN).toFixed(0)} m of ground reaching ` +
           `${deg(occlusion.crestAltitudeDeg ?? Number.NaN)} deg`) +
       (occlusion.colDepthM === undefined
@@ -436,6 +436,12 @@ function report(
   }
   line();
   line(`PEAKS CONSIDERED — ${scene.peaks.length} within ${scene.config.peakRadiusKm} km`);
+  if (scene.unmeasured.length > 0) {
+    line(
+      `  (${scene.unmeasured.length} more were found and NOT judged: their sightlines run past ` +
+        `the terrain this run measured. See WARNINGS.)`,
+    );
+  }
   line();
   line(`  VISIBLE — LABELLED (${scene.visible.length})`);
   if (scene.visible.length === 0) line('    (none)');

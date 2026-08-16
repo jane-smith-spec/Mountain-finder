@@ -83,9 +83,14 @@ function builder(options: { covered?: boolean; peaks?: readonly Peak[] } = {}) {
   return createOverlayBuilder({
     terrain: flatTerrain(options.covered ?? true),
     peaks: new StaticPeakSource(options.peaks ?? [EAST_PEAK, WEST_PEAK]),
-    // A short sweep: the scene is a plane, and 5 km of it settles the horizon
-    // as conclusively as 30 would, in a fraction of the samples.
-    config: { sweep: { maxRangeKm: 5, rangeStepM: 250, bearingStepDeg: 1 } },
+    // A short sweep — but not shorter than the summits it has to judge. It
+    // used to stop at 5 km, on the grounds that 5 km of a plane settles the
+    // horizon as conclusively as 30 would. True of THIS terrain, and not
+    // something the pipeline can know from inside: since review 2's finding 2
+    // it refuses to call a 10 km summit visible off 5 km of measured ground,
+    // which is the whole point. 12 km covers both summits and still costs a
+    // fraction of the default sweep's samples.
+    config: { sweep: { maxRangeKm: 12, rangeStepM: 250, bearingStepDeg: 1 } },
   });
 }
 

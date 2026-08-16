@@ -226,6 +226,11 @@ function groundElevationCandidateFromExif(
 function hFovCandidateFromExif(exif: PhotoExif): Candidate {
   const hFovDeg = finite(exif.hFovDeg);
   if (hFovDeg !== undefined) return { value: hFovDeg };
+  // A 35 mm equivalent with no pixel dimensions is not a missing focal length:
+  // the angle is known, but which axis of the photograph it spans is not, and
+  // assuming landscape is the bug this stopped doing (review 2, finding 3).
+  // Name the thing that is actually absent, so the UI asks for the right one.
+  if (exif.focalLength35mmMm !== undefined) return { blockedReason: 'image-dimensions-unknown' };
   return {
     blockedReason:
       exif.focalLengthMm !== undefined ? 'no-35mm-equivalent-focal-length' : 'absent-from-exif',

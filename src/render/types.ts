@@ -162,8 +162,8 @@ export interface UnlabelledSummit {
  *
  * `stackLevel` and `direction` are part of the public shape on purpose. Label
  * collision avoidance is a *behaviour* this renderer promises, so the tests
- * assert on the decision itself ("the second peak in this cluster went to level
- * 1") and not merely on the pixel side effects of it.
+ * assert on the decision itself ("the second-highest peak in this cluster went
+ * to level 1") and not merely on the pixel side effects of it.
  */
 export interface PeakMarker {
   peak: OverlayPeak;
@@ -183,9 +183,15 @@ export interface PeakMarker {
   stackLevel: number;
   direction: LabelDirection;
   /**
-   * True when no candidate placement was free and the marker had to be placed
-   * on top of an existing label. Surfaced rather than hidden so a caller (or a
-   * test) can tell "there was room" from "the sky was full".
+   * True when the frame had no room for this label ANYWHERE — a label taller
+   * than the photograph, or margins that swallow it — so it was placed at the
+   * clamped level-0 position and may sit on another.
+   *
+   * **This is no longer how crowding is reported.** A label that lost to a
+   * neighbour is withheld, not overlapped: see
+   * {@link OverlayLayout.crowdedOutSummits}. What remains here is degenerate
+   * geometry, where withholding would empty an overlay that has peaks in it.
+   * For every frame of a real photograph this is `false`.
    */
   overlapped: boolean;
   /**

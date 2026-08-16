@@ -50,6 +50,8 @@ photo (JPEG)
 | `npm run test:acceptance` | ground-truth cases; a pass means the *yardstick* is sound |
 | `npm run demo -- <case>` | runs a real case end to end and writes `out/annotated.png` — the human-viewable proof |
 | `npm run build` | typecheck + production bundle |
+| `npm run package:deploy` | assembles `dist/terrain/` + `dist/peaks/` — a deployable static directory |
+| `npm run test:deploy` | the built bundle behind a plain static server, no Vite: [docs/DEPLOY.md](docs/DEPLOY.md) |
 | `npm run fetch:tiles` | acquisition only: pulls SRTM tiles from AWS Open Data |
 
 ## How the browser gets terrain
@@ -65,8 +67,16 @@ During `npm run dev` / `npm run preview` that directory is published by
 tiles from `data/tiles/` (gitignored, fetched on demand) and the committed
 real-SRTM case windows from `fixtures/tiles/cases/`. Synthetic test tiles are
 deliberately never served — invented mountains at real coordinates is the exact
-failure mode this project exists to avoid. A production deployment serves its
-own tile directory at `/terrain/`.
+failure mode this project exists to avoid.
+
+A production build ships no terrain, because which square degrees a deployment
+wants is a deployment decision. `npm run package:deploy` assembles the directory
+it does want — the same index, the same grids, hard-linked out of `data/tiles/`
+and `fixtures/tiles/cases/` — into `dist/terrain/`, and `npm run test:deploy`
+drives the result in Chromium behind a plain static file server with no Vite in
+the process. One alpine tile costs 25.93 MB, or 16.35 MB gzipped, per session.
+[docs/DEPLOY.md](docs/DEPLOY.md) has the numbers, the server settings, and the
+attribution obligations.
 
 Where the app has no terrain it says so specifically — which tile is missing,
 what it holds instead, and the command that fixes it — and draws nothing. An

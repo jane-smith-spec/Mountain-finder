@@ -108,6 +108,59 @@ Thirteen of fifteen heights agree exactly or within 2 m. What the exceptions mea
   Sentinel Dome are broad tops. `own-estimate-sentinel-dome` was already flagged
   in this file as the weakest coordinate in the set, and Overture agrees with it
   to 200 m, which is neither confirmation nor refutation.
+### Re-checked against the committed regions (2026-08-16, second pass)
+
+The first pass compared against a live import held in memory. All four regions
+are now committed under `regions/` (california, cascades, fort-william,
+zermatt), so the same comparison was re-run **against the bytes in this
+repository** and every row above reproduces exactly. Asking a second question of
+the same data — *which Overture summit is NEAREST to each cited coordinate,
+whatever it is called* — sharpens three of the conflicts and adds none:
+
+| cited summit | cited coord | nearest Overture node | distance | reading |
+|---|---|---|---|---|
+| **Mount Tamalpais East Peak** | 37.923922, −122.596644 | **`Mount Tamalpais West Peak`, 778 m** | **20.4 m** | the cited coordinate is OSM's **West** Peak, not the East Peak |
+| **Mount Hamilton** | 37.341722, −121.642833 | `Mount Hamilton`, 1279 m | 23.1 m | but `Observatory Peak`, **1298 m**, is 37 m away |
+| **Mount Rainier** | 46.852886, −121.760374 | **`Columbia Crest`, 4392 m** | **3.3 m** | the node named `Mount Rainier` is the one 230 m away |
+
+* **Mount Tamalpais is now a much sharper conflict, and still not resolved
+  here.** The cited record pairs the *East* Peak's name and its height (784 m,
+  which is exactly OSM's East Peak `ele`) with a coordinate that sits 20 m from
+  OSM's *West* Peak (778 m) and 1 754 m from OSM's East Peak. Two independent
+  readings of the same mountain do not disagree by 1.75 km by accident; the most
+  likely explanation is that the cited coordinate was read off the wrong summit
+  of a three-summit ridge. **The cited value still wins by default** — it has a
+  source and this environment cannot reach a better one — but nothing should
+  assert on Mount Tamalpais's *position* until someone checks it against a
+  gazetteer. Its height is not in doubt.
+* **Mount Hamilton's −21 m is probably a summit-vs-observatory split, not a
+  datum error.** OSM carries two nodes 40 m apart: `Mount Hamilton` 1 279 m and
+  `Observatory Peak` 1 298 m. The cited 1 300 m (4 265 ft) is within 2 m of the
+  *latter*. So the disagreement is most likely about which point on the summit
+  ridge the name attaches to. Reported, not reconciled: picking one would be
+  choosing a source, which is exactly what this table exists to avoid.
+* **Mount Rainier's 230 m is a two-node naming split.** The cited coordinate
+  lands 3.3 m from OSM's `Columbia Crest` — the true summit — while the node
+  named `Mount Rainier` sits 230 m away at the same 4 392 m. Nothing here is
+  wrong; a name lookup just picks the further of two nodes for the same
+  mountain, and a renderer draws both.
+
+**One mountain, many nodes — the density finding.** The same query shows how
+often a single mountain arrives as a cluster of summit nodes: Matterhorn 4
+(Épaule de Furggen, Picco Muzio, Pic Tyndall within 445 m), Mount Hamilton 5,
+Dufourspitze 3, Mount Diablo 3, Mount Rainier 2, Half Dome 2. This is not an
+import bug — every one is a genuinely named point in OSM — but it is why the
+regenerated demo images stack four labels on the Matterhorn and eight around
+Rainier, and it belongs in whatever eventually decides which summits are worth
+naming in a frame.
+
+**Name lookups are worse than the Breithorn case suggested.** `Cow Hill` is
+287 m in Lochaber and 989 m in Santa Clara County, California — two of the
+regions committed here. Within one region, California alone holds 306 repeated
+names (36 × `Bald Mountain`, 36 × `Sugarloaf`, 25 × `Red Mountain`); the
+Cascades hold 164 and Lochaber 48. `LocalPeakStore.byName` returning an array is
+not a formality.
+
 * **"Breithorn" is a naming conflict, not a data one.** OSM names the 4164 m
   west summit `Breithorn Occidentale / Westgipfel`; this file calls it
   `Breithorn`. Same height, 36 m apart. Worse, the imported Valais region

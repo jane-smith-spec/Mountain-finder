@@ -336,9 +336,9 @@ describe('layoutOverlay — label collision avoidance', () => {
     //
     // Both peaks at Δ = 15.0°, so their boxes coincide horizontally.
     //     Alpha (α 3.0°) → y 524.820,  L0 → 414.72…461.82   free  → level 0
-    //     Beta  (α 2.5°) → y 537.367,  L0 → 427.27…474.37   hits Alpha
-    //                                  L1 → 376.27…423.37   hits Alpha by 8.65 px
-    //                                  L2 → 325.27…372.37   free  → level 2
+    //     Beta  (α 2.5°) → y 537.36747, L0 → 427.27…474.37  hits Alpha
+    //                                   L1 → 376.27…423.37  hits Alpha by 8.65 px
+    //                                   L2 → 325.27…372.37  free  → level 2
     // Level 1 is skipped.
     const layout = layoutOverlay(
       scene({
@@ -351,7 +351,8 @@ describe('layoutOverlay — label collision avoidance', () => {
     );
 
     expect(markerNamed(layout.markers, 'Alpha').stackLevel).toBe(0);
-    expect(markerNamed(layout.markers, 'Beta').summitPx.yPx).toBeCloseTo(537.36736, 4);
+    // tan2.5° / cos15° / (2·tan30°·0.75) = 0.052193773 → y = 0.447806227.
+    expect(markerNamed(layout.markers, 'Beta').summitPx.yPx).toBeCloseTo(537.36747, 4);
     expect(markerNamed(layout.markers, 'Beta').stackLevel).toBe(2);
     expect(
       rectsOverlap(
@@ -433,25 +434,44 @@ describe('layoutOverlay — label collision avoidance', () => {
     expect(rectsOverlap(alpha.labelBoxPx, bravo.labelBoxPx)).toBe(false);
   });
 
-  it('flags overlap rather than dropping a peak when nothing is free', () => {
+  it('accounts for a peak it cannot place rather than burying a neighbour', () => {
     // Three coincident peaks with one level in each direction: the third has
-    // nowhere left to go. It is still drawn — losing a summit to keep the
-    // overlay tidy would be a lie about what is in the photograph — and the
-    // crowding is reported instead.
-    const layout = layoutOverlay(
-      scene({
-        peaks: [
-          peak({ id: 'node/1', name: 'Alpha', bearingDeg: 105.0 }),
-          peak({ id: 'node/2', name: 'Bravo', bearingDeg: 105.05 }),
-          peak({ id: 'node/3', name: 'Charlie', bearingDeg: 105.1 }),
-        ],
-      }),
-      { ...PINNED, maxStackLevels: 1 },
-    );
-    expect(layout.markers).toHaveLength(3);
-    expect(markerNamed(layout.markers, 'Alpha').overlapped).toBe(false);
-    expect(markerNamed(layout.markers, 'Bravo').overlapped).toBe(false);
-    expect(markerNamed(layout.markers, 'Charlie').overlapped).toBe(true);
+    // nowhere left to go.
+    //
+    // This test formerly asserted the opposite — that the third was DRAWN, on
+    // top of its neighbour, and flagged `overlapped`. That was the right answer
+    // when it was written, because there was no channel through which a
+    // withheld name could be reported, and a name that silently vanishes is a
+    // lie about what is in the photograph. `crowdedOutSummits` and the count
+    // drawn on the image are that channel, so the reason for drawing an
+    // illegible label has gone: it now costs the legible label underneath it
+    // and buys nothing that the count does not.
+    //
+    // What the old test was protecting — nothing disappears unaccounted for —
+    // is asserted here in full, and more strictly than before.
+    const peaks = [
+      peak({ id: 'node/1', name: 'Alpha', bearingDeg: 105.0 }),
+      peak({ id: 'node/2', name: 'Bravo', bearingDeg: 105.05 }),
+      peak({ id: 'node/3', name: 'Charlie', bearingDeg: 105.1 }),
+    ];
+    const layout = layoutOverlay(scene({ peaks }), { ...PINNED, maxStackLevels: 1 });
+
+    expect(layout.markers.map((m) => m.nameText)).toEqual(['Alpha', 'Bravo']);
+    expect(layout.markers.every((m) => !m.overlapped)).toBe(true);
+    expect(layout.crowdedOutSummits.map((entry) => entry.peak.name)).toEqual(['Charlie']);
+    // Nothing lost: every peak is in exactly one of the four exit lists.
+    expect(
+      layout.markers.length +
+        layout.crowdedOutSummits.length +
+        layout.offFramePeaks.length +
+        layout.foregroundOccludedPeaks.length,
+    ).toBe(peaks.length);
+    // …and the summit that lost its name still has its dot, at its own
+    // projected position (Δ = 15.1°, α = 3°, from the closed form at the top of
+    // this file), so the picture does not pretend it is not there.
+    const charlie = expectedPx(15.1, 3);
+    expect(layout.crowdedOutSummits[0]?.summitPx.xPx).toBeCloseTo(charlie.xPx, 6);
+    expect(layout.crowdedOutSummits[0]?.summitPx.yPx).toBeCloseTo(charlie.yPx, 6);
   });
 
   it('hangs the label below a summit that sits too near the top edge', () => {
@@ -789,11 +809,17 @@ describe('layoutOverlay — real peak density', () => {
       maxLabels: 8,
     });
 
-    expect(layout.markers).toHaveLength(8);
+    // Three levels up plus three down is six slots for eight peaks, so two are
+    // dotted rather than stacked past the budget. Nothing is lost either way.
+    expect(layout.markers).toHaveLength(6);
+    expect(layout.crowdedOutSummits).toHaveLength(2);
     for (const marker of layout.markers) {
       expect(marker.stackLevel).toBeLessThanOrEqual(2);
       expect(60 + marker.stackLevel * 51).toBeLessThanOrEqual(200);
     }
+    // The two that lost are the two lowest in the view, because placement runs
+    // highest-first: α 3.7 … 3.0 descending with the index.
+    expect(layout.crowdedOutSummits.map((entry) => entry.peak.name)).toEqual(['P6', 'P7']);
   });
 
   it('derives a label budget from how many boxes the frame holds', () => {
@@ -972,14 +998,15 @@ describe('resolveOverlayOptions — crowding', () => {
 });
 
 /**
- * ## Over capacity, an unreadable label is worse than a counted dot
+ * ## Two ways to lose a name, one rule
  *
- * Below capacity the renderer never loses a name to tidiness: the third of
- * three coincident peaks is drawn on top of its neighbour and flagged
- * `overlapped` (see the test of that name above, which still stands). Above
- * capacity the frame has *already told the reader* it is withholding names — it
- * says so on the image — so stacking one illegible label over another buys
- * nothing that adding it to the count does not, and costs the label underneath.
+ * A summit can fail to get a label either because the frame's budget was spent
+ * before its turn came, or because its own neighbourhood was full when it was
+ * placed. Both outcomes are the same outcome — a dot, a place in
+ * `crowdedOutSummits`, and a line on the image — and the rule does not care
+ * which happened or whether the budget was binding at the time. That uniformity
+ * is the point: a frame of 20 summits and a frame of 74 obey the same
+ * guarantee, so a slightly emptier view cannot come out worse than a fuller one.
  *
  * The fixture: four peaks within 0.15° of bearing, one stack level in each
  * direction, and a budget of three.
@@ -989,10 +1016,10 @@ describe('resolveOverlayOptions — crowding', () => {
  *   • Bravo's level-0 up box (527.315 − 110.1 → 417.22…464.32) hits Alpha's, so
  *     it hangs below: 527.315 + 60 + 3 → box 590.32…637.42.
  *   • Charlie's two candidates are 419.72…466.82 (hits Alpha) and
- *     592.82…639.92 (hits Bravo). Nothing is free, and the frame is over
- *     capacity, so Charlie joins the dotted summits.
+ *     592.82…639.92 (hits Bravo). Nothing is free, so Charlie joins the dotted
+ *     summits — the same place Delta went, by the other route.
  */
-describe('layoutOverlay — over capacity', () => {
+describe('layoutOverlay — summits that lose their name', () => {
   const CROWDED_PEAKS: readonly VisiblePeak[] = [
     peak({ id: 'node/1', name: 'Alpha', bearingDeg: 105.0, altitudeDeg: 3.0 }),
     peak({ id: 'node/2', name: 'Bravo', bearingDeg: 105.05, altitudeDeg: 2.9 }),
@@ -1000,7 +1027,7 @@ describe('layoutOverlay — over capacity', () => {
     peak({ id: 'node/4', name: 'Delta', bearingDeg: 105.15, altitudeDeg: 2.7 }),
   ];
 
-  it('marks a summit it cannot place rather than burying a neighbour', () => {
+  it('reports a budget loss and a placement loss in the same list', () => {
     const layout = layoutOverlay(scene({ peaks: [...CROWDED_PEAKS] }), {
       ...PINNED,
       maxStackLevels: 1,
@@ -1017,15 +1044,32 @@ describe('layoutOverlay — over capacity', () => {
     ]);
   });
 
-  it('still never drops a name while the frame is under capacity', () => {
-    // The same three peaks with the budget switched off behave exactly as they
-    // always did: all three drawn, the last one flagged.
+  it('applies the same rule with the budget nowhere near binding', () => {
+    // The same three peaks with a budget of 32 that cannot possibly bind. The
+    // outcome is identical to the crowded case: Charlie is dotted and counted,
+    // never drawn over Bravo. A frame is not allowed to behave one way at 3
+    // summits and another at 30.
     const layout = layoutOverlay(scene({ peaks: CROWDED_PEAKS.slice(0, 3) }), {
       ...PINNED,
       maxStackLevels: 1,
+      maxLabels: 32,
     });
-    expect(layout.markers).toHaveLength(3);
-    expect(markerNamed(layout.markers, 'Charlie').overlapped).toBe(true);
+    expect(layout.markers.map((marker) => marker.nameText)).toEqual(['Alpha', 'Bravo']);
+    expect(layout.markers.every((marker) => !marker.overlapped)).toBe(true);
+    expect(layout.crowdedOutSummits.map((entry) => entry.peak.name)).toEqual(['Charlie']);
+  });
+
+  it('still draws a label when the frame is too small to place one properly', () => {
+    // The one surviving use of `overlapped`, and it is not about crowding: a
+    // frame so short that NO candidate fits without being clamped. Withholding
+    // here would empty the overlay of a scene that has one peak in it, so the
+    // marker is drawn at the clamped level-0 placement and flagged.
+    const layout = layoutOverlay(
+      scene({ widthPx: 400, heightPx: 90, peaks: [peak({ id: 'node/1', name: 'Alpha' })] }),
+      PINNED,
+    );
+    expect(layout.markers).toHaveLength(1);
+    expect(layout.markers[0]?.overlapped).toBe(true);
     expect(layout.crowdedOutSummits).toHaveLength(0);
   });
 });

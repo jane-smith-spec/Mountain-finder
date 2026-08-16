@@ -51,6 +51,19 @@ The Gornergrat ground-truth viewpoint: complete metadata over terrain this repos
 - FocalLength 4.5 mm, FocalLengthIn35mmFormat 28 mm -> hFOV 65.4704525442152 deg
 - PixelXDimension 1200, PixelYDimension 900 (4:3 landscape)
 
+## portrait-orientation-6.jpg
+
+Stored landscape, displayed PORTRAIT via EXIF Orientation 6 — the rotated-phone case no other fixture covers.
+
+- Orientation 6 (rotate 90 deg CW to display): stored 800x600, DISPLAYED 600x800
+- GPSLatitude  47 deg 37 min 46.20 sec, GPSLatitudeRef N  (47.629500 deg)
+- GPSLongitude 122 deg 21 min 35.64 sec, GPSLongitudeRef W (-122.359900 deg)
+- GPSAltitude 113 m, GPSAltitudeRef 0 (above sea level)
+- GPSImgDirection 130.0, GPSImgDirectionRef T (true north)
+- FocalLength 5.1 mm, FocalLengthIn35mmFormat 26 mm
+- PixelXDimension 800, PixelYDimension 600 — the STORED frame, before rotation
+- Displayed 600x800 -> vFOV 69.39030706246794 deg, hFOV 54.87945589639861 deg
+
 ## stripped-no-exif.jpg
 
 A valid JPEG with no EXIF at all — what a messaging app hands you.

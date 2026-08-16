@@ -68,7 +68,23 @@ export const APP_SWEEP: Pick<SweepConfig, 'bearingStepDeg' | 'rangeStepM' | 'max
   maxRangeKm: 30,
 };
 
-/** How far out summits are looked for. */
+/**
+ * How far out summits are looked for.
+ *
+ * Larger than `APP_SWEEP.maxRangeKm` on purpose, and no longer a silent
+ * over-claim (review 2, finding 2): the pipeline refuses a verdict on any peak
+ * whose sightline it did not measure to the end, so a summit at 97 km comes
+ * back in `scene.unmeasured` and is reported by `buildNotes` below rather than
+ * drawn. Looking wide and refusing out loud is the useful half of the
+ * asymmetry — it turns "the app has no terrain out there" into a note the user
+ * can act on, where a narrow radius would simply never mention the mountain.
+ *
+ * The sweep stays at 30 km rather than growing to match: past that the app
+ * would be sampling tiles it does not serve, which converts an honest refusal
+ * into a ray full of holes and buys no answers. A deployment that does hold
+ * 200 km of tiles raises `maxRangeKm` and gets real verdicts automatically,
+ * because the refusal is keyed to terrain that was MEASURED, not to this number.
+ */
 export const APP_PEAK_RADIUS_KM = 200;
 
 /** Raised when the app holds no elevation data where the photo was taken. */
@@ -152,8 +168,9 @@ function buildNotes(
   scene: {
     readonly peaks: readonly { readonly name: string }[];
     readonly foregroundOccluded: readonly { readonly name: string }[];
+    readonly unmeasured: readonly { readonly name: string }[];
     readonly sweep: { readonly raysRequested: number; readonly raysWithTerrain: number };
-    readonly config: { readonly peakRadiusKm: number };
+    readonly config: { readonly peakRadiusKm: number; readonly sweep: { readonly maxRangeKm: number } };
   },
   layout: OverlayLayout,
   at: LatLng,
@@ -179,6 +196,18 @@ function buildNotes(
       `${scene.foregroundOccluded.length} summit${scene.foregroundOccluded.length === 1 ? ' is' : 's are'} ` +
         `hidden behind nearer, different hills and ${scene.foregroundOccluded.length === 1 ? 'is' : 'are'} ` +
         `never labelled: ${nameList(scene.foregroundOccluded.map((peak) => peak.name))}.`,
+    );
+  }
+  if (scene.unmeasured.length > 0) {
+    // Not drawn and not claimed either way. Saying so is the point: these are
+    // the long-range summits the app used to label off a fraction of their
+    // sightline, and a user who sees the name can widen the terrain rather than
+    // wonder why a mountain they can see is missing.
+    notes.push(
+      `${scene.unmeasured.length} summit${scene.unmeasured.length === 1 ? '' : 's'} stand ` +
+        `farther out than the ${scene.config.sweep.maxRangeKm} km terrain sweep measured, so ` +
+        `${scene.unmeasured.length === 1 ? 'it is' : 'they are'} neither labelled nor ruled out: ` +
+        `${nameList(scene.unmeasured.map((peak) => peak.name))}.`,
     );
   }
   const blindRays = scene.sweep.raysRequested - scene.sweep.raysWithTerrain;

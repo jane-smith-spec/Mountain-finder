@@ -39,6 +39,63 @@ without opening one.
 It covers the Gornergrat acceptance viewpoint and the two SRTM tiles the
 repository already holds terrain for.
 
+## `california/`
+
+| | |
+|---|---|
+| Area | 36.4…41.0 N, −123.6…−119.0 W — Bay Area, Diablo Range, Yosemite high country, Lassen |
+| Summits | 3 341 across 24 cells; 266 above 3 000 m |
+| Cost | 16.72 MB fetched of the 29.47 GB release = **0.0567 %** (30 row groups of 5 056, in 2 of 32 parts) |
+| Regenerate | `npm run fetch:peaks -- --bbox 36.4,-123.6,41.0,-119.0 --name california` |
+
+Cut for the `mount-diablo-summit` case, whose must-see summits run from
+Mount Tamalpais at 60 km to Lassen Peak at 292 km. Highest imported: Mount
+Ritter 4 007 m, Mount Lyell 3 993 m, Mount Dana 3 976 m — the Yosemite crest,
+which is what this box's eastern edge (−119.0) cuts through. Mount Whitney and
+Mount Shasta are deliberately **outside** it; a region is sized to its case, not
+to a state.
+
+## `cascades/`
+
+| | |
+|---|---|
+| Area | 45.0…49.2 N, −123.6…−120.4 W — Oregon border to the Canadian border |
+| Summits | 2 717 across 19 cells; 17 above 3 000 m |
+| Cost | 17.67 MB fetched of the 29.47 GB release = **0.0600 %** (54 row groups of 5 056, in 1 of 32 parts) |
+| Regenerate | `npm run fetch:peaks -- --bbox 45.0,-123.6,49.2,-120.4 --name cascades` |
+
+Cut for `kerry-park-seattle` (Rainier 98 km, Baker 160 km, Hood 250 km).
+
+**`class = volcano` is load-bearing here and was verified, not assumed.** The
+big Cascade summits are `natural=volcano` in OSM, and re-running the same
+importer over Rainier's own degree-tenth with `--classes peak` returns 14
+summits — Liberty Cap, Point Success, Columbia Crest, Little Tahoma … and **no
+Mount Rainier**. The volcanoes are in this dataset only because
+`DEFAULT_SUMMIT_CLASSES` carries both classes: Rainier 4 392 m, Adams 3 743 m,
+Hood 3 429 m, Baker 3 287 m, Glacier Peak 3 214 m, Saint Helens 2 549 m
+(post-1980 height, correctly). Lassen Peak 3 187 m is in `california/` for the
+same reason.
+
+## `fort-william/`
+
+| | |
+|---|---|
+| Area | 56.3…57.2 N, −5.7…−4.5 W — Lochaber |
+| Summits | 684 across 4 cells; 95 above 1 000 m |
+| Cost | 5.14 MB fetched of the 29.47 GB release = **0.0175 %** (7 row groups of 5 056, in 1 of 32 parts) |
+| Regenerate | `npm run fetch:peaks -- --region fort-william` |
+
+Highest: Ben Nevis 1 345 m, Aonach Beag 1 234 m, Aonach Mòr 1 221 m, Càrn Mòr
+Dearg 1 220 m — the Ben Nevis massif in the right order, which is the cheapest
+possible check that the box landed where it was aimed.
+
+## Total committed size
+
+`fixtures/peaks/` is **3.3 MB** for all four regions (8 428 summits in 51
+cells): california 1.3 MB, cascades 1.1 MB, zermatt 672 kB, fort-william 268 kB.
+Four regions, not a continent — and every one of them cost less than a tenth of
+a percent of the release to fetch.
+
 ## Where the numbers come from
 
 * **Position** is the midpoint of Overture's `bbox`, which is the point geometry
@@ -52,8 +109,9 @@ repository already holds terrain for.
   which is the honest label in the frozen contract.
 * **A summit with no `ele` tag is dropped, not filled in.** MISSION.md forbids
   taking peak heights from the DEM: SRTM under-reads sharp summits by 250–350 m
-  and displaces them ~320 m. The import counts and prints those drops (285 of
-  them in the Zermatt area).
+  and displaces them ~320 m. The import counts and prints those drops: 285 in
+  the Zermatt area, 871 in Lochaber, 349 in California, 221 in the Cascades.
+  Unnamed summits are dropped and counted the same way (628 / 2 598 / 3 869).
 
 ## These do NOT replace the cited dataset
 
