@@ -2,9 +2,10 @@
 
 Live checklist. Check items only after their self-check has been run and passed (see PLAN.md for each check's definition).
 
-## Phase 0 — Scaffold
-- [ ] P0.1 Vite + React + TS(strict) + vitest + ESLint + Playwright toolchain
-- [ ] P0.2 `check` / `test:e2e` / `test:acceptance` / `demo` scripts wired
+## Phase 0 — Scaffold ✅
+- [x] P0.1 Vite 6 + React 18 + TS(strict, noUncheckedIndexedAccess) + vitest 3 + ESLint 9 + Playwright
+- [x] P0.2 `check` / `test:e2e` / `test:acceptance` / `demo` scripts wired — all five commands verified green
+- [x] `src/core/types.ts` frozen shared contract (separates `elevationM` from `altitudeDeg`)
 
 ## Phase 1 — Geometry core (group A)
 - [ ] P1.1 Geodesy (haversine, bearing, destination, wrap-safe angles)
