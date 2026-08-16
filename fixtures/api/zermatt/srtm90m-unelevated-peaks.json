@@ -1,0 +1,26 @@
+{
+  "note": "HAND-AUTHORED (not a live recording) — see fixtures/api/README.md. OpenTopoData SRTM 90 m readings for the two Zermatt peaks whose OSM tags carry no usable `ele` (Riffelhorn, Unterrothorn), in the order resolvePeakElevations() asks for them. The values sit slightly below the published summit heights, as a 90 m posting genuinely does on a sharp summit.",
+  "request": {
+    "url": "https://api.opentopodata.org/v1/srtm90m?locations=45.981900,7.750000|46.032500,7.777200&interpolation=bilinear",
+    "method": "GET"
+  },
+  "response": {
+    "status": 200,
+    "headers": { "content-type": "application/json" },
+    "json": {
+      "status": "OK",
+      "results": [
+        {
+          "dataset": "srtm90m",
+          "elevation": 2921.0,
+          "location": { "lat": 45.9819, "lng": 7.75 }
+        },
+        {
+          "dataset": "srtm90m",
+          "elevation": 3097.0,
+          "location": { "lat": 46.0325, "lng": 7.7772 }
+        }
+      ]
+    }
+  }
+}

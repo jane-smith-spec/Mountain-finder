@@ -1,0 +1,36 @@
+{
+  "note": "HAND-AUTHORED (not a live recording) — see fixtures/api/README.md. OpenTopoData SRTM 90 m across the Monterey Bay shoreline: two land samples and two over open water. SRTM has no data over ocean, which the API reports as `elevation: null` — the case that must never be silently flattened to 0 m.",
+  "request": {
+    "url": "https://api.opentopodata.org/v1/srtm90m?locations=36.800000,-121.790000|36.750000,-121.900000|36.700000,-122.000000|36.960000,-121.980000&interpolation=bilinear",
+    "method": "GET"
+  },
+  "response": {
+    "status": 200,
+    "headers": { "content-type": "application/json" },
+    "json": {
+      "status": "OK",
+      "results": [
+        {
+          "dataset": "srtm90m",
+          "elevation": 12.0,
+          "location": { "lat": 36.8, "lng": -121.79 }
+        },
+        {
+          "dataset": "srtm90m",
+          "elevation": null,
+          "location": { "lat": 36.75, "lng": -121.9 }
+        },
+        {
+          "dataset": "srtm90m",
+          "elevation": null,
+          "location": { "lat": 36.7, "lng": -122.0 }
+        },
+        {
+          "dataset": "srtm90m",
+          "elevation": 25.0,
+          "location": { "lat": 36.96, "lng": -121.98 }
+        }
+      ]
+    }
+  }
+}

@@ -7,22 +7,29 @@ Live checklist. Check items only after their self-check has been run and passed 
 - [x] P0.2 `check` / `test:e2e` / `test:acceptance` / `demo` scripts wired — all five commands verified green
 - [x] `src/core/types.ts` frozen shared contract (separates `elevationM` from `altitudeDeg`)
 
-## Phase 1 — Geometry core (group A)
-- [ ] P1.1 Geodesy (haversine, bearing, destination, wrap-safe angles)
-- [ ] P1.2 Sightline (curvature + refraction, LoS sweep) — analytic cone test passing
-- [ ] P1.3 Horizon profile (build + wrap-safe interpolation)
-- [ ] P1.4 Camera projection (pose + FOV from focal length)
-- [ ] P1.5 Visibility filter
+## Phase 1 — Geometry core (group A) ✅ 151 tests
+- [x] P1.1 Geodesy — 56 tests; meridian-convergence test rejects a rhumb-line impostor
+- [x] P1.2 Sightline — 29 tests; analytic cone matches closed form to 1e-12 (spec asked 0.01°)
+- [x] P1.3 Horizon profile — 20 tests; exact at samples, seam continuity across 359°→0°
+- [x] P1.4 Camera projection — 29 tests; guards the tangent-vs-angle-linear mistake
+- [x] P1.5 Visibility filter — 17 tests; twin identical summits, only the unoccluded one survives
 
-## Phase 2 — Data providers (group B)
-- [ ] P2.1 Transport layer (Fetch + Fixture transports, retry/backoff/abort)
-- [ ] P2.2 Elevation provider (OpenTopoData, batching)
-- [ ] P2.3 Peaks provider (Overpass, node+way, ele parsing)
-- [ ] P2.4 Fixture recorder script + first recorded site
+## Phase 2 — Data providers (group B) ✅ 64 tests
+- [x] P2.1 Transport layer — injected sleep, so backoff is asserted with zero wall-clock wait
+- [x] P2.2 Elevation provider — batches of 100, request order verified, `null` no-data preserved
+- [x] P2.3 Peaks provider — nodes + way centroids, `ele`/`ele:ft` parsing
+- [~] P2.4 Fixture recorder — **self-check NOT met.** Recorder + offline `--verify` work, but the
+      live APIs are blocked by this environment's egress policy (403 at proxy), so no live
+      recording was possible. Fixtures are HAND-AUTHORED against documented schemas and
+      labelled as such. Must be re-recorded once egress is allowed. See "Blocked" below.
 
-## Phase 3 — Photo ingestion (group C)
-- [ ] P3.1 EXIF extraction (GPS, direction, focal→FOV)
-- [ ] P3.2 Fallback model + manual override merge
+## Phase 3 — Photo ingestion (group C) ✅ 69 tests
+- [x] P3.1 EXIF extraction — real JPEGs authored byte-wise; `GPSImgDirectionRef` honoured
+- [x] P3.2 Fallback + override merge — 9 pose fields, each resolved or explicitly needs-manual
+
+## Blocked on environment (not on code)
+- [ ] Re-record `fixtures/api/**` from live OpenTopoData + Overpass once egress permits
+- [ ] P6.2 real-viewpoint research needs reachable reference sources (Wikipedia also 403)
 
 ## Phase 4 — Renderer (group D)
 - [ ] P4.1 SVG overlay builder (horizon line, flags, labels, collision avoidance)

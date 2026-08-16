@@ -1,0 +1,133 @@
+{
+  "note": "HAND-AUTHORED (not a live recording) — see fixtures/api/README.md. Overpass response shape for named peaks within 15 km of the Gornergrat viewpoint above Zermatt, CH. Summit names, coordinates and heights are real; OSM element IDs are invented. Deliberately exercises: plain `ele`, `ele` with a unit suffix, `ele` with a thousands separator, a way needing `out center`, `ele:ft` only, `ele` winning over `ele:ft`, an unparseable `ele`, a peak with no `ele` at all, an unplaceable way, and an unnamed node.",
+  "request": {
+    "url": "https://overpass-api.de/api/interpreter",
+    "method": "POST",
+    "body": {
+      "data": "[out:json][timeout:60];\n(\n  node[\"natural\"=\"peak\"][\"name\"](around:15000,45.983300,7.784700);\n  way[\"natural\"=\"peak\"][\"name\"](around:15000,45.983300,7.784700);\n);\nout body center;"
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": { "content-type": "application/json" },
+    "json": {
+      "version": 0.6,
+      "generator": "Overpass API 0.7.62.1 084b4234",
+      "osm3s": {
+        "timestamp_osm_base": "2026-08-15T18:00:00Z",
+        "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+      },
+      "elements": [
+        {
+          "type": "node",
+          "id": 26863221,
+          "lat": 45.9763,
+          "lon": 7.6586,
+          "tags": {
+            "name": "Matterhorn",
+            "natural": "peak",
+            "ele": "4478",
+            "wikidata": "Q1691"
+          }
+        },
+        {
+          "type": "node",
+          "id": 33862008,
+          "lat": 45.9369,
+          "lon": 7.8669,
+          "tags": {
+            "name": "Dufourspitze",
+            "natural": "peak",
+            "ele": "4634 m"
+          }
+        },
+        {
+          "type": "node",
+          "id": 26999104,
+          "lat": 45.9414,
+          "lon": 7.7664,
+          "tags": {
+            "name": "Breithorn",
+            "natural": "peak",
+            "ele": "4 164"
+          }
+        },
+        {
+          "type": "way",
+          "id": 220000001,
+          "center": { "lat": 45.9386, "lon": 7.7297 },
+          "nodes": [1001, 1002, 1003, 1001],
+          "tags": {
+            "name": "Klein Matterhorn",
+            "natural": "peak",
+            "ele": "3883"
+          }
+        },
+        {
+          "type": "node",
+          "id": 27000001,
+          "lat": 45.9819,
+          "lon": 7.75,
+          "tags": {
+            "name": "Riffelhorn",
+            "natural": "peak"
+          }
+        },
+        {
+          "type": "node",
+          "id": 27000002,
+          "lat": 46.0325,
+          "lon": 7.7772,
+          "tags": {
+            "name": "Unterrothorn",
+            "natural": "peak",
+            "ele": "unknown"
+          }
+        },
+        {
+          "type": "way",
+          "id": 220000002,
+          "nodes": [2001, 2002, 2001],
+          "tags": {
+            "name": "Unplaceable Way",
+            "natural": "peak",
+            "ele": "3000"
+          }
+        },
+        {
+          "type": "node",
+          "id": 27000003,
+          "lat": 46.01,
+          "lon": 7.7,
+          "tags": {
+            "natural": "peak",
+            "ele": "2800"
+          }
+        },
+        {
+          "type": "node",
+          "id": 27000004,
+          "lat": 45.93,
+          "lon": 7.86,
+          "tags": {
+            "name": "Nordend",
+            "natural": "peak",
+            "ele:ft": "15121"
+          }
+        },
+        {
+          "type": "node",
+          "id": 27000005,
+          "lat": 45.9,
+          "lon": 7.87,
+          "tags": {
+            "name": "Zumsteinspitze",
+            "natural": "peak",
+            "ele": "4563",
+            "ele:ft": "14970"
+          }
+        }
+      ]
+    }
+  }
+}
