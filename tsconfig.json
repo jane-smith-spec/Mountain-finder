@@ -20,5 +20,10 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "tests", "scripts", "fixtures", "*.config.ts"]
+  "include": ["src", "tests", "scripts", "fixtures", "*.config.ts"],
+  // tests/scratch is a gitignored working area for review agents demonstrating
+  // findings. It was inside `include`, so one half-written scratch file broke
+  // `npm run check` and `npm run build` for everyone else — a shared-tree
+  // hazard with no upside, since nothing there ships.
+  "exclude": ["node_modules", "dist", "tests/scratch", "archive"]
 }
