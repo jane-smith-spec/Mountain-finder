@@ -13,7 +13,7 @@ write-ups are in the three `REVIEW-FINDINGS*.md` files and are not repeated here
 
 | # | Item | What it needs |
 |---|---|---|
-| **Q8** | Switch the app to the 8 528-summit dataset | One file. `src/app/main.tsx` imports `fixtures/peaks/ground-truth-peaks.json` (15 cited summits) and hands `groundTruthPeakStore` to `createOverlayBuilder`; the Overture regions are already staged at `/peaks/<region>/index.json` + `cells/N45E007.json` in exactly the layout `TiledPeakStore` expects, and `npm run test:deploy` already proves they are served. Two things move in the same commit: `peakDataReadByThisBuild` in `src/app/data-credits.ts` (`'bundled'` → `'regions'`, or the footer keeps saying "not read by this build yet"), and `verifyPeaksAreBundled` in `scripts/package-deploy.ts`, which deliberately **fails** the day the summit name leaves the bundle. Expect the density findings to bite: `Breithorn` is ambiguous (four in the Valais), one mountain arrives as a cluster (Matterhorn 4 nodes, Rainier 8), and California alone repeats 306 names |
+| **Q8b** | The density findings, now user-visible | Q8 shipped (below), and the frame that drew 1 marker now draws 26 at Gornergrat. What was a prediction is now on screen: `Breithorn` is ambiguous (four in the Valais), one mountain arrives as a cluster (Matterhorn 4 nodes, Rainier 8), California repeats 306 names. Nothing yet merges a summit cluster into one label or disambiguates repeated names by range/prominence — the collision layout stacks them honestly instead. Decide a policy (nearest-of-cluster? prominence threshold? name+distance disambiguation?) before dense viewpoints ship to anyone |
 | **Q9** | Re-measure the DEPLOY.md size table | "What it costs" predates the four committed regions and the attribution footer. It has **no row for `/peaks/`** at all (3.2 MB staged — california 1.26, cascades 1.02, zermatt 0.67, fort-william 0.26 MB), and nothing states what one *session* costs once the app fetches cells rather than bundling them — which is the number a deployer budgets with. The bundle figure was 302 KB and is now 318.40 kB / 104.34 kB gzipped; the windows-only demo row moved 1.77 → 1.78 MB. Those two were measured; the `/peaks/` row only means something after Q8 |
 | **P7.4** | CV integration — deliberately not done | Seam is `src/pipeline/cv-alignment.ts`, exported from nothing and imported by nothing. Pre-set the P5.1 trim sliders rather than replace them: an automatic correction the user cannot see or undo is worse than a manual one. Blocked behind P7.5 — there is no point wiring in an extractor that stitches two edges together. See `src/cv/README.md` |
 | **P7.5** | The extractor on real photographs | **Narrowed from "it stitches edges together" to one measurable bias.** The continuity constraint fixed the span (15.96° → 8.44°, ceiling 8.80°). What is left is that ~40 columns near x ≈ 0.35–0.42 sit on the snow/rock boundary *below* the crest, and that bias is now shown to land almost entirely in **pitch**: against a photogrammetrically solved pose the aligner recovers heading to 0.207° and pitch to only 1.97°, in the direction a downward-pulled skyline predicts ([CV-6](docs/FINDINGS.md), [docs/REAL-PHOTO-POSE.md](docs/REAL-PHOTO-POSE.md)). Roll was tested and is not the missing term (±10° of roll buys 1.133° → 1.037°). Snow-dominant hazy scenes still need a texture or gradient cue ([CV-2](docs/FINDINGS.md)) |
@@ -35,6 +35,26 @@ write-ups are in the three `REVIEW-FINDINGS*.md` files and are not repeated here
 ---
 
 ## Done
+
+### Q8 — the app reads the 9 237-summit Overture regions, 2026-08-17
+
+`src/app/main.tsx` now hands the pipeline `createRegionPeakSource` (new
+`src/providers/http-peak-store.ts`): region INDEXES compiled into the bundle — the same
+import the attribution footer reads, so the queried regions and the credited regions cannot
+drift — and summit CELLS fetched same-origin from `/peaks/<region>/cells/…`, pruned to the
+cells a query's box touches (a Gornergrat query fetches nothing of California's 3 341
+summits). Five regions, 9 237 summits (the count grew past the "8 528" this item was filed
+under when idaho-central was imported). In dev the layout is served by the new
+`scripts/peaks-server.ts` plugin; in production `package:deploy` stages it as before, and
+`verifyPeaksAreBundled` became `verifyPeaksAreServed` — packaging now FAILS if the bundle's
+regions are not all staged, the exact inverse of the old assertion, for the same reason in
+the new architecture. `peakDataReadByThisBuild` flipped to `'regions'` in the same commit.
+The 15 cited summits stay bundled for the footer's count and the acceptance suite. The
+predicted density finding arrived on cue: the Gornergrat e2e frame draws **26 summit
+markers** where the bundled dataset drew one, so the e2e and deploy specs now pin what the
+geometry owns — several markers, one within ±12 px of the Matterhorn's closed-form position —
+rather than a count the dataset owns (see Q8b, above). Self-checks: `npm run check` 1 135,
+`npm run test:acceptance` 178, `npx playwright test` 21, `npm run test:deploy` 5 — all green.
 
 ### P1.6 — the `marginal` visibility state, built 2026-08-17
 

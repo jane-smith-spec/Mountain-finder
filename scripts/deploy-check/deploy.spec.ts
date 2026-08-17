@@ -156,12 +156,24 @@ test('a statically served build draws a real overlay from a real photo', async (
     page.locator('[data-testid="overlay-svg"] g.mf-horizon polyline').first(),
   ).toBeVisible();
 
-  // One summit, where the projection above puts it.
+  // Summit markers from the served Zermatt region (Q8) — the deployment now
+  // answers peak queries from its own /peaks/ files, so the frame fills with
+  // markers where the bundled dataset drew one. The dataset owns the count;
+  // the geometry owns the claim pinned here: one marker within ±12 px of the
+  // Matterhorn's hand-derived position.
   const summits = page.locator('[data-testid="overlay-svg"] g.mf-summits circle');
-  await expect(summits).toHaveCount(1);
-  const summit = summits.first();
-  expect(Math.abs(Number(await summit.getAttribute('cx')) - 600.37)).toBeLessThan(12);
-  expect(Math.abs(Number(await summit.getAttribute('cy')) - 315.48)).toBeLessThan(12);
+  expect(await summits.count()).toBeGreaterThan(5);
+  const positions = await summits.evaluateAll((nodes) =>
+    nodes.map((node) => ({
+      cx: Number(node.getAttribute('cx')),
+      cy: Number(node.getAttribute('cy')),
+    })),
+  );
+  expect(
+    positions.filter(
+      (dot) => Math.abs(dot.cx - 600.37) < 12 && Math.abs(dot.cy - 315.48) < 12,
+    ).length,
+  ).toBeGreaterThan(0);
 
   // What the terrain actually cost on the wire. `--gzip` staged a .gz sibling
   // and the static server offered it; the browser inflated it before

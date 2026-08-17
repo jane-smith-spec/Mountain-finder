@@ -345,16 +345,29 @@ test('a photo over terrain the app holds gets a real overlay, and exports it', a
   await expect(overlay).toHaveAttribute('viewBox', '0 0 1200 900');
   await expect(page.locator('[data-testid="overlay-svg"] g.mf-horizon polyline').first()).toBeVisible();
 
-  // …and exactly one summit marker, where the geometry above puts it.
+  // …and summit markers from the Overture region (Q8): the 15-summit bundled
+  // dataset drew exactly one marker here; the 1 786-summit Zermatt region
+  // fills the frame. The count is the DATASET's business and re-imports may
+  // move it, so what is pinned is what the geometry owns: several markers, and
+  // ONE of them within ±12 px of the Matterhorn's hand-derived position.
   const summits = page.locator('[data-testid="overlay-svg"] g.mf-summits circle');
-  await expect(summits).toHaveCount(1);
-  const summit = summits.first();
-  expect(Math.abs(Number(await summit.getAttribute('cx')) - 600.37)).toBeLessThan(12);
-  expect(Math.abs(Number(await summit.getAttribute('cy')) - 315.48)).toBeLessThan(12);
+  expect(await summits.count()).toBeGreaterThan(5);
+  const positions = await summits.evaluateAll((nodes) =>
+    nodes.map((node) => ({
+      cx: Number(node.getAttribute('cx')),
+      cy: Number(node.getAttribute('cy')),
+    })),
+  );
+  const nearMatterhorn = positions.filter(
+    (dot) => Math.abs(dot.cx - 600.37) < 12 && Math.abs(dot.cy - 315.48) < 12,
+  );
+  expect(nearMatterhorn.length).toBeGreaterThan(0);
 
-  // Breithorn (210°) and Dufourspitze (128°) are outside a 65° frame centred
-  // on 265.4°, and the app says so rather than leaving them unexplained.
-  await expect(page.getByTestId('overlay-notes')).toContainText('Breithorn');
+  // Summits behind the camera or beyond the frame edge are explained, not
+  // silently absent. (The bundled dataset's version of this note named
+  // Breithorn; with 1 786 regional summits the name list caps at four, so the
+  // sentence, not a specific name, is the stable claim.)
+  await expect(page.getByTestId('overlay-notes')).toContainText('outside this frame');
 
   // P5.2 — the export, composited by src/render/composite in this same browser.
   const button = page.getByTestId('export-png');

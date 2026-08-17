@@ -28,18 +28,20 @@
  * Every staged grid is checked against `expectedGridByteLength` before it is
  * copied. A truncated `.hgt` in data/tiles/ is a plausible-looking grid of the
  * wrong shape; caught here it is a build failure, caught in the browser it is a
- * wrong horizon. The peak side is verified too — see `verifyPeaksAreBundled`.
+ * wrong horizon. The peak side is verified too — see `verifyPeaksAreServed`.
  *
  * ── PEAKS ──────────────────────────────────────────────────────────────────
- * The app does NOT fetch peaks today: `src/app/main.tsx` imports
- * `fixtures/peaks` (15 cited summits, ~12 KB), so Vite compiles them into the
- * JS bundle and there is nothing to serve. This script asserts that is still
- * true rather than assuming it. The imported Overture regions under
- * `fixtures/peaks/regions/` are a different matter — 1 786 summits, 3.2 MB, far
- * too much to inline — so they are staged at `/peaks/<region>/` in the layout
- * `TiledPeakStore` expects. They are inert until `main.tsx` is given a fetch
- * loader; staging them now means that switch is a one-file change and not also
- * a deployment change.
+ * The app READS its summits from `/peaks/` (Q8): `src/app/main.tsx` compiles
+ * in the region INDEXES (~10 KB, the same import the attribution footer uses)
+ * and fetches summit CELLS on demand through `createRegionPeakSource`. The
+ * imported Overture regions under `fixtures/peaks/regions/` — thousands of
+ * summits, megabytes of cells, far too much to inline — are therefore staged
+ * at `/peaks/<region>/` in exactly the layout `TiledPeakStore` expects, and
+ * `verifyPeaksAreServed` FAILS the packaging if the bundle's regions are not
+ * all staged: an app that fetches 404s draws empty overlays that read as "no
+ * mountains here". In dev the same layout is served by scripts/peaks-server.ts.
+ * The 15-summit cited dataset is still compiled in for the footer's count and
+ * the acceptance suite; the app no longer queries it.
  *
  * ACQUISITION-TIME TOOL. It never touches the network: everything it stages is
  * already on disk. `npm run fetch:tiles` / `npm run fetch:peaks` put it there.
@@ -314,37 +316,80 @@ async function stagePeakRegions(
 }
 
 /**
- * The app's peaks are compiled INTO the bundle. Prove it, rather than trusting
- * a comment: if `main.tsx` ever switches to fetching them, the assertion fails
- * here — at packaging time, where the fix is to serve the peak directory —
- * instead of as an empty overlay in front of a user.
+ * The app READS its summits from `/peaks/` (Q8). Prove the deployment can
+ * answer, rather than trusting a comment — at packaging time, where the fix is
+ * a re-run, instead of as an empty overlay in front of a user:
+ *
+ *   1. the JS bundle must reference every region's cells (the indexes are
+ *      compiled in — data-credits imports them, main.tsx queries by them), and
+ *   2. every region the bundle knows must actually be STAGED, cells included.
+ *      A `--no-peaks` package of this app is therefore an error, not an
+ *      option silently honoured: the app would fetch 404s everywhere.
+ *
+ * This is the same assertion the pre-Q8 version made, inverted with the
+ * architecture: it used to prove the bundle CONTAINED the summits and fail the
+ * day they were served; now it proves the served layout matches the bundle's
+ * promises and fails the day they are missing.
  */
-async function verifyPeaksAreBundled(root: string, outDir: string): Promise<string> {
-  const dataset = JSON.parse(await readFile(join(root, BUNDLED_PEAKS), 'utf8')) as {
-    peaks?: readonly { name?: unknown }[];
-  };
-  const names = (dataset.peaks ?? [])
-    .map((peak) => peak.name)
-    .filter((name): name is string => typeof name === 'string' && name.length > 4);
-  if (names.length === 0) throw new Error(`${BUNDLED_PEAKS} lists no named peaks`);
+async function verifyPeaksAreServed(
+  root: string,
+  outDir: string,
+  staged: readonly StagedRegion[],
+): Promise<string> {
+  const regionRoot = join(root, PEAK_REGION_DIR);
+  const regionNames = (await readdir(regionRoot, { withFileTypes: true }).catch(() => []))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+  if (regionNames.length === 0) {
+    throw new Error(`${PEAK_REGION_DIR} holds no regions — the app would have no summits at all.`);
+  }
 
   const assetsDir = join(outDir, 'assets');
   const scripts = (await readdir(assetsDir)).filter((file) => file.endsWith('.js'));
-  let found: string | undefined;
   let bundleBytes = 0;
+  const texts: string[] = [];
   for (const file of scripts) {
     const text = await readFile(join(assetsDir, file), 'utf8');
     bundleBytes += Buffer.byteLength(text);
-    if (found === undefined) found = names.find((name) => text.includes(name));
+    texts.push(text);
   }
-  if (found === undefined) {
+
+  // Region names reach the bundle as import.meta.glob keys; `cells/` reaches
+  // it inside every compiled index. Either ALL gone means main.tsx stopped
+  // reading the region indexes.
+  const missingFromBundle = regionNames.filter(
+    (name) => !texts.some((text) => text.includes('cells/') && text.includes(name)),
+  );
+  if (missingFromBundle.length === regionNames.length) {
     throw new Error(
-      `None of the ${names.length} bundled summit names appear in ${assetsDir}. ` +
-        'The app no longer compiles its peak dataset in, so peaks must be SERVED — ' +
-        'point the app at /peaks/<region>/index.json and re-check this assertion.',
+      `The JS bundle references none of the regions (${regionNames.join(', ')}). ` +
+        'main.tsx no longer reads the region indexes — if the app went back to a bundled ' +
+        'dataset, update data-credits and this assertion in the same commit (Q8 in reverse).',
     );
   }
-  return `${found} found in the JS bundle (${mb(bundleBytes)} of JS)`;
+
+  const unstaged: string[] = [];
+  for (const name of regionNames) {
+    const region = staged.find((entry) => entry.name === name);
+    if (region === undefined || region.cells === 0) {
+      unstaged.push(name);
+      continue;
+    }
+    await stat(join(outDir, 'peaks', name, 'index.json'));
+  }
+  if (unstaged.length > 0) {
+    throw new Error(
+      `The app reads /peaks/ but ${unstaged.join(', ')} ${unstaged.length === 1 ? 'is' : 'are'} ` +
+        'not staged. Do not package this app with --no-peaks: it would fetch 404s and draw ' +
+        'empty overlays that read as "no mountains here".',
+    );
+  }
+
+  const totalPeaks = staged.reduce((sum, entry) => sum + entry.peaks, 0);
+  return (
+    `${staged.length} region(s), ${totalPeaks} summits staged and referenced by the bundle ` +
+    `(${mb(bundleBytes)} of JS)`
+  );
 }
 
 /**
@@ -425,7 +470,7 @@ async function main(): Promise<void> {
 
   const { manifest, staged } = await stageTerrain(root, outDir, options);
   const regions = await stagePeakRegions(root, outDir, options);
-  const peakProof = await verifyPeaksAreBundled(root, outDir);
+  const peakProof = await verifyPeaksAreServed(root, outDir, regions);
   const attribution = await writeAttribution(root, outDir, staged, regions);
 
   const rawTotal = staged.reduce((total, entry) => total + entry.bytes, 0);
@@ -459,10 +504,10 @@ async function main(): Promise<void> {
           mb(region.bytes),
       );
     }
-    out.push('    inert until src/app/main.tsx reads peaks over HTTP — see docs/DEPLOY.md');
+    out.push('    read by the app over HTTP, cell by cell, as queries need them (Q8)');
   }
   out.push('');
-  out.push(`  peaks in use are bundled: ${peakProof}`);
+  out.push(`  peaks served and readable: ${peakProof}`);
   out.push(
     `  wrote ${relative(root, attribution)} — the app itself DISPLAYS this notice too ` +
       '(src/app/attribution.ts; a file nobody links to is not attribution)',

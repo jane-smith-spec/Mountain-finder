@@ -9,9 +9,13 @@
  *             OWN origin — no live elevation API at runtime, decision D7) read
  *             through TileElevationProvider, exactly as the Node side reads a
  *             tile directory.
- *   peaks     the committed offline peak database (fixtures/peaks). Summit
- *             heights come from here and never from the DEM — SRTM under-reads
- *             a sharp summit by hundreds of metres and displaces it sideways.
+ *   peaks     the imported Overture regions over /peaks/ (Q8): the region
+ *             indexes are compiled into this bundle (the same import the
+ *             attribution footer reads), the summit CELLS are fetched from the
+ *             app's own origin on demand, pruned to the cells a query touches.
+ *             Summit heights come from here and never from the DEM — SRTM
+ *             under-reads a sharp summit by hundreds of metres and displaces
+ *             it sideways.
  *   overlay   createOverlayBuilder: pipeline → renderer → SVG.
  *   export    compositePng: photo + overlay → PNG blob, in the same Chromium
  *             the page is drawn in.
@@ -24,12 +28,13 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import { groundTruthPeakStore } from '../../fixtures/peaks';
+import { createRegionPeakSource } from '../providers/http-peak-store';
 import { HttpTerrainStore } from '../providers/http-terrain-store';
 import { DEFAULT_TERRAIN_MANIFEST_URL } from '../providers/terrain-manifest';
 import { TileElevationProvider } from '../providers/tile-elevation';
 import { App, type AppProps } from './App';
 import { compositePng } from './composite-export';
+import { bundledRegionIndexes } from './data-credits';
 import { createOverlayBuilder, type TerrainSource } from './overlay-builder';
 import './styles.css';
 
@@ -39,8 +44,10 @@ const terrain: TerrainSource = {
   coverage: (lat, lon) => store.coverage(lat, lon),
 };
 
+const peaks = createRegionPeakSource(bundledRegionIndexes(), '/peaks', (url) => fetch(url));
+
 const props: AppProps = {
-  overlayBuilder: createOverlayBuilder({ terrain, peaks: groundTruthPeakStore }),
+  overlayBuilder: createOverlayBuilder({ terrain, peaks }),
   pngExporter: compositePng,
 };
 

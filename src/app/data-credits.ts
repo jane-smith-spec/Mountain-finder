@@ -5,16 +5,19 @@
  * those records come from, and it takes them from the shipped files themselves
  * rather than from a sentence somebody typed:
  *
- *   summits, labelled     fixtures/peaks/ground-truth-peaks.json — the dataset
- *                         main.tsx hands to the pipeline, compiled into the JS
- *                         bundle by Vite. Its `sources[]` are per-summit
- *                         citations (Wikipedia / USGS GNIS); they name no
- *                         licence, and none is claimed for them.
- *   summits, deployed     fixtures/peaks/regions/<region>/index.json, matched by
- *                         a glob so a region added tomorrow appears in the
- *                         footer with ITS licence, not this one. These carry
- *                         Overture Maps' citation: © OpenStreetMap
+ *   summits, labelled     fixtures/peaks/regions/<region>/ — the Overture
+ *                         regions main.tsx reads through /peaks/ (Q8). The
+ *                         INDEXES are matched by a glob so a region added
+ *                         tomorrow appears in the footer with ITS licence, not
+ *                         this one, and is served without a code change. They
+ *                         carry Overture Maps' citation: © OpenStreetMap
  *                         contributors, ODbL-1.0 — attribution required.
+ *   summits, cited        fixtures/peaks/ground-truth-peaks.json — the 15
+ *                         cited summits the acceptance suite gates on, still
+ *                         compiled into the bundle for this footer's count.
+ *                         Its `sources[]` are per-summit citations
+ *                         (Wikipedia / USGS GNIS); they name no licence, and
+ *                         none is claimed for them.
  *   elevation             a citation constant, below, with its own reasons.
  *
  * Only the region INDEX files are imported (~10 KB of metadata for four
@@ -36,7 +39,7 @@ import bundledPeaksJson from '../../fixtures/peaks/ground-truth-peaks.json';
 /** The two summit datasets this repository holds. */
 export type PeakDataChoice = 'bundled' | 'regions';
 
-const PEAK_DATA_CHOICE: PeakDataChoice = 'bundled';
+const PEAK_DATA_CHOICE: PeakDataChoice = 'regions';
 
 /**
  * Which summit dataset `main.tsx` wires into the pipeline. See module docs.
@@ -129,6 +132,20 @@ export function regionNameFromPath(path: string): string {
   const parts = path.split('/');
   const name = parts[parts.length - 2];
   return name ?? path;
+}
+
+/**
+ * The bundled region indexes, keyed by region name — what `main.tsx` hands to
+ * `createRegionPeakSource` (Q8). The same glob feeds the footer above, so the
+ * regions the app queries and the regions the footer credits cannot drift: one
+ * import, two readers.
+ */
+export function bundledRegionIndexes(): Readonly<Record<string, unknown>> {
+  const byName: Record<string, unknown> = {};
+  for (const path of Object.keys(REGION_INDEXES)) {
+    byName[regionNameFromPath(path)] = REGION_INDEXES[path];
+  }
+  return byName;
 }
 
 interface RegionSummary {
