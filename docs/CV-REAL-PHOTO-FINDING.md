@@ -1,66 +1,70 @@
-# First contact with a real photograph: the extractor scores 0 of 512
+# First contact with real photographs
 
-**2026-08-17.** A user-supplied photograph — a snowy summit view from a fire lookout, 5712×4284
-— is the first real photograph this project has ever had. `src/cv`'s skyline extractor was run
-against it.
+> ## ⚠ Correction — the first version of this document was wrong
+>
+> It reported "**the extractor scores 0 of 512**" and diagnosed at length why. **That was my
+> own bug, not the extractor's.** The probe filtered on `column.confidence` and `column.row`;
+> the actual fields are **`confidence01`** and **`rowNorm`**. `undefined > 0` is `false`, so
+> every column was discarded and the extractor was blamed for it.
+>
+> This is the second time in this project that I published a confident conclusion drawn from a
+> buggy read — the first was "SRTM is full of voids", which was an out-of-bounds tile lookup.
+> Both are exactly the failure this whole codebase is built to prevent: **a plausible number
+> from a broken measurement is more dangerous than a crash.** Recorded rather than quietly
+> edited, because the pattern matters more than either individual error.
 
-## Result
+**2026-08-17.** Two user-supplied photographs, the first real ones this project has ever had.
 
-```
-columns with a skyline : 0 of 512  (0.0%)
-```
+## The real result
 
-Total failure, across every part of the frame. Not degraded, not low-confidence — nothing.
-Reported rather than tuned around, as the brief required.
+| photo | coverage | mean confidence | verdict |
+|---|---|---|---|
+| **tundra** — blue sky, dark rock, 4032×3024 | **98.8 %** | 0.575 | **works** |
+| **lookout** — snow, white haze, tower frame, 5712×4284 | **1.4 %** | 0.140 | **fails** |
 
-Note this is the *honest* failure path: `alignSkyline` refuses with `insufficient-skyline`
-rather than returning an offset. The aligner's refusal machinery works. The extractor does not.
+On the tundra photo the extractor resolves **506 of 512 columns**, median confidence 0.571, and
+places the skyline 29–36 % down the frame — which is where the peaks actually are. Confidence
+rises left→right (0.407 → 0.712) exactly as the scene does: the left third is a smooth snowfield
+against bright cloud, the right is dark rock against blue sky.
 
-## Why — measured, and NOT what we predicted
+So the extractor is **not** unfit for real photographs. It is fit for *favourable* ones and
+fails on hard ones, which is a completely different and much more useful conclusion.
 
-`MISSION.md` and the Phase 7 report predicted "sunlit snow is brighter than hazy sky, so the
-sky/terrain step inverts". That is **partly wrong**. Measured luminance at the true skyline:
+## Why the lookout photo genuinely fails
+
+These measurements stand — they were taken from the pixels, not through the buggy probe:
 
 ```
 column   sky(35% down)   ridge(44%)   snow(75%)   step sky→ridge
-x=45%        174            104          185         −70
 x=55%        183             64          172        −118
-x=65%        208            110           52         −98
-x=75%        183            139          141         −43
-x=85%        179            121          195         −57
 x=95%        157            147          186          −9
 ```
 
-The step at the true skyline is **negative everywhere** — sky *is* brighter than the ridge, as a
-naive model assumes. The inversion is not the problem. Three other things are:
+1. **The vertical profile is bright → dark → bright.** Sky ~180, ridge ~110, snow back up to
+   ~185 — brighter than the sky above it in four of six columns. `fitStep` searches for a split
+   whose upper segment is brighter than its lower one; with a bright snowfield below, the best
+   such split is not the skyline.
+2. **The sky is desaturated white haze.** Saturation at x=55 %: sky **0.084**, ridge **0.526** —
+   the ridge is six times more saturated. `skyAffinity` weights luminance *and blueness*, and
+   white haze scores low on both relative to sunlit snow.
+3. **Contrast collapses with distance:** −118 at x=55 % against −9 at x=95 %.
+4. The lookout frame occupies the left ~25 % and is neither sky nor terrain.
 
-1. **The vertical profile is non-monotonic: bright → dark → bright.** Sky ~180, ridge ~110,
-   then snow *back up* to ~185 — brighter than the sky above it in four of six columns. Any
-   model that assumes "everything below the boundary is darker than everything above" has no
-   valid boundary to find. This is the real killer and it was not anticipated.
-2. **The sky is desaturated white haze, not blue.** Saturation at x=55%: sky **0.084**, ridge
-   **0.526**. The ridge is *six times more saturated* than the sky — the exact opposite of the
-   usual "blue sky, grey rock" assumption.
-3. **Contrast collapses with distance.** At x=95% the step is **−9** out of 255, against −118
-   at x=55%. Distant hazy ridges are nearly invisible to a fixed threshold.
+`coverage01 = 0.014` is the extractor *correctly reporting that it could not read this photo*,
+and `alignSkyline` then refuses with `insufficient-skyline` rather than returning an offset.
+**The honest-failure path works.** That is the part that matters most.
 
-## What this means
+## Status
 
-- The **aligner** is proven (0.013° against real SRTM terrain) and its refusals are honest.
-- The **extractor** is now measured, and it is not fit for real photographs.
-- A brightness-step model is insufficient. A texture/gradient cue, a non-monotonic segmentation,
-  or a per-column adaptive threshold is required. This is real work, not a tuning pass.
+- Aligner: proven to 0.013° against real SRTM terrain.
+- Extractor: **measured at last** — good on favourable photographs, unable to read a
+  snow-dominant hazy one, and honest about which is which.
+- Snow-dominant scenes need a texture or gradient cue and a non-monotonic segmentation. That is
+  real work, and now it has a real test case to be measured against.
 
-## Also learned
+## What these photos still need to become ground truth
 
-**EXIF does not survive the upload path.** The photo arrived with `Orientation` and dimensions
-only — no GPS, no `GPSImgDirection`, no focal length. This is exactly the case `src/exif`'s
-`needs-manual` model exists for, so the pipeline handles it correctly, but it means a supplied
-photograph is not automatically ground truth: the location and view direction must come with it
-separately.
-
-## What would make this photo ground truth
-
-Its coordinates and view bearing, plus the names of a few summits in it. Then it becomes an
-acceptance case, and the extractor has a target to be measured against rather than just a
-demonstration that it fails.
+EXIF did not survive the upload path — `Orientation` and dimensions only, no GPS, no
+`GPSImgDirection`, no focal length. `src/exif`'s `needs-manual` model handles that correctly,
+but it means each photo needs its **coordinates, view bearing, and a few summit names** supplied
+separately before it can be an acceptance case rather than a demonstration.
