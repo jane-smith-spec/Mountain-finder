@@ -2,15 +2,25 @@
  * ACCEPTANCE — THE SUPPLIED PHOTOGRAPHS (photo cases)
  * ═══════════════════════════════════════════════════════════════════════════
  *
- * Two real photographs with real positions and NO measured view bearing. What
- * this file proves, offline, from committed bytes:
+ * Two real photographs with real positions, ONE of which now has a measured
+ * view bearing. What this file proves, offline, from committed bytes:
  *
  *   1. The photographs are what the cases say they are — dimensions,
- *      orientation, and the ABSENCE of GPS and of `GPSImgDirection`. That last
- *      one is the load-bearing assertion of this file: it turns "the bearing is
- *      unmeasured" from a claim in a comment into a checked property of the
- *      committed file, so nobody can later fill in a plausible number and leave
- *      the prose saying otherwise.
+ *      orientation, and the ABSENCE of GPS and of `GPSImgDirection` in the
+ *      committed JPEGs. That last one is the load-bearing assertion of this
+ *      file: it turns "this file carries no bearing" from a claim in a comment
+ *      into a checked property of the bytes, so nobody can fill in a plausible
+ *      number and leave the prose saying otherwise.
+ *
+ *      **And its mirror image, added 2026-08-17.** The Railroad Ridge case now
+ *      commits the CAMERA ORIGINAL alongside the transcode, and its heading is
+ *      re-read from that original's EXIF rather than trusted from the data
+ *      file. The absence check and the presence check are the same check run in
+ *      opposite directions: a stripped file may not claim a heading, and a case
+ *      that claims one must point at bytes that carry it. Note in particular
+ *      that the ORIGINAL is asserted to carry every field the transcode is
+ *      asserted to lack — swap a stripped file in as the "original" and this
+ *      fails rather than passing vacuously.
  *   2. Every number traces to a source, and every source resolves — a URL for
  *      the remote ones, an existing file for the committed ones.
  *   3. The committed SRTM window contains the viewpoint AND the whole sweep it
@@ -55,6 +65,7 @@ import {
   groundTruthCases,
   photoCases,
   type PhotoCase,
+  type PhotoExifProbe,
   type RecordedSummit,
 } from './cases';
 
@@ -145,13 +156,56 @@ describe('the supplied photo cases as a set', () => {
     expect(groundTruthCases.length).toBe(4);
   });
 
-  it('asserts NO view bearing anywhere, for either photograph', () => {
-    // The single most important property of this whole file. Both photographs
-    // arrived with their EXIF stripped; a bearing here would be invented.
+  it('states a view bearing only where a committed file carries one', () => {
+    // The single most important property of this whole file, and the one that
+    // had to change carefully when the first real heading arrived. It is NOT
+    // "no case has a bearing" any more; it is "a bearing exists exactly where
+    // there are bytes to read it out of". A case cannot become measured by
+    // someone editing a data file: it needs a committed original whose EXIF is
+    // re-read below, in `matches the committed photograph`.
     for (const photoCase of photoCases) {
-      expect(photoCase.view.bearingDeg, `${photoCase.id} states a view bearing`).toBeNull();
-      expect(photoCase.view.measured).toBe(false);
-      expect(photoCase.view.note.length).toBeGreaterThan(60);
+      const { view } = photoCase;
+      expect(view.note.length).toBeGreaterThan(60);
+
+      if (view.measured) {
+        expect(typeof view.bearingDeg, `${photoCase.id} measured but has no number`).toBe('number');
+        expect(view.bearingDeg).toBeGreaterThanOrEqual(0);
+        expect(view.bearingDeg).toBeLessThan(360);
+        // A heading whose reference is unknown is not a heading.
+        expect(['T', 'M']).toContain(view.bearingRef);
+        // …and it must be traceable to a source that is a file in this repo.
+        const source = photoCase.sources.find((entry) => entry.id === view.bearingSourceId);
+        expect(source, `${photoCase.id}: bearingSourceId names no source`).toBeDefined();
+        expect(source?.access).toBe('supplied-by-photographer');
+        expect(source?.locator.startsWith('http')).toBe(false);
+        // The original must be the file the bearing was read from, and its
+        // recorded EXIF must contain that very number — so the case cannot
+        // cite one file and quote another's heading.
+        expect(photoCase.photo.original?.path).toBe(source?.locator);
+        expect(photoCase.photo.original?.exif.imgDirectionDeg).toBe(view.bearingDeg);
+        expect(photoCase.photo.original?.exif.imgDirectionRef).toBe(view.bearingRef);
+      } else {
+        expect(view.bearingDeg, `${photoCase.id} states a view bearing`).toBeNull();
+        expect(view.measured).toBe(false);
+      }
+    }
+  });
+
+  it('never lets a bearing this repository COMPUTED become a case\'s ground truth', () => {
+    // CLAUDE.md rule 4, made executable. `corroborationDeg` is where an
+    // independently obtained heading is reported; the danger it carries is that
+    // a later edit quietly promotes it into `bearingDeg`, at which point the
+    // pipeline is grading its own homework and every gate built on this case
+    // becomes worthless while still passing.
+    for (const photoCase of photoCases) {
+      const { view } = photoCase;
+      if (!view.measured || view.corroborationDeg === null) continue;
+      expect(
+        view.corroborationDeg.bearingDeg,
+        `${photoCase.id}: the corroborating heading IS the asserted bearing`,
+      ).not.toBe(view.bearingDeg);
+      expect(view.corroborationDeg.method.length).toBeGreaterThan(40);
+      expect(view.corroborationDeg.note.length).toBeGreaterThan(60);
     }
   });
 
@@ -255,6 +309,82 @@ describe.each(photoCases.map((photoCase) => [photoCase.id, photoCase] as const))
       expect(photoCase.photo.absentFields).toContain('imgDirectionDeg');
       expect(photoCase.photo.absentFields).toContain('lat');
       expect(photoCase.photo.absentFields).toContain('lon');
+    });
+
+    it('reads the camera original\'s EXIF out of its own bytes, where one exists', async () => {
+      const original = photoCase.photo.original;
+      if (original === undefined) {
+        // Not a skip that hides anything: a case with no original is a case
+        // whose view must therefore be unmeasured, which is asserted here.
+        expect(photoCase.view.measured).toBe(false);
+        return;
+      }
+
+      // HEIC, not JPEG — exifr reads the EXIF item out of the ISO-BMFF meta
+      // box. No pixel decoding is involved and no new dependency is needed,
+      // which is why the ORIGINAL is what the repository commits: the metadata
+      // is readable offline even though the image is not.
+      expect(await exists(original.path)).toBe(true);
+      const exif: PhotoExif = await extractPhotoExif(new Uint8Array(await readFile(original.path)));
+
+      // Every field the case quotes, compared with the bytes. Exact equality
+      // on purpose: these are transcriptions, and a transcription is either
+      // right or wrong. Nothing here is a tolerance.
+      for (const [field, expected] of Object.entries(original.exif)) {
+        expect(
+          exif[field as keyof PhotoExifProbe],
+          `${photoCase.id}: ${original.path} does not carry ${field} = ${String(expected)}`,
+        ).toBe(expected);
+      }
+
+      // The whole point of the original: it carries what the transcode lost.
+      // If this ever passes vacuously, the file has been replaced by another
+      // stripped one and the bearing above has quietly lost its source.
+      expect(exif.imgDirectionDeg).toBeDefined();
+      expect(exif.lat).toBeDefined();
+      expect(exif.lon).toBeDefined();
+      expect(exif.focalLength35mmMm).toBeDefined();
+      for (const field of photoCase.photo.absentFields) {
+        expect(
+          exif[field],
+          `${photoCase.id}: the ORIGINAL is missing ${field} too — it is not an original`,
+        ).toBeDefined();
+      }
+
+      // The derivative and the original must at least agree on the frame. This
+      // does not prove they are the same picture — `sameImageEvidence` records
+      // the pixel comparison that does — but two different shapes would prove
+      // they are not, and that check is free.
+      expect(exif.imageWidthPx).toBe(photoCase.photo.widthPx);
+      expect(exif.imageHeightPx).toBe(photoCase.photo.heightPx);
+      expect(exif.orientation).toBe(photoCase.photo.orientation);
+      expect(original.sameImageEvidence.length).toBeGreaterThan(80);
+    });
+
+    it('places the original\'s own GPS fix and altitude near the case\'s observer', async () => {
+      const original = photoCase.photo.original;
+      if (original?.exif.lat === undefined || original.exif.lon === undefined) return;
+
+      // A second reading of the same position, from a different instrument
+      // than the one that produced `observer`. It is checked LOOSELY and on
+      // purpose: this asserts the two describe the same spot on the ridge, not
+      // that either is accurate. A coordinate typed wrong by a digit lands
+      // kilometres away and fails; a GPS fix a few metres off does not.
+      const separationM = greatCircleDistanceM(origin(photoCase), {
+        lat: original.exif.lat,
+        lon: original.exif.lon,
+      });
+      expect(
+        separationM,
+        `${photoCase.id}: the original's GPS fix is ${separationM.toFixed(0)} m from the observer`,
+      ).toBeLessThan(100);
+
+      // …and the barometric/GPS altitude against what the committed DEM reads.
+      // 60 m is wide because GPS altitude is the weakest number a phone
+      // records; it still catches a window cut from the wrong place.
+      if (original.exif.gpsAltitudeM === undefined) return;
+      const demM = await observerElevationM(photoCase);
+      expect(Math.abs(original.exif.gpsAltitudeM - demM)).toBeLessThan(60);
     });
 
     it('has a committed terrain window that contains the viewpoint and its whole sweep', async () => {

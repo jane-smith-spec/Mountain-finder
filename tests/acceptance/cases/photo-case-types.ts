@@ -9,12 +9,20 @@
  * is / is not visible", and its schema makes two things mandatory that neither
  * of the supplied Idaho photographs can honestly supply:
  *
- *   1. `view.bearingDeg: number`. Both photographs arrived with their EXIF
+ *   1. `view.bearingDeg: number`. Both photographs FIRST arrived with their EXIF
  *      stripped — orientation and pixel dimensions survived, GPS and
  *      `GPSImgDirection` did not (asserted in photo-cases.test.ts, from the
- *      committed files themselves). Any number written in that field would be
- *      invented, and an invented bearing is exactly the failure mode this
+ *      committed files themselves). Any number written in that field would have
+ *      been invented, and an invented bearing is exactly the failure mode this
  *      repository keeps designing against.
+ *
+ *      **Half of that is now fixed, by evidence rather than by relaxing the
+ *      rule.** The photographer later supplied the camera ORIGINALS, whose EXIF
+ *      survived intact, and the Railroad Ridge frame carries `GPSImgDirection
+ *      174.089° T`. So that case's view is a {@link MeasuredView} read out of
+ *      committed bytes; the Sunset Mountain lookout frame has no original and
+ *      remains an {@link UnmeasuredView}. The schema now expresses both, and
+ *      which one a case is remains a change to this file to make.
  *   2. `mustBeVisible` with at least one peak. Nobody has established which
  *      summits are in either frame. Deriving a must-see list from the geometry
  *      would make the pipeline its own ground truth — CLAUDE.md rule 4 — and a
@@ -101,11 +109,17 @@ export interface PhotoObserver extends LatLng {
 }
 
 /**
- * The direction the camera faced — which is NOT KNOWN for either photograph.
+ * The direction the camera faced, when nothing establishes it.
  *
  * `bearingDeg` is typed `null`, not `number | null`, deliberately: filling it in
  * has to be a change to this type and therefore a change a reviewer sees, not a
  * one-line edit to a data file that quietly turns a guess into ground truth.
+ *
+ * **That change has now happened once**, and the mechanism worked as designed —
+ * see {@link MeasuredView}. It was not a guess being promoted: the photographer
+ * supplied the ORIGINAL HEIC of the Railroad Ridge frame, whose EXIF carries
+ * `GPSImgDirection`. The JPEG that had been committed until then was a
+ * transcode that dropped the GPS IFD entirely, which is why this type existed.
  */
 export interface UnmeasuredView {
   readonly bearingDeg: null;
@@ -124,6 +138,51 @@ export interface UnmeasuredView {
   } | null;
 }
 
+/**
+ * The direction the camera faced, READ OUT OF THE FILE.
+ *
+ * The only admissible origin for `bearingDeg` is a `GPSImgDirection` tag in a
+ * committed image, cited by `bearingSourceId` and re-read from those bytes by
+ * the suite. It may not be typed in from a map, recalled by the photographer,
+ * or — above all — produced by this repository's own aligner: a case that
+ * carried a computed heading would be the pipeline grading its own homework,
+ * which CLAUDE.md rule 4 forbids.
+ *
+ * `corroborationDeg` exists to keep that separation legible. It records what
+ * an independent method got, purely as a reported number; nothing derives from
+ * it and no gate consults it.
+ */
+export interface MeasuredView {
+  readonly bearingDeg: number;
+  readonly measured: true;
+  /**
+   * `'T'` = referenced to true north, i.e. the writer already applied magnetic
+   * declination; `'M'` = magnetic, and a declination correction is still owed
+   * before the number may be compared with a computed bearing. Never assumed:
+   * a heading whose reference is unknown is not a heading.
+   */
+  readonly bearingRef: 'T' | 'M';
+  /** Id of the source this number was read from. Must be a committed image. */
+  readonly bearingSourceId: string;
+  /**
+   * Uncertainty in degrees, or `null` where none is established. `null` is the
+   * honest entry for a phone magnetometer: vendors publish no figure, and
+   * inventing ±10° because it sounds like the right order of magnitude would be
+   * exactly the invented precision this schema is built to prevent.
+   */
+  readonly uncertaintyDeg: number | null;
+  /**
+   * What an INDEPENDENT method obtained for the same frame, reported only.
+   * Never asserted, never averaged in, never used to narrow `uncertaintyDeg`.
+   */
+  readonly corroborationDeg: {
+    readonly bearingDeg: number;
+    readonly method: string;
+    readonly note: string;
+  } | null;
+  readonly note: string;
+}
+
 /** What the committed photograph's EXIF actually contains — and lacks. */
 export interface PhotoMetadata {
   /** Repository-relative path to the committed image. */
@@ -137,6 +196,37 @@ export interface PhotoMetadata {
    * unmeasured" a checked fact rather than a claim in a comment.
    */
   readonly absentFields: readonly (keyof PhotoExifProbe)[];
+  readonly note: string;
+  /**
+   * The camera original this file was transcoded from, where one was supplied.
+   *
+   * This exists because of a specific and repeatable failure: a phone JPEG that
+   * has been through a share sheet or a messaging app keeps its orientation and
+   * pixel dimensions and loses the entire GPS IFD — position, altitude and
+   * `GPSImgDirection` together. The image looks identical and the metadata that
+   * makes it usable is gone. `absentFields` above is a true statement about
+   * THIS file and a misleading one about the photograph, and this block is what
+   * separates the two.
+   */
+  readonly original?: PhotoOriginal;
+}
+
+/** A camera original, and the EXIF the suite re-reads out of its bytes. */
+export interface PhotoOriginal {
+  /** Repository-relative path to the committed original. */
+  readonly path: string;
+  /**
+   * Fields the ORIGINAL carries, asserted present AND equal by the suite. Every
+   * number a case takes from EXIF must appear here, so no such number can drift
+   * away from the bytes it claims to have come from.
+   */
+  readonly exif: PhotoExifProbe;
+  /**
+   * How it was established that the original and the committed derivative are
+   * the same photograph. Without this the original's EXIF is metadata for some
+   * other picture, and its heading would be worse than no heading at all.
+   */
+  readonly sameImageEvidence: string;
   readonly note: string;
 }
 
@@ -219,7 +309,7 @@ export interface PhotoCase {
   /** The `CaseTerrainSpec.caseId` whose committed window backs this case. */
   readonly terrainWindowCaseId: string;
   readonly observer: PhotoObserver;
-  readonly view: UnmeasuredView;
+  readonly view: UnmeasuredView | MeasuredView;
   readonly peakDataset: PeakDatasetBinding;
   /** Summits near the viewpoint. Recorded, never asserted to be in frame. */
   readonly summits: readonly RecordedSummit[];

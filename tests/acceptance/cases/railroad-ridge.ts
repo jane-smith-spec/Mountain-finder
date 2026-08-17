@@ -26,15 +26,47 @@
  * wrong by a digit lands in a valley and misses by hundreds of metres.
  *
  * ───────────────────────────────────────────────────────────────────────────
- * WHAT IS NOT ESTABLISHED — AND IS THEREFORE ASSERTED NOWHERE
+ * THE VIEW BEARING — MEASURED 2026-08-17, AND WHERE IT CAME FROM
  * ───────────────────────────────────────────────────────────────────────────
- * • THE VIEW BEARING. EXIF carries orientation and dimensions only; no GPS, no
- *   `GPSImgDirection` (asserted from the committed file). `view.bearingDeg` is
- *   `null` and the type will not take a number. The photograph looks across
- *   tundra at a jagged skyline, and the named White Cloud summits happen to lie
- *   in a southward arc of roughly 170–230° — that arc is recorded in
- *   `view.plausibleArcDeg` as WHERE THE MOUNTAINS ARE, which is not evidence of
- *   where the camera pointed, and it is asserted nowhere.
+ * Until 2026-08-17 this block read "NOT ESTABLISHED", because the committed
+ * JPEG carries orientation and dimensions and nothing else. That was a true
+ * statement about the FILE and a false one about the photograph: the JPEG is a
+ * transcode whose share path dropped the whole GPS IFD.
+ *
+ * The photographer then supplied the camera original,
+ * `fixtures/photos/real/railroad-ridge-48mm.heic`, and its EXIF is intact:
+ *
+ *     GPSImgDirection      174.08944701476096, GPSImgDirectionRef 'T'
+ *     GPSLatitude/Longitude    44.139125 N, 114.595650 W
+ *     GPSAltitude              3165.65 m  (SRTM reads 3166.1 m here — 0.4 m)
+ *     FocalLengthIn35mmFormat  48 mm   ->  hFOV 41.11 deg, vFOV 31.42 deg
+ *
+ * That the original is the SAME PICTURE as the committed JPEG is not assumed.
+ * Both decode to 4032 x 3024, and comparing them pixel for pixel gives a mean
+ * |dRGB| of 1.03/255 with a maximum of 18 — the residue of a JPEG transcode
+ * and a Display-P3 profile, not two different photographs.
+ *
+ * The heading is a phone magnetometer reading. It is TRUE-referenced (ref 'T',
+ * so declination is already applied) and it is NOT of survey quality; no
+ * uncertainty is stated because none is published, and inventing +-10 deg
+ * because it sounds like the right order of magnitude is the same sin as
+ * inventing the bearing was. What IS recorded, as corroboration and nothing
+ * more, is that this repository's own aligner — given the correct lens and a
+ * +-25 deg window — independently returns 174.893 deg from the terrain, 0.804
+ * deg away. Two unrelated instruments agreeing to under a degree is the
+ * strongest statement available here, and it is still not an error bar.
+ *
+ * ONE CONSEQUENCE WORTH STATING PLAINLY: every alignment run before this date
+ * assumed a 26 mm-equivalent lens, hFOV 69.4 deg, because the stripped JPEG
+ * named no focal length. The true frame is 41.1 deg — a 1.69x error in image
+ * scale. Sweeping the whole compass in 24 windows under the wrong lens produces
+ * an answer in NONE of them; under the right lens the window containing the
+ * truth is the only one that both survives its gates and holds the lowest
+ * residual of all 24 (1.112 deg). The aligner was not the thing that was wrong.
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * WHAT IS STILL NOT ESTABLISHED — AND IS THEREFORE ASSERTED NOWHERE
+ * ───────────────────────────────────────────────────────────────────────────
  * • WHICH SUMMITS ARE IN THE FRAME. Seventeen named summits stand within the
  *   7.5 km window and thirty-two within 25 km; several of them are within a few
  *   degrees of one another from here. Picking the ones the pipeline would
@@ -75,9 +107,56 @@ export const railroadRidgeCase: PhotoCase = {
       'vFovDeg',
     ],
     note:
-      'EXIF did not survive the upload path: orientation and dimensions only. ' +
-      'The position below came from the photographer separately, in degrees, ' +
-      'minutes and seconds — not from this file.',
+      'EXIF did not survive the upload path that produced THIS file: ' +
+      'orientation and dimensions only. It is a transcode, and the camera ' +
+      'original recorded below is where the position, heading and lens come ' +
+      'from. The stripping is specific and worth naming — the APP1 segment ' +
+      'survives at 9 564 bytes and the ICC Display-P3 profile survives, while ' +
+      'the entire GPS IFD is gone.',
+    original: {
+      path: 'fixtures/photos/real/railroad-ridge-48mm.heic',
+      // Every number this case takes from EXIF, re-read from the bytes by the
+      // suite, and compared with EXACT equality — these are transcriptions, and
+      // a transcription is right or wrong, not close.
+      //
+      // Hence -114.59564999999999 rather than the -114.59565 a person would
+      // write. GPS coordinates are stored as three rationals and reconstructed
+      // as `deg + min/60 + sec/3600`, so the result is whatever double that
+      // arithmetic lands on; -114.59565 is a DIFFERENT double and comparing
+      // against it fails. What is written here is the shortest decimal that
+      // round-trips to the value the file yields. Rounding it and loosening the
+      // comparison to compensate would trade a check that catches a wrong file
+      // for one that only catches a very wrong file.
+      exif: {
+        lat: 44.139125,
+        lon: -114.59564999999999,
+        gpsAltitudeM: 3165.6544715447153,
+        imgDirectionDeg: 174.08944701476096,
+        imgDirectionRef: 'T',
+        focalLengthMm: 6.764999866370901,
+        focalLength35mmMm: 48,
+        // Derived by src/exif/fov.ts, not stored in the file — pinned here
+        // because these two angles are what every alignment run consumes, and
+        // getting them wrong is precisely what went wrong before 2026-08-17.
+        // The frame itself (4032 x 3024, orientation 1) is asserted against
+        // `photo.widthPx`/`heightPx`/`orientation` above rather than repeated.
+        hFovDeg: 41.11209043916693,
+        vFovDeg: 31.417275658031485,
+      },
+      sameImageEvidence:
+        'Both decode to 4032 x 3024, and a pixel-for-pixel comparison of the ' +
+        'two gives mean |dRGB| = 1.03/255 with a maximum of 18 across all ' +
+        '36 578 304 channel samples. That is a JPEG transcode of a Display-P3 ' +
+        'HEIC, not a different photograph. Checked with heic-decode + jpeg-js ' +
+        'on 2026-08-17; the comparison is not in the offline suite because ' +
+        'decoding HEIC pixels needs a dependency the suite does not carry, and ' +
+        'the EXIF assertions below need only exifr, which already reads HEIC.',
+      note:
+        'iPhone 15 Pro Max, 2024-11-09 15:10:27 -07:00, 6.765 mm lens at f/1.78 ' +
+        '= 48 mm-equivalent (the 2x telephoto crop). Supplied by the ' +
+        'photographer on 2026-08-17 specifically to recover the heading, after ' +
+        'the transcoded JPEG had been in the repository for a day.',
+    },
   },
 
   terrainWindowCaseId: 'railroad-ridge',
@@ -124,25 +203,48 @@ export const railroadRidgeCase: PhotoCase = {
   },
 
   view: {
-    bearingDeg: null,
-    measured: false,
-    note:
-      'UNMEASURED. No GPSImgDirection in the file, and the photographer ' +
-      'supplied a position but not a heading. This is the photograph the ' +
-      'aligner should eventually recover a heading FROM — 98.8 % skyline ' +
-      'coverage — which is the whole reason no heading is written here: a ' +
-      'supplied guess would contaminate the one case that can test recovery.',
-    plausibleArcDeg: {
-      fromDeg: 170,
-      toDeg: 230,
-      basis:
-        'WHERE THE NAMED SUMMITS ARE, not where the camera pointed. Castle ' +
-        'Peak (176 deg), Mount Andrus (191 deg), Lee Peak (213 deg), WCP-10 ' +
-        '(205 deg) and Calkens Peak (225 deg) all lie in this arc, and the ' +
-        'photograph shows a jagged skyline. That is consistency, not evidence: ' +
-        'the White Clouds also fill the western arc, and nothing here rules it ' +
-        'out. Asserted nowhere in the suite.',
+    bearingDeg: 174.08944701476096,
+    measured: true,
+    bearingRef: 'T',
+    bearingSourceId: 'railroad-ridge-48mm-original',
+    // No published figure exists for an iPhone magnetometer's heading accuracy,
+    // so none is stated. See the note: what is available instead is a second
+    // instrument agreeing, which is corroboration and not an error bar.
+    uncertaintyDeg: null,
+    corroborationDeg: {
+      bearingDeg: 174.893,
+      method:
+        "This repository's own aligner (src/cv/align.ts): the skyline extracted " +
+        'from the photograph, correlated against an SRTM horizon profile swept ' +
+        '30 km at 0.25 deg / 90 m from the EXIF position, searching +-25 deg of ' +
+        'heading and +-10 deg of pitch under the EXIF lens.',
+      note:
+        'REPORTED, NOT ASSERTED, and it must never become the case\'s bearing: ' +
+        'a heading this repository computed cannot also be the ground truth ' +
+        'this repository is graded against (CLAUDE.md rule 4). Its interest is ' +
+        'that terrain and magnetometer are wholly unrelated instruments and ' +
+        'they land 0.804 deg apart. The alignment itself returned ' +
+        'low-confidence, not a lock: NCC 0.578, margin 0.031 against a 0.03 ' +
+        'floor, residual 1.111 deg against a 1.5 deg limit, recovered pitch ' +
+        '-1.55 deg. A near-miss agreement from a near-miss alignment is worth ' +
+        'exactly what it says and no more.',
     },
+    note:
+      'MEASURED, from GPSImgDirection in the camera original ' +
+      'railroad-ridge-48mm.heic — 174.08944701476096 deg with ' +
+      'GPSImgDirectionRef "T", so it is referenced to TRUE north and no ' +
+      'declination correction is owed. It is a phone magnetometer reading, not ' +
+      'a survey: fused compass headings are routinely several degrees out, and ' +
+      'nothing here claims otherwise. The number was NOT recalled by the ' +
+      'photographer, read off a map, or computed by this repository; it is a ' +
+      'tag in committed bytes, and the suite re-reads it from those bytes ' +
+      'rather than trusting this file. The frame it defines spans 153.5 to ' +
+      '194.6 deg (hFOV 41.11 deg about the heading), which places Castle Peak ' +
+      '(176.4 deg), Lonesome Lake Peak (190.5 deg) and Mount Andrus (191.4 ' +
+      'deg) inside it and WCP-10, Lee Peak, WCP-9, White Cloud Peaks and ' +
+      'Calkens Peak outside — arithmetic on the heading and the field of view, ' +
+      'which is NOT a claim that any of the three is visible. Occlusion is ' +
+      'unresolved and they stay unverified below.',
   },
 
   peakDataset: {
@@ -271,9 +373,14 @@ export const railroadRidgeCase: PhotoCase = {
   visibility: {
     status: 'unverified',
     blockedOn:
-      'A view bearing — to be RECOVERED from the terrain by src/cv\'s aligner ' +
-      'on this photograph rather than supplied, since this is the one ' +
-      'photograph in the repository whose skyline the extractor reads well.',
+      'IDENTIFICATION, no longer a bearing. The bearing arrived on 2026-08-17 ' +
+      'and it narrows the question rather than answering it: three of the ' +
+      'eight recorded summits fall inside the 153.5-194.6 deg frame and five ' +
+      'do not, but whether the three are SEEN depends on occlusion, and ' +
+      'deciding that with this repository\'s own occlusion code would make the ' +
+      'pipeline its own ground truth. What is missing is an external ' +
+      'identification of the summits in this frame — a person who knows the ' +
+      'range naming them, or a published panorama from Railroad Ridge.',
     note:
       'No summit here is asserted visible or hidden. The eight recorded above ' +
       'are the nearest by bearing from the camera; asserting any of them would ' +
@@ -378,17 +485,62 @@ export const railroadRidgeCase: PhotoCase = {
       retrieved: '2026-08-17',
       access: 'supplied-by-photographer',
       note:
-        'Committed as bytes. EXIF: orientation 1, 4032 x 3024 px, nothing else ' +
-        '— no GPS and no GPSImgDirection, which the suite asserts.',
+        'Committed as bytes, and a TRANSCODE: orientation 1, 4032 x 3024 px, ' +
+        'and no GPS IFD at all, which the suite asserts. Still the file every ' +
+        'test decodes, because jpeg-js reads it with no extra dependency. The ' +
+        'metadata comes from the original cited below.',
+    },
+    {
+      id: 'railroad-ridge-48mm-original',
+      title:
+        'Camera original of the same frame — iPhone 15 Pro Max, 48 mm-equivalent, ' +
+        '2024-11-09 15:10:27 -07:00, GPSImgDirection 174.08944701476096 deg ref T',
+      locator: 'fixtures/photos/real/railroad-ridge-48mm.heic',
+      retrieved: '2026-08-17',
+      access: 'supplied-by-photographer',
+      note:
+        'THE SOURCE OF THE VIEW BEARING, and of the position and lens. Supplied ' +
+        'a day after the JPEG, once it was clear the transcode had dropped the ' +
+        'GPS IFD. Its GPSAltitude of 3165.65 m lands 0.4 m from what SRTM reads ' +
+        'at its own stated coordinate, and its position lands 14.3 m from the ' +
+        'DMS coordinate the photographer had supplied by hand — two agreements ' +
+        'that were not available before it arrived. The suite re-reads every ' +
+        'field this case quotes directly from these bytes. The observer below ' +
+        'deliberately STAYS on the hand-supplied coordinate: 14.3 m is under ' +
+        'half of SRTM1\'s 30 m posting, so no computed quantity can tell the ' +
+        'two apart, and moving the case would churn every figure verified ' +
+        'against the first one in exchange for nothing measurable.',
+    },
+    {
+      id: 'railroad-ridge-wide-originals',
+      title:
+        'Two further originals from the same viewpoint, same minute: ' +
+        'railroad-ridge-24mm.heic (173.151 deg T, 5712 x 4284) and ' +
+        'railroad-ridge-14mm.heic (203.611 deg T, 4032 x 3024)',
+      locator: 'fixtures/photos/real/railroad-ridge-24mm.heic',
+      retrieved: '2026-08-17',
+      access: 'supplied-by-photographer',
+      note:
+        'Committed because they are the same camera at the same position ' +
+        'within the same minute at three different focal lengths — 14, 24 and ' +
+        '48 mm-equivalent, hFOV 104.3 / 73.7 / 41.1 deg — each carrying its own ' +
+        'independent magnetometer heading. That is a controlled test of whether ' +
+        'alignment degrades with field of view, and it is not a test this ' +
+        'repository could previously run. NOTHING IN THIS CASE IS DERIVED FROM ' +
+        'THEM YET: see docs/FINDINGS.md CV-5, where the wide pair currently ' +
+        'fails alignment at 12.9 and 9.8 deg residual while the 48 mm frame ' +
+        'succeeds at 1.11 deg. That is an open finding, not a settled result.',
     },
   ],
 
   caveats: [
-    'The position rests on ONE source: the photographer. It is cross-checked ' +
-      'against the terrain (a point on a ridge road reading 14 m below the ' +
-      'published crest) but not corroborated by a second position, and a ' +
-      'coordinate that is plausible is not a coordinate that is right. Any ' +
-      'future visibility gate from this viewpoint should say so.',
+    'The position now rests on TWO readings, which is one more than it had ' +
+      'before 2026-08-17 and still not two independent instruments: the ' +
+      'photographer\'s hand-read DMS coordinate, and the GPS fix in the camera ' +
+      'original (44.139125, -114.595650, GPSHPositioningError 2.66 m). They ' +
+      'are 14.3 m apart — under half a DEM posting — so the agreement is real ' +
+      'but weak evidence, since a mapping app showing the photo\'s own GPS pin ' +
+      'is arguably where the hand-read coordinate came from in the first place.',
     'The elevation cited for the observer is a DEM reading, so comparing it ' +
       'with the committed DEM window is a fixture-integrity check and NOT an ' +
       'independent confirmation. The independent line is the published ridge ' +
