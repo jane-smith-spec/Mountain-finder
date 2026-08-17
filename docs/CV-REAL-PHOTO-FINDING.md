@@ -376,3 +376,34 @@ Remaining and refiled: CV-2/CV-8 (the sky/snow cue for wide frames) still block 
 and 14 mm frames entirely; the snow-band lock is now a cosmetic defect of this frame's
 extraction rather than the accused; and the DEM shape floor (~0.9–1.35° RMS here) bounds
 what any aligner can recover at this viewpoint.
+
+## The sky-roughness cue, and the comb (CV-2/CV-8 resolved in part, 2026-08-17)
+
+**The cue.** The region above a genuine sky/terrain boundary must BE sky, and sky — even
+under bold clouds — varies smoothly down a column: measured on the three real Idaho frames,
+mean |Δaffinity| per row above every true split is 0.2–1.8×10⁻³ (48 mm clouds included, p90
+1.7×10⁻³), while any split whose "sky" contains terrain reads 2.5–13×10⁻³ — a 3–10×
+separation. `skyClarity01` in `src/cv/skyline.ts` ramps evidence to zero across
+`SKY_ROUGHNESS_CLEAR = 0.002` → `SKY_ROUGHNESS_OPAQUE = 0.006`, with the blur's own guard
+rows excluded so a boundary is never charged with the roughness of its own edge. Effects,
+measured:
+
+- 24 mm frame: the foreground-tundra lock is GONE (chosen rowNorm p90 0.979 → 0.410; every
+  readable column on the true skyline band). Coverage 63 % → 38 %: hazy crest columns now
+  report **nothing** rather than a confident wrong row.
+- 14 mm frame: coverage 1 % → 0 % — an outright refusal replaces a curve along the bottom of
+  the picture.
+- 48 mm frame: the ~40-column snow-band lock is gone too (max roughness above chosen splits
+  6.6 → 1.9×10⁻³); coverage 99 %.
+
+**The comb.** Cleaning the extraction exposed the CV-10 impostor fully: the ±6° window's own
+rim now out-scored the true optimum and `suggestPoseTrim` declined the 48 mm frame. A
+landscape scan (±0.6°-wide windows swept across ±8°) showed exactly ONE interior optimum —
+total ΔH **+0.50°** against the solved +0.597° — with every other window running downhill
+toward the −10° impostor. So the decision layer now sweeps the budget with overlapping
+narrow windows and keeps the interior optima of the same gated machinery; the compass picks
+the NEAREST; a monotone slope toward an out-of-budget match yields no candidates and the
+honest refusal. Result on the 48 mm frame: heading err **−0.109°**, pitch err **+0.690°**,
+and Castle Peak's flag lands **(+10, +66) px** from its true apex — against (+56, +332) at
+the raw EXIF pose and (+20, +78) for the pre-cue suggester. The 24 mm frame declines: its
+38 % coverage cannot anchor an interior optimum, and saying so beats inventing one.

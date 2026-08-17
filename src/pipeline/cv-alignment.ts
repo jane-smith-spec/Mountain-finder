@@ -49,6 +49,7 @@ import type {
   RgbaImage,
   Skyline,
   SkylineAlignment,
+  SkylineAlignmentFailure,
   SkylineAlignmentSolution,
 } from '../cv/types.js';
 
@@ -173,6 +174,17 @@ export const DEFAULT_COMPASS_BUDGET_DEG = 6;
 /** Ground nearer than this is unresolvable by the DEM — see docs/NEAR-FIELD.md. */
 export const DEFAULT_NEAR_FIELD_RADIUS_M = 150;
 
+/**
+ * Spacing of the comb's window centres, degrees. With windows ±0.6° wide the
+ * comb overlaps itself, so an optimum near a window's rim is interior to the
+ * neighbouring window — measured as what it takes to isolate the +0.50°
+ * optimum on the real frame, where a ±6° window's own rim out-scores it.
+ */
+export const COMB_STEP_DEG = 1;
+
+/** Half-width of each comb window, degrees. Overlaps the step (see above). */
+export const COMB_HALF_WIDTH_DEG = 0.6;
+
 export interface PoseTrimRequest {
   readonly image: RgbaImage;
   readonly scene: AlignableScene;
@@ -203,9 +215,21 @@ export type PoseTrimSuggestion =
       readonly headingTrimDeg: number;
       readonly pitchTrimDeg: number;
       /** The aligner's own quality verdict, gates and diagnostics included. */
+      /**
+       * The chosen window's own result. Its `headingOffsetDeg` is relative to
+       * that window's centre — `headingTrimDeg` above is the total; the
+       * `correctedCamera` is already the fully corrected pose.
+       */
       readonly alignment: SkylineAlignmentSolution;
       readonly skyline: Skyline;
       readonly compassBudgetDeg: number;
+      /**
+       * Other interior optima found in the budget, as total heading trims,
+       * nearest-first. Usually empty; more than one means the terrain shape
+       * genuinely supports several compass-consistent headings and the user
+       * should treat the suggestion as one of them, not the answer.
+       */
+      readonly otherCandidateHeadingsDeg: readonly number[];
     }
   | {
       readonly status: 'declined';
@@ -268,28 +292,85 @@ export function suggestPoseTrim(request: PoseTrimRequest): PoseTrimSuggestion {
     };
   }
 
-  const { skyline, alignment } = alignSceneToPhoto({
-    image: request.image,
-    scene: request.scene,
-    ...(request.skyline === undefined ? {} : { skyline: request.skyline }),
-    align: { ...request.align, headingRangeDeg: compassBudgetDeg },
-  });
+  // ── The comb search: interior optima, not the window maximum ──────────────
+  // A single search over the whole budget inherits the rim problem in
+  // miniature: on the measured frame the impostor's slope crosses the window,
+  // the in-window maximum lands on the rim, and the aligner (correctly)
+  // refuses — throwing away a genuine local optimum at +0.50° that the
+  // landscape scan shows is the only interior one for 8° in either direction.
+  // So the budget is swept with overlapping NARROW windows instead. Each
+  // window that resolves a non-rim optimum contributes a candidate; a window
+  // crossed by a slope refuses at its own rim and contributes nothing. What
+  // survives is the set of local optima of the same gated machinery — and the
+  // compass, which is a measurement, picks the NEAREST one. A monotone slope
+  // toward a match outside the budget produces no candidates at all, which is
+  // the CV-10 refusal, reached the honest way.
+  const skyline = extractSkyline(request.image, request.skyline);
+  const candidates: { totalHeadingDeg: number; alignment: SkylineAlignmentSolution }[] = [];
+  // A window that fails for a reason OTHER than its own rim — fog, a flat
+  // profile, a lost skyline — is diagnosing the INPUT, not the search. Kept so
+  // an unreadable photograph is declined for what it is, instead of being
+  // blamed on the terrain shape.
+  let nonRimFailure: SkylineAlignmentFailure | undefined;
+  for (
+    let centreDeg = -compassBudgetDeg;
+    centreDeg <= compassBudgetDeg + 1e-9;
+    centreDeg += COMB_STEP_DEG
+  ) {
+    const posed: CameraPose = {
+      ...request.scene.camera,
+      headingDeg: request.scene.camera.headingDeg + centreDeg,
+    };
+    const alignment = alignSkyline(skyline, posed, request.scene.horizon, {
+      ...request.align,
+      headingRangeDeg: COMB_HALF_WIDTH_DEG,
+      headingStepDeg: 0.1,
+    });
+    if (alignment.status === 'failed') {
+      if (alignment.reason !== 'search-range-exhausted') {
+        nonRimFailure ??= alignment;
+      }
+      continue;
+    }
+    const totalHeadingDeg = centreDeg + alignment.headingOffsetDeg;
+    if (Math.abs(totalHeadingDeg) > compassBudgetDeg + 1e-9) continue;
+    // Overlapping windows find the same optimum twice: keep the better-scored.
+    const near = candidates.find(
+      (candidate) => Math.abs(candidate.totalHeadingDeg - totalHeadingDeg) < COMB_STEP_DEG / 2,
+    );
+    if (near === undefined) {
+      candidates.push({ totalHeadingDeg, alignment });
+    } else if (alignment.diagnostics.score > near.alignment.diagnostics.score) {
+      near.totalHeadingDeg = totalHeadingDeg;
+      near.alignment = alignment;
+    }
+  }
 
-  if (alignment.status === 'failed') {
+  if (candidates.length === 0) {
     return {
       status: 'declined',
       reason: 'no-alignment',
-      detail: `${alignment.reason}: ${alignment.detail}`,
+      detail:
+        nonRimFailure !== undefined
+          ? `${nonRimFailure.reason}: ${nonRimFailure.detail}`
+          : `no interior correlation optimum within the ±${compassBudgetDeg}° compass budget — ` +
+            'every window ran to its rim, i.e. the terrain shape rises toward a match outside ' +
+            'the budget, which CV-10 forbids trusting. The manual controls are the honest option.',
       skyline,
     };
   }
 
+  candidates.sort((a, b) => Math.abs(a.totalHeadingDeg) - Math.abs(b.totalHeadingDeg));
+  const chosen = candidates[0];
+  if (chosen === undefined) throw new Error('unreachable: candidates is non-empty');
+
   return {
     status: 'suggested',
-    headingTrimDeg: alignment.headingOffsetDeg,
-    pitchTrimDeg: alignment.pitchOffsetDeg,
-    alignment,
+    headingTrimDeg: chosen.totalHeadingDeg,
+    pitchTrimDeg: chosen.alignment.pitchOffsetDeg,
+    alignment: chosen.alignment,
     skyline,
     compassBudgetDeg,
+    otherCandidateHeadingsDeg: candidates.slice(1).map((c) => c.totalHeadingDeg),
   };
 }

@@ -53,6 +53,7 @@ function suggested(alignment: SkylineAlignmentSolution): PoseTrimSuggestion {
     alignment,
     skyline: EMPTY_SKYLINE,
     compassBudgetDeg: 6,
+    otherCandidateHeadingsDeg: [],
   };
 }
 

@@ -224,11 +224,36 @@ export interface SkylineOptions {
   readonly marginFraction?: number;
 }
 
+/**
+ * Vertical roughness at or below which the region above a split is fully
+ * credible as SKY, in mean |Δaffinity| per row over the blurred column strip.
+ *
+ * MEASURED, not tuned (CV-2, 2026-08-17, the three real Idaho frames): above
+ * every true sky/terrain split the mean roughness is 0.2–1.8 ×10⁻³ per row —
+ * the 48 mm frame's bold clouds included (p90 = 1.7 ×10⁻³) — while any split
+ * whose "sky" contains terrain reads 2.5–13 ×10⁻³. Sky, even dramatic sky,
+ * varies SMOOTHLY down a column; rock, snowfields and tundra do not, and the
+ * ~8-pixel horizontal strip averaging has already suppressed their texture
+ * once, so what survives is a 3–10× separation.
+ */
+export const SKY_ROUGHNESS_CLEAR = 0.002;
+
+/**
+ * Roughness at or beyond which the region above a split cannot be sky at all.
+ * 0.006 sits below every terrain-contaminated measurement (min 2.5 ×10⁻³ only
+ * for barely-contaminated splits; the wide frames' foreground locks read
+ * 5.4–10.9 ×10⁻³) and above every sky one. Between the two bounds credibility
+ * falls linearly — a soft ramp, so a single freak column cannot flip a path.
+ */
+export const SKY_ROUGHNESS_OPAQUE = 0.006;
+
 /** Everything needed to score any split of one column in O(1). */
 interface ColumnPrefix {
   readonly rows: number;
   readonly sum: Float64Array;
   readonly values: Float64Array;
+  /** Prefix sums of |values[r] − values[r−1]| — the sky-roughness cue (CV-2). */
+  readonly roughness: Float64Array;
   readonly total: number;
   readonly totalVariance: number;
   readonly edgeBand: number;
@@ -255,15 +280,19 @@ function prefixOf(values: Float64Array, edgeBand: number, guard: number): Column
   const rows = values.length;
   const sum = new Float64Array(rows + 1);
   const sumSquares = new Float64Array(rows + 1);
+  const roughness = new Float64Array(rows);
   for (let row = 0; row < rows; row += 1) {
     const value = values[row] ?? 0;
     sum[row + 1] = (sum[row] ?? 0) + value;
     sumSquares[row + 1] = (sumSquares[row] ?? 0) + value * value;
+    if (row > 0) {
+      roughness[row] = (roughness[row - 1] ?? 0) + Math.abs(value - (values[row - 1] ?? 0));
+    }
   }
   const total = sum[rows] ?? 0;
   const mean = total / rows;
   const totalVariance = Math.max(0, (sumSquares[rows] ?? 0) / rows - mean * mean);
-  return { rows, sum, values, total, totalVariance, edgeBand, guard };
+  return { rows, sum, values, roughness, total, totalVariance, edgeBand, guard };
 }
 
 /**
@@ -289,12 +318,29 @@ function meanOver(values: Float64Array, from: number, to: number): number | unde
  * definition of the thing being looked for.
  */
 function factorsAt(prefix: ColumnPrefix, split: number): StepFactors {
-  const { rows, sum, values, total, totalVariance, edgeBand, guard } = prefix;
+  const { rows, sum, values, roughness, total, totalVariance, edgeBand, guard } = prefix;
   if (split <= 0 || split >= rows) return NO_STEP;
 
   const above = sum[split] ?? 0;
   const contrast = above / split - (total - above) / (rows - split);
   if (contrast <= 0) return NO_STEP;
+
+  // CV-2: the region above a sky/terrain boundary must BE sky, and sky varies
+  // smoothly down a column while terrain does not (constants above, measured).
+  // This is the cue that stops a bright snowfield or sunlit tundra edge from
+  // impersonating the horizon: the step itself looks identical, but everything
+  // above a false step contains terrain and is rough. The `guard` rows next to
+  // the split are excluded for the same reason `edge01` excludes them: the
+  // pre-blur has smeared the step itself across them, and charging a boundary
+  // with the roughness OF ITS OWN EDGE would penalise exactly the sharpest,
+  // best splits. A split near the top of the frame has almost nothing above it
+  // to measure, and correctly scores clear.
+  const topRows = split - guard - 1;
+  const meanRoughnessAbove = topRows <= 1 ? 0 : (roughness[topRows - 1] ?? 0) / (topRows - 1);
+  const skyClarity01 = clamp01(
+    (SKY_ROUGHNESS_OPAQUE - meanRoughnessAbove) / (SKY_ROUGHNESS_OPAQUE - SKY_ROUGHNESS_CLEAR),
+  );
+  if (skyClarity01 <= 0) return NO_STEP;
 
   // σ²_within = σ²_total − σ²_between, which is exact for a two-class partition.
   const weightAbove = split / rows;
@@ -319,7 +365,8 @@ function factorsAt(prefix: ColumnPrefix, split: number): StepFactors {
   const evidence =
     rampFactor(contrast, CONTRAST_FLOOR, CONTRAST_REFERENCE) *
     rampFactor(snr, SNR_FLOOR, SNR_REFERENCE) *
-    edge01;
+    edge01 *
+    skyClarity01;
 
   return {
     contrast,
