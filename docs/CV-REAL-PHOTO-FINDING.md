@@ -173,3 +173,160 @@ fit. `agreement01` already measures neighbour agreement and is *reported*, but i
 constrain the choice.
 
 That is a real piece of work, and it now has a real photograph to be measured against.
+
+---
+
+# The fix: a continuity constraint across columns
+
+**2026-08-17.** The defect above is repaired. `extractSkyline` no longer picks a winner per
+column; it scores **every** row of every column and then chooses the *path* through those scores
+that maximises total step evidence minus a penalty for how fast the boundary moves. The
+per-column step fit has not been improved — it has been demoted from "the answer" to "one term
+in the answer", which is the only place the missing information could have come from.
+
+## Reproduced first, at the same viewpoint
+
+Everything below was re-measured in this environment before anything was changed, against the
+same Railroad Ridge position (44.13900, −114.59569, SRTM reads 3166.1 m) and a 720-bearing,
+30 km, 90 m-step SRTM sweep. Numbers differ in the last digit from the section above because
+that run's exact assumed lens was not recorded; the conclusion is identical and the *alignment*
+reproduced exactly — 12 windows, 12 refusals, and the same `no-correlation` 7 / `residual-
+too-large` 4 / `ambiguous-correlation` 1 split.
+
+```
+photo skyline, per-column fit    −4.38° … 11.59°   SPAN 15.96°   (26 mm-eq, hFOV 69.4°)
+terrain, entire 360°             −1.94° …  9.03°   SPAN 10.97°
+most relief a 69.4° frame holds, over the whole compass:  8.80°  (at 030°; 8.64° at 000°)
+```
+
+## Before and after
+
+```
+                              coverage   mean conf   ALTITUDE SPAN
+tundra, per-column fit          98.2 %      0.487       15.96°     ← impossible
+tundra, continuous path         97.9 %      0.497        8.44°     ← inside 8.63°/8.80°
+lookout, per-column fit          1.0 %      0.111          —
+lookout, continuous path         2.9 %      0.132          —       ← still unreadable
+```
+
+**15.96° → 8.44°.** The extracted boundary now fits inside the relief the terrain can actually
+present, with 0.2° to spare against the 8.63° figure quoted above and 0.36° against the 8.80°
+this run measured. The remaining span is real: about forty columns near x ≈ 0.35–0.42 still sit
+on the snow/rock boundary part-way down the massif rather than on the crest above it, and that
+is stated here rather than tuned away.
+
+The lookout photograph moved from 5 readable columns to 15, of 512. It is still, correctly,
+unreadable: 2.9 % is an order of magnitude below the aligner's 25 % floor, so `alignSkyline`
+still refuses it on coverage before correlating anything. A continuity constraint could very
+easily have turned an unreadable photograph into a smooth, confident, entirely invented curve.
+It did not, and there is now a test that says so.
+
+## The penalty, and why it is a slope
+
+The quantity the penalty is written in is **dα/dβ — degrees of altitude per degree of bearing**.
+For a skyline at horizontal distance `d`, moving `dβ` along the crest covers ground `d·dβ` and
+changes height by `dz`, and `α ≈ z/d`, so
+
+```
+dα/dβ = dz / (d · dβ) = tan θ / sin φ
+```
+
+with `θ` the ground slope along the crest and `φ` the angle between the crest line and the line
+of sight. **The distance cancels** — a ridge 2 km away and one 20 km away with the same shape
+present the same apparent slope — which is what makes this a property of terrain rather than of
+the photograph.
+
+It is also measurable without knowing the focal length. A rectilinear lens with square pixels
+subtends the same angle per pixel vertically and horizontally, so at the frame centre
+`dα/dβ = Δrow_px / Δx_px` exactly, with no focal length in it. Off axis the pixel slope
+understates it by at most `sec(hFOV/2) − 1 ≈ 21 %` across a 69° frame.
+
+- **Free below 5.** Ordinary mountain terrain reaches about θ = 40° (tan 0.84) before it stops
+  being a slope and becomes a cliff; a crest running within about 10° of the line of sight
+  divides that by sin 10° = 0.174, giving ≈ 4.8. Below that the boundary moves for nothing.
+- **Linear above it**, one column of unambiguous step evidence per unit of excess slope. Linear
+  and not quadratic on purpose: a linear penalty charges the same for a rise whether it is taken
+  in one column or spread over ten, so **sharpness itself is never penalised** and a real cliff
+  or an end-on arête stays possible. A quadratic penalty is a soft slope cap, and a slope cap is
+  simply wrong about mountains.
+
+What actually defeats the two-surface stitch is therefore not the jump alone. Leaving the
+skyline and returning pays the excess twice *and* spends the crossing columns on rows that carry
+no edge at all, so the detour has to out-earn its own dead columns. A genuine spire pays nothing:
+every row of its flank is a real edge, and its slope is inside the free limit.
+
+### The constants are not doing the work — measured
+
+The tundra span was measured across more than two orders of magnitude of both constants:
+
+```
+penalty      0      0.01    0.03    0.05    0.1     0.3     1       3       10
+span       16.08°  16.10°   8.44°   8.44°   8.44°   8.44°   8.44°   8.44°   8.44°
+
+free slope   3       5       8      12          (penalty held at 1)
+span       8.44°   8.44°   8.44°   8.44°
+```
+
+`penalty = 0` is the control: the same per-row evidence with the constraint switched off returns
+16.08°, i.e. the defect. So the improvement is the continuity constraint and not the change of
+per-column objective — and above a threshold of about 0.03 the answer stops depending on the
+exchange rate at all. **No constant was moved to make a heading come out anywhere.**
+
+## What the aligner does now, which is still refuse
+
+Re-run over the same 12 heading windows, ±25° each, pitch searched over ±10°:
+
+```
+000°  residual-too-large           score  0.5730  margin 0.486  residual 1.96°
+030°  search-range-exhausted       score  0.3742  margin 0.330  residual 3.21°
+060°  no-correlation               score −0.0495  margin 0.170  residual 3.66°
+090°  no-correlation               score  0.1235  margin 0.065  residual 2.34°
+120°  no-correlation               score  0.2618  margin 0.032  residual 2.22°
+150°  residual-too-large           score  0.5589  margin 0.315  residual 2.06°
+180°  residual-too-large           score  0.5589  margin 0.533  residual 2.06°
+210°  no-correlation               score −0.0138  margin 0.068  residual 3.15°
+240°  no-correlation               score  0.0375  margin 0.013  residual 2.96°
+270°  no-correlation               score  0.2106  margin 0.162  residual 2.50°
+300°  search-range-exhausted       score  0.5544  margin 0.265  residual 2.26°
+330°  featureless-terrain-profile  score  0.5632  margin 0.010  residual 2.26°
+```
+
+**Twelve windows, twelve refusals. That is the honest outcome and it is being reported as one.**
+
+The correlation did improve — it was 0.0000 everywhere in the first run and reaches 0.573 now —
+and it is still not an alignment. Scanning every heading on the compass at 0.5°, solving pitch at
+each:
+
+```
+best anywhere            345.0°   score 0.5732   residual 1.96°
+best in 150–250°         168.5°   score 0.5588   residual 2.07°
+```
+
+Two things say the same thing. First, the best heading on the entire compass beats the best one
+inside the arc where the White Clouds demonstrably are — Castle Peak 176°, Mount Andrus 191°,
+Lee Peak 213° — by **0.014 of NCC**, which is no separation at all: the landscape has no winner.
+Second, at both of them the terrain sits about **2° RMS off** the extracted skyline, past the
+1.5° the residual gate allows, so even the better one does not actually lie on the photograph.
+
+345° is not a hypothesis. It points away from the range in the picture, it is tied with its
+rivals, and the geometry rejects it independently. It is recorded here only so that nobody
+re-derives it later and mistakes it for a result.
+
+## What is left, stated as a limitation and not as a caveat
+
+1. **About forty columns still follow the wrong surface.** Near x ≈ 0.35–0.42 the crest's own
+   evidence is weak (0.07–0.26) while the snow/rock boundary 236 rows below it is strong
+   (0.28–0.56), and the free slope lets the path reach it over six columns without paying. The
+   span is physically possible now, but part of the curve is still not the skyline.
+2. **A residual of ~2° is not obviously a heading problem.** It is roughly the size of the
+   remaining extraction error, and it is also roughly what an unmodelled pitch, a crop, or a
+   focal length off by a few millimetres would produce. Those are separate hypotheses and none of
+   them has been tested here.
+3. **The 30 km sweep may still be short.** Cause 4 from the previous section was never
+   eliminated, only made unnecessary; it becomes relevant again now that the skyline is one
+   surface.
+
+The next measurement worth making is the one this document already recommended and which is now
+finally worth doing: render the computed profile at 168° over the photograph and look at where
+the two curves part company. With the extracted curve no longer self-contradictory, that
+comparison can finally mean something.

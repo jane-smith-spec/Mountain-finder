@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { extractSkyline, READABLE_FLOOR } from './skyline.js';
+import { CONTRAST_FLOOR, extractSkyline, READABLE_FLOOR, SNR_FLOOR } from './skyline.js';
 import type { RgbaImage } from './types.js';
 
 /** Build an image from a per-pixel colour function. */
@@ -88,8 +88,9 @@ describe('extractSkyline refuses where there is no evidence', () => {
   });
 
   it('reports nothing for an inverted frame (dark above, bright below)', () => {
-    // There is no ordered split with the bright segment on top, so `fitStep`
-    // has nothing to return. A skyline is sky-above-terrain by definition.
+    // No ordered split anywhere has the bright segment on top, so every row of
+    // every column scores zero evidence and the path through them carries none.
+    // A skyline is sky-above-terrain by definition.
     const image = imageFrom(64, 64, (_x, y) => (y < 32 ? ROCK : SKY));
     const skyline = extractSkyline(image, { columnCount: 64 });
     expect(skyline.coverage01).toBe(0);
@@ -128,8 +129,8 @@ describe('extractSkyline refuses where there is no evidence', () => {
   });
 });
 
-describe('the neighbour-agreement factor', () => {
-  it('demotes a single column that locked onto a dark cloud bank above the ridge', () => {
+describe('columns that disagree with their neighbours', () => {
+  it('reports nothing for a column whose only strong step is a cloud edge', () => {
     const WIDTH = 128;
     const HEIGHT = 200;
     const ROGUE = 64;
@@ -137,12 +138,33 @@ describe('the neighbour-agreement factor', () => {
     const CLOUD_TOP = 40;
     // Every column is sky over rock at row 150. In the rogue column a dark
     // storm bank fills rows 40–149, so its strongest ordered step is the TOP OF
-    // THE CLOUD, not the ridge. That is not a bug in the step fit — with sky
-    // affinity 0.752 above, 0.320 in the cloud and 0.287 in the rock, the split
-    // at row 40 scores w₁w₂(μ₁−μ₂)² = 0.16 · 0.442² = 0.0313 against the
-    // ridge's 0.1875 · 0.148² = 0.0041, so the cloud genuinely is the strongest
-    // step in that column. It is exactly the wrong answer the extractor cannot
-    // see on its own, and the neighbours are the only evidence against it.
+    // THE CLOUD, not the ridge: with sky affinity 0.752 above, 0.320 in the
+    // cloud and 0.287 in the rock, the split at row 40 scores
+    // w₁w₂(μ₁−μ₂)² = 0.16 · 0.442² = 0.0313 against the ridge's
+    // 0.1875 · 0.148² = 0.0041. The cloud genuinely is the strongest step in
+    // that column, and no amount of per-column cleverness can see otherwise.
+    //
+    // ── What changed here, and why the expectation moved ────────────────────
+    // This test used to assert that the extractor RETURNED the cloud top and
+    // that `agreement01` then demoted it to a confidence below the readable
+    // floor. That was the best available answer when each column was fitted on
+    // its own: a wrong row, marked untrustworthy after the fact.
+    //
+    // With the continuity constraint the wrong row is never chosen. Reaching
+    // the cloud top costs 110 rows of altitude across one column of bearing,
+    // twice — an apparent slope of 110 against a free limit of 5 — and one
+    // column of evidence cannot buy that. So the path stays on the ridge.
+    //
+    // And on the ridge this column has nothing to report either, which the SNR
+    // factor is what notices. Splitting at row 150 gives μ₁ = 0.4352 (40 rows
+    // of sky at 0.752 over 110 of cloud at 0.320) against μ₂ = 0.287, a
+    // contrast of 0.148 — but the cloud makes that upper segment so
+    // heterogeneous that σ_within = 0.165 EXCEEDS the step itself: SNR 0.89,
+    // below the floor of 1, so the evidence is exactly 0 at every row.
+    //
+    // The honest output is therefore a GAP, which is strictly better than the
+    // demoted wrong row this test used to assert: the aligner weights by
+    // confidence, but it still has to be handed a row to weight.
     const image = imageFrom(WIDTH, HEIGHT, (x, y) => {
       if (y >= RIDGE_ROW) return ROCK;
       if (x === ROGUE && y >= CLOUD_TOP) return [50, 52, 60];
@@ -150,27 +172,28 @@ describe('the neighbour-agreement factor', () => {
     });
     const skyline = extractSkyline(image, { columnCount: WIDTH });
 
-    // First: the step fit really did land on the cloud top, not the ridge.
-    const rogueRow = skyline.columns[ROGUE]?.rowNorm;
-    if (rogueRow !== undefined) {
-      expect(Math.abs(rogueRow * HEIGHT - (CLOUD_TOP + 0.5))).toBeLessThanOrEqual(1.5);
-    }
-
     const rogue = skyline.columns[ROGUE];
     const neighbour = skyline.columns[ROGUE + 8];
     expect(rogue).toBeDefined();
     expect(neighbour).toBeDefined();
     if (rogue === undefined || neighbour === undefined) return;
 
-    // The neighbour is on the real ridge with full agreement.
+    // Nothing is reported for the rogue column, and certainly not the cloud.
+    expect(rogue.rowNorm).toBeUndefined();
+    expect(rogue.confidence01).toBe(0);
+    // …and the factor that disqualifies it is the SNR, not the contrast: the
+    // step is real enough (0.148) and simply smaller than the scatter around it.
+    expect(rogue.contrast).toBeGreaterThan(CONTRAST_FLOOR);
+    expect(rogue.snr).toBeLessThan(SNR_FLOOR);
+
+    // Its neighbours are unharmed: on the real ridge, in full agreement.
     expect(neighbour.rowNorm).toBeDefined();
     expect(neighbour.agreement01).toBeGreaterThan(0.9);
-
-    // The rogue column disagrees with its neighbours by 0.55 of the frame,
-    // which at a 0.12 tolerance is 1/(1+(0.55/0.12)²) ≈ 0.045 — an order of
-    // magnitude of demotion, and enough to make it not worth listening to.
-    expect(rogue.agreement01).toBeLessThan(0.06);
-    expect(rogue.confidence01).toBeLessThan(0.1);
+    if (neighbour.rowNorm !== undefined) {
+      expect(Math.abs(neighbour.rowNorm * HEIGHT - (RIDGE_ROW + 0.5))).toBeLessThanOrEqual(1);
+    }
+    // One column of 128 lost, and only that one.
+    expect(skyline.coverage01).toBeGreaterThanOrEqual(127 / 128);
   });
 
   it('does NOT demote a genuinely sharp summit, which also disagrees locally', () => {

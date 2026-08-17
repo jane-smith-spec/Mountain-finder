@@ -22,6 +22,50 @@ interim answer. This measures the error from the photograph instead.
 | `rays.ts` | What world direction does a pixel look along, and what does a pose error do to it? |
 | `align.ts` | Which heading and pitch offset make the terrain profile lie on that extracted skyline — or why can't any? |
 
+## The extractor is a path, not 512 independent answers
+
+A photograph taken while standing on a broad ridge contains at least two ordered
+sky-over-terrain steps in most columns: the distant skyline against the sky, and
+a nearer edge inside the terrain — a snowfield ending on a cliff band, the lip of
+the foreground. **Both are excellent steps.** Fitting each column on its own,
+some columns lock onto one and some onto the other, each with full confidence,
+and the returned curve is two surfaces stitched together.
+
+That is measured, not hypothetical. On `fixtures/photos/real/tundra-blue-sky.jpeg`
+the per-column extractor returned a boundary spanning **15.96° of altitude**,
+against a terrain horizon that spans 10.97° over the whole compass from that
+viewpoint and at most 8.8° inside any one 69° frame. Span is the right thing to
+measure because it survives not knowing the pose: pitch shifts the range without
+changing its width and focal length scales it roughly uniformly, so neither can
+turn 8.8° into 15.96°. The full story is in
+[`docs/CV-REAL-PHOTO-FINDING.md`](../../docs/CV-REAL-PHOTO-FINDING.md).
+
+So `skyline.ts` scores **every row of every column** — the same contrast × SNR ×
+local-edge product the confidence is built from — and takes the path through
+those scores that maximises total evidence minus a penalty for how fast the
+boundary moves. The dynamic program is exact and runs in `O(rows × columns)`: the
+penalty is flat-then-linear, which factors into a sliding-window maximum followed
+by the two-pass L1 transform, so no candidate shortlist and no approximation.
+
+The penalty is written in **degrees of altitude per degree of bearing**, which is
+`tan θ / sin φ` for a crest of ground slope `θ` seen at `φ` to the line of sight —
+distance cancels, so it is a property of terrain and not of the photograph. It is
+free below 5 (ordinary terrain at 40° seen within 10° of end-on) and **linear**
+above, one column of perfect evidence per unit of excess. Linear rather than
+quadratic on purpose: a quadratic penalty is a soft slope cap, and a real skyline
+is locally near-vertical at a cliff edge. Where the price is genuinely too high
+the extractor reports a **gap**, never a smoothed compromise curve.
+
+The tundra span is 8.44° after this, and 15.96° with the penalty set to zero and
+nothing else changed. It is 8.44° for every penalty from 0.03 to 10 and every
+free slope from 3 to 12 — the constants are not what decides it.
+
+`agreement01` stayed a **diagnostic** and did not become the constraint, which was
+a deliberate choice: a number that drives the path cannot also certify it. It
+still measures deviation from the robust local median, over a wider window and a
+different statistic than the slope penalty, so it can still report that the path
+was dragged through a column it should not have been.
+
 ## The one result the search is built on
 
 Write `A(h, p)` for the camera axis triple at heading `h`, pitch `p`. Then
@@ -105,13 +149,22 @@ profile, through cloud, sun flare and noise, with 60 % of the frame fogged out,
 and on a sector profile rather than a full 360° sweep. Every failure case above
 is exercised and refuses.
 
-**Not proven: the extractor on a real photograph.** There is no photograph of a
-mountain in this repository. `fixtures/photos/*.jpg` are uniform grey frames
-generated for the EXIF suite, and the ground-truth cases deliberately cite
-images on Wikimedia Commons rather than vendoring them. The extractor is
-therefore only ever measured against images this repository drew, and its
-`skyAffinity` model — sky is brighter and bluer — is a heuristic with known
-enemies:
+**Measured on two real photographs, and neither aligns.** `fixtures/photos/real/`
+holds two supplied photographs with real positions and no EXIF bearing.
+`tundra-blue-sky.jpeg` is read at 98 % coverage and its extracted skyline now
+spans an altitude range a real horizon could have — but `alignSkyline` refuses it
+in all twelve heading windows, and the best correlation anywhere on the compass
+(0.573 at 345°) is tied to within 0.014 with the best inside the arc where the
+range actually is (0.559 at 168.5°), with the terrain sitting ~2° RMS off the
+skyline at both. `lookout-snow-haze.jpeg` is read at 2.9 % and refused on
+coverage. **The end-to-end chain has never yet succeeded on a real photograph**,
+and that is the honest headline; what has been proven is that it does not invent
+an answer instead.
+
+The remaining `fixtures/photos/*.jpg` are uniform grey frames generated for the
+EXIF suite, and the ground-truth cases deliberately cite images on Wikimedia
+Commons rather than vendoring them. The `skyAffinity` model — sky is brighter and
+bluer — is a heuristic with known enemies:
 
 - **sunlit snow is brighter than a hazy sky.** `align.test.ts` runs exactly this
   case: the extractor locks onto the *snowline*, a flat horizontal edge, and the

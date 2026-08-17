@@ -37,10 +37,11 @@ import { decode as decodeJpeg } from 'jpeg-js';
 import { describe, expect, it } from 'vitest';
 
 import { cameraPoseFromFocalLength } from '../core/projection.js';
-import { alignSkyline } from './align.js';
+import { alignSkyline, MIN_USED_FRACTION } from './align.js';
+import { directionToSky, unprojectFromImage } from './rays.js';
 import { extractSkyline } from './skyline.js';
 import { signatureProfile } from './testing/profiles.js';
-import type { RgbaImage } from './types.js';
+import type { RgbaImage, Skyline } from './types.js';
 
 const PHOTO_DIR = fileURLToPath(new URL('../../fixtures/photos/', import.meta.url));
 
@@ -85,6 +86,132 @@ describe('fixtures/photos/gornergrat-matterhorn.jpg', () => {
     // would be indistinguishable from "checked, EXIF was right".
     expect(result).not.toHaveProperty('headingOffsetDeg');
     expect(result).not.toHaveProperty('correctedCamera');
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * The two REAL photographs
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * A frame's worth of altitude, in degrees, from an extracted skyline.
+ *
+ * Span, not position, because span is the one number that survives not knowing
+ * the pose: an unmodelled pitch shifts the whole range without changing its
+ * width, and a wrong focal length scales it roughly uniformly. That is what
+ * makes it a decisive test of an extractor whose photograph carries no EXIF.
+ */
+function altitudeSpanDeg(skyline: Skyline, focalLength35mm: number): number {
+  const camera = cameraPoseFromFocalLength({
+    // Any heading: the frame is rigid, so the span does not depend on where it
+    // points. 190° is only the arc the photograph is thought to look along.
+    headingDeg: 190,
+    focalLength35mm,
+    imageWidthPx: skyline.widthPx,
+    imageHeightPx: skyline.heightPx,
+  });
+  let lowest = Number.POSITIVE_INFINITY;
+  let highest = Number.NEGATIVE_INFINITY;
+  for (const column of skyline.columns) {
+    if (column.rowNorm === undefined) continue;
+    const sky = directionToSky(unprojectFromImage(camera, column.xNorm, column.rowNorm));
+    lowest = Math.min(lowest, sky.altitudeDeg);
+    highest = Math.max(highest, sky.altitudeDeg);
+  }
+  return highest >= lowest ? highest - lowest : 0;
+}
+
+describe('fixtures/photos/real/tundra-blue-sky.jpeg', () => {
+  // Railroad Ridge Road, White Cloud Mountains, Idaho: 44.13900, −114.59569,
+  // SRTM 3166.0 m. Position from the photographer, cross-checked against the
+  // DEM to the foot (docs/IDAHO-PHOTO-CASES.md). 26 mm-equivalent is the middle
+  // of the focal sweep that was run against it and gives hFOV 69.4° — the "69°
+  // frame" the terrain measurement below is quoted for.
+  const FOCAL_35MM = 26;
+
+  /**
+   * The most altitude any 69° frame from that viewpoint could possibly contain.
+   *
+   * Measured from the terrain, not from this code: a 720-bearing SRTM sweep out
+   * to 30 km around the camera spans 10.97° of altitude over the ENTIRE compass
+   * (−1.94° … 9.03°), and the widest 69.4° window anywhere in it holds 8.8°
+   * (8.63° due north, which is the figure `docs/CV-REAL-PHOTO-FINDING.md`
+   * records). No photograph taken from that spot, in any direction, at any
+   * pitch, with any lens, can show a skyline spanning more than that.
+   *
+   * The per-column extractor returned 15.96° — very nearly twice the ceiling.
+   * That is not a wrong heading or a wrong lens; it is arithmetically
+   * impossible for one horizon, and it is what said the returned curve was two
+   * surfaces stitched together.
+   */
+  const RELIEF_CEILING_DEG = 8.63;
+
+  const image = loadPhoto('real/tundra-blue-sky.jpeg');
+  const skyline = extractSkyline(image);
+
+  it('is the 4032×3024 frame the case records', () => {
+    expect(image.width).toBe(4032);
+    expect(image.height).toBe(3024);
+  });
+
+  it('reads nearly every column — this photograph is a favourable one', () => {
+    expect(skyline.coverage01).toBeGreaterThan(0.9);
+  });
+
+  it('returns a skyline a real horizon could actually have', () => {
+    expect(altitudeSpanDeg(skyline, FOCAL_35MM)).toBeLessThanOrEqual(RELIEF_CEILING_DEG);
+  });
+
+  it('gets further inside the ceiling as the assumed lens narrows', () => {
+    // The ceiling above is quoted for one specific frame width, so the test
+    // above is stated at that width and nowhere else — a wider assumed lens
+    // spreads the same rows over more degrees and would have to be compared
+    // against the relief a wider frame can hold, which was not measured.
+    //
+    // What IS lens-independent is the ordering: narrowing the lens scales the
+    // span down roughly with tan(vFOV/2), so every focal length longer than the
+    // one assumed is further inside the ceiling, not closer to it. Asserted so
+    // that the single-focal-length test above cannot be a coincidence of the
+    // number 26.
+    let previous = altitudeSpanDeg(skyline, FOCAL_35MM);
+    for (const focal of [30, 35, 50]) {
+      const span = altitudeSpanDeg(skyline, focal);
+      expect(span).toBeLessThan(previous);
+      expect(span).toBeLessThanOrEqual(RELIEF_CEILING_DEG);
+      previous = span;
+    }
+  });
+});
+
+describe('fixtures/photos/real/lookout-snow-haze.jpeg', () => {
+  // Sunset Mountain Lookout, Idaho. Snow-dominant, white haze, and a lookout
+  // frame over the left quarter: the extractor cannot read it, and the point of
+  // this case is that it must go on not being able to. A continuity constraint
+  // could easily have turned an unreadable photograph into a smooth, confident,
+  // entirely invented curve — that is exactly the failure it must not cause.
+  const image = loadPhoto('real/lookout-snow-haze.jpeg');
+  const skyline = extractSkyline(image);
+
+  it('still cannot read it, and still says so', () => {
+    // Well under the aligner's 25 % floor, so `alignSkyline` refuses on
+    // coverage before it correlates anything. The margin here is an order of
+    // magnitude, not a hair.
+    expect(skyline.coverage01).toBeLessThan(0.1);
+    expect(skyline.coverage01).toBeLessThan(MIN_USED_FRACTION);
+  });
+
+  it('refuses to align it rather than returning an offset', () => {
+    const camera = cameraPoseFromFocalLength({
+      headingDeg: 0,
+      focalLength35mm: 26,
+      imageWidthPx: image.width,
+      imageHeightPx: image.height,
+    });
+    const result = alignSkyline(skyline, camera, signatureProfile(0, 60));
+    expect(result.status).toBe('failed');
+    if (result.status !== 'failed') return;
+    expect(result.reason).toBe('insufficient-skyline');
+    expect(result).not.toHaveProperty('headingOffsetDeg');
   });
 });
 

@@ -25,6 +25,8 @@ export {
   SNR_REFERENCE,
   READABLE_FLOOR,
   AGREEMENT_TOLERANCE_NORM,
+  CONTINUITY_FREE_SLOPE,
+  CONTINUITY_PENALTY,
 } from './skyline.js';
 
 export { alignSkyline } from './align.js';
