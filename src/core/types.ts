@@ -124,6 +124,19 @@ export interface VisiblePeak extends PeakSighting {
   occludingAltitudeDeg: number;
   /** altitudeDeg − occludingAltitudeDeg. Near zero = only just clearing the ridge. */
   clearanceDeg: number;
+  /**
+   * Ground distance to the terrain that set `occludingAltitudeDeg` — the
+   * nearest sample among those reaching that angle, read off the same skyline
+   * staircase the angle came from. Absent when no nearer terrain exists (the
+   * −90° case) or when the profile point carries no staircase to read it from.
+   *
+   * ADDED for the P1.6 near-field question: an occluding angle is only as
+   * trustworthy as the distance it was measured over, and a DEM cannot resolve
+   * ground within a few postings of the camera (docs/NEAR-FIELD.md). This is
+   * the number that says whether `clearanceDeg` was measured against a ridge
+   * or against the sampling grid.
+   */
+  occluderDistanceKm?: number;
 }
 
 /**
@@ -152,12 +165,28 @@ export interface VisiblePeak extends PeakSighting {
  *     mountain's name on somebody else's hillside, which is the one failure
  *     this project exists to prevent, so such peaks are never drawn.
  *
- * The classifier that decides between the two, and the geometric argument for
- * the rule it uses, live in {@link classifyOcclusion} in visibility.ts. Use
- * {@link isLabelled} rather than comparing strings at call sites, so the
+ *   `'marginal'`
+ *     ADDED for P1.6 (docs/NEAR-FIELD.md). The comparison itself is not
+ *     trustworthy: the occluding terrain sits inside the near field the DEM
+ *     cannot resolve, and the peak's clearance is smaller than the uncertainty
+ *     of the ground it was measured against — so `visible` and `occluded`
+ *     would both be claims the data cannot support. Measured at Railroad
+ *     Ridge: Castle Peak, plainly visible in the photograph, cleared a phantom
+ *     wall 90 m away by 0.065° when adjacent DEM cells there disagree by
+ *     metres. A marginal summit is labelled and de-emphasised — saying "about
+ *     here, if anything blocks it we cannot tell" is both honest and useful,
+ *     where either confident verdict would be a coin toss dressed as a
+ *     measurement. This state only ever arises when the caller supplies a
+ *     near-field uncertainty; with none, verdicts are exactly the three-way
+ *     split above.
+ *
+ * The classifier that decides among the occluded pair, and the geometric
+ * argument for the rule it uses, live in {@link classifyOcclusion} in
+ * visibility.ts; the marginal test is `isMarginalVisibility` in the same file.
+ * Use {@link isLabelled} rather than comparing strings at call sites, so the
  * "may this be drawn?" question has exactly one implementation.
  */
-export type PeakVisibility = 'visible' | 'self-occluded' | 'foreground-occluded';
+export type PeakVisibility = 'visible' | 'marginal' | 'self-occluded' | 'foreground-occluded';
 
 /**
  * Camera orientation and optics. Angles in degrees.

@@ -158,7 +158,10 @@ function usage(): void {
   line('                     A DEM cannot resolve the ground beside you; using it');
   line('                     builds a wall in front of the camera. See the');
   line('                     NEAR FIELD line in the report and docs/NEAR-FIELD.md.');
-  line('  --near-field-m N   radius the report calls unresolvable (default 150)');
+  line('  --near-field-m N   radius treated as unresolvable (default 150): drives the');
+  line('                     NEAR FIELD report AND the marginal verdicts — a peak whose');
+  line('                     clearance is inside the near ground\'s own noise band is');
+  line('                     labelled "may be hidden" instead of being decided (P1.6)');
   line('  --no-png           text report only');
   line();
   line('The pose comes from EXIF. There are no defaults for position, heading or');
@@ -286,7 +289,18 @@ async function photoDataUrl(path: string, decoded: DecodedPhoto): Promise<string
 function reportScene(scene: AnnotatedScene, limit = 40): void {
   line('SCENE');
   line(`  ${scene.labelled.length} labelled, ${scene.visible.length} visible, ` +
-    `${scene.occluded.length} occluded, ${scene.unmeasured.length} unmeasured`);
+    `${scene.marginal.length} marginal, ${scene.occluded.length} occluded, ` +
+    `${scene.unmeasured.length} unmeasured`);
+  if (scene.nearFieldUncertainty !== undefined && scene.marginal.length > 0) {
+    line(`  MARGINAL (occluder within ${scene.nearFieldUncertainty.radiusM} m, where the DEM's ` +
+      `own cells disagree by ±${scene.nearFieldUncertainty.elevationBandM.toFixed(1)} m — ` +
+      'clearance inside that noise, so neither verdict is claimed):');
+    for (const peak of scene.marginal.slice(0, 10)) {
+      line(`    ${peak.name.padEnd(24)} clearance ${peak.clearanceDeg >= 0 ? '+' : ''}` +
+        `${peak.clearanceDeg.toFixed(3)} deg against a ±${peak.clearanceBandDeg.toFixed(3)} deg band` +
+        ` (occluder at ${((peak.occluderDistanceKm ?? 0) * 1000).toFixed(0)} m)`);
+    }
+  }
   if (scene.unmeasured.length > 0) {
     line(`  UNMEASURED (beyond the swept range — no verdict, not "not visible"):`);
     for (const peak of scene.unmeasured.slice(0, 10)) {
@@ -375,6 +389,10 @@ async function main(): Promise<void> {
         maxRangeKm: options.rangeKm,
       },
       peakRadiusKm: options.queryRadiusKm,
+      // P1.6: verdicts measured against an occluder inside this radius carry
+      // the DEM's local disagreement as an uncertainty band, and a peak whose
+      // verdict flips inside it is reported `marginal` rather than decided.
+      nearFieldRadiusM: options.nearFieldRadiusM,
     },
   });
 

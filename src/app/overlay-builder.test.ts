@@ -240,3 +240,28 @@ describe('createOverlayBuilder', () => {
     await expect(builder()({ ...REQUEST, signal: controller.signal })).rejects.toThrow();
   });
 });
+
+describe('selectOverlayPeaks — marginal summits (P1.6)', () => {
+  const visible = { name: 'Clear', visibility: 'visible' as const };
+  const selfOccluded = { name: 'Own hill', visibility: 'self-occluded' as const };
+  const marginal = { name: 'Coin toss', visibility: 'marginal' as const };
+  const scene = { visible: [visible], labelled: [visible, selfOccluded, marginal] };
+
+  it('keeps a marginal summit when the obscured switch is on', () => {
+    expect(selectOverlayPeaks(scene, true).map((peak) => peak.name)).toEqual([
+      'Clear',
+      'Own hill',
+      'Coin toss',
+    ]);
+  });
+
+  it('keeps a marginal summit even with the obscured switch OFF', () => {
+    // The switch hides summits tucked behind their own hill. A marginal summit
+    // may be in plain view — hiding it would promote "cannot decide" to
+    // "hidden", the exact claim the state exists to refuse.
+    expect(selectOverlayPeaks(scene, false).map((peak) => peak.name)).toEqual([
+      'Clear',
+      'Coin toss',
+    ]);
+  });
+});

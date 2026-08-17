@@ -231,17 +231,33 @@ export function resolveOverlayOptions(
  */
 export const OBSCURED_DETAIL_SUFFIX = 'summit obscured';
 
-/** Whether a peak is to be drawn de-emphasised (D8). */
+/**
+ * The words for a marginal summit (P1.6): the near ground the verdict was
+ * measured against is unresolvable, so "may be hidden" is the whole claim.
+ */
+export const MARGINAL_DETAIL_SUFFIX = 'may be hidden';
+
+/**
+ * Whether a peak is to be drawn de-emphasised — dashed pole, hollow ring,
+ * reduced opacity. Two states earn it for two different reasons: a summit
+ * tucked behind its own hill's shoulder (D8) is definitely there but not
+ * itself in view, and a marginal summit (P1.6) may or may not clear the
+ * unresolvable ground in front of the camera. Both are claims weaker than a
+ * solid flag, and the ink says so; the DETAIL TEXT is what distinguishes them,
+ * because opacity cannot carry two meanings and text can.
+ */
 export function isPeakObscured(peak: OverlayPeak): boolean {
-  return peak.visibility === 'self-occluded';
+  return peak.visibility === 'self-occluded' || peak.visibility === 'marginal';
 }
 
 /**
  * Elevation and distance, the second line of a label — plus, for a summit
- * hidden behind its own hill, a note saying so.
+ * hidden behind its own hill or one the near field leaves undecided, a note
+ * saying which.
  */
 export function formatPeakDetail(peak: OverlayPeak): string {
   const measurements = `${Math.round(peak.elevationM)} m · ${peak.distanceKm.toFixed(1)} km`;
+  if (peak.visibility === 'marginal') return `${measurements} · ${MARGINAL_DETAIL_SUFFIX}`;
   return isPeakObscured(peak) ? `${measurements} · ${OBSCURED_DETAIL_SUFFIX}` : measurements;
 }
 

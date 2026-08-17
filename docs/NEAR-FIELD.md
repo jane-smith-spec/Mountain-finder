@@ -114,7 +114,7 @@ moved.** What ships is:
 - **`SweepConfig.minRangeM`** — default 0, so behaviour is unchanged, available to a caller who
   wants the comparison and accepts the refusals that follow.
 
-## The real fix, not attempted here
+## The real fix, not attempted here *(superseded — see the next section)*
 
 The near field should be neither trusted nor discarded but **carried with its uncertainty**. The
 DEM's local relief within the camera's position uncertainty gives a band on the near horizon's
@@ -125,3 +125,44 @@ manages.
 
 That is a change to the visibility contract (`PeakVisibility` gains a state) and to every gate
 built on it, so it is filed rather than rushed: TODO.md **P1.6**.
+
+## The fix, built (P1.6, 2026-08-17)
+
+`PeakVisibility` gained `'marginal'`. The machinery, all opt-in behind
+`PipelineConfig.nearFieldRadiusM` (default 0 — with it unset, every verdict is bit-identical to
+before):
+
+- `VisiblePeak.occluderDistanceKm` — every clearance now knows how far away the terrain it was
+  measured against stands, read off the same skyline staircase as the angle.
+- `clearanceBandDeg` — an occluder inside the radius carries the near ground's elevation
+  half-band as an angle: atan(band / distance).
+- `isMarginalVisibility` — marginal ⟺ the verdict *flips* somewhere inside the band, in either
+  direction. A summit 0.05° short of a phantom is exactly as undecided as one 0.05° over it.
+- Marginal summits are **labelled, de-emphasised, and say "may be hidden"** — a direction the
+  user can check, which is all decision D9 claims for any label. They get no occlusion
+  classification: classifying *what* hides a summit presumes it is hidden.
+
+**The estimator needed one correction, found on the first real run.** The band was first
+measured as the relief of *all* ground within the radius — and the camera stands on a ridge
+crest, so that span is 55 m, almost all of it the slope falling away behind and beside the
+camera. It produced a ±17° band that flagged summits buried under kilometres of rock as "may be
+hidden". No mis-placed camera position raises the western valley into the southward view: the
+ground that can occlude a peak is the ground in the peak's *direction*, so each peak's band is
+now measured over rays within ±15° of its bearing (`nearFieldElevationBandM`), and the
+scene-level all-directions figure is reported separately.
+
+Measured on the Railroad Ridge photograph (`npm run annotate`, radius 150 m):
+
+```
+13 labelled, 9 visible, 4 marginal, 29 occluded, 0 unmeasured
+
+Merriam Peak      clearance −0.981°  band ±1.763°   ← were all foreground-occluded,
+Sheep Mountain    clearance −1.546°  band ±2.112°     i.e. silently dropped, on the
+Bowery Peak       clearance −1.449°  band ±1.890°     strength of a 90 m phantom
+Glassford Peak    clearance −1.356°  band ±1.537°
+```
+
+Saturday Mountain (−4.78°), Potaman Peak (−7.37°) and Hunter Creek Summit (−2.19°) stay
+confidently occluded — their deficits exceed their directional bands. Castle Peak stays
+confidently **visible**: its occluder is its own massif's ridge at ~11 km, which is resolvable
+ground. The near-field *report* (`nearFieldHorizons`) is unchanged and still prints first.

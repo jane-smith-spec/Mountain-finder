@@ -493,6 +493,79 @@ export function interpolateNearerTerrainAltitudeDeg(
 }
 
 /**
+ * The staircase step that set {@link maxAltitudeNearerThanDeg}'s answer on one
+ * bearing — the piece of terrain the occluding angle was actually measured
+ * against — or `undefined` when no step lies nearer than the cutoff.
+ *
+ * A tie on angle keeps the NEARER step, matching `classifyOcclusion`'s crest
+ * tie rule and erring in the reporting direction that matters here: the nearer
+ * a claimed occluder stands, the less the DEM can be trusted about it, so of
+ * two equal claims the more suspect one is the one to report.
+ */
+export function nearerTerrainOccluderStep(
+  point: HorizonPoint,
+  cutoffDistanceKm: number,
+): SkylineStep | undefined {
+  const slackKm = Math.abs(cutoffDistanceKm) * COINCIDENT_DISTANCE_TOLERANCE;
+  let best: SkylineStep | undefined;
+  for (const step of skylineStepsOf(point)) {
+    if (step.distanceKm >= cutoffDistanceKm - slackKm) continue;
+    if (
+      best === undefined ||
+      step.maxAltitudeDeg > best.maxAltitudeDeg ||
+      (step.maxAltitudeDeg === best.maxAltitudeDeg && step.distanceKm < best.distanceKm)
+    ) {
+      best = step;
+    }
+  }
+  return best;
+}
+
+/** The occlusion answer with its provenance: how high, and measured how far out. */
+export interface NearerTerrain {
+  /** Same value {@link interpolateNearerTerrainAltitudeDeg} returns. */
+  readonly altitudeDeg: number;
+  /** Distance to the terrain that set it — see below for the bracket rule. */
+  readonly occluderDistanceKm: number;
+}
+
+/**
+ * {@link interpolateNearerTerrainAltitudeDeg} plus the distance of the terrain
+ * responsible, which is what decides whether the angle is a measurement or a
+ * near-field artefact (P1.6, docs/NEAR-FIELD.md).
+ *
+ * The ANGLE is interpolated exactly as before — same bracket, same weight, so
+ * the two functions can never disagree about it. The DISTANCE is not
+ * interpolated at all: averaging the ranges of two different pieces of ground
+ * is not a distance to anything. The question this field exists to answer is
+ * "does the occluding angle rest on unresolvable near ground?", and it does if
+ * EITHER contributing bearing's occluder does — so the MINIMUM of the two is
+ * returned. That errs only toward reporting uncertainty, never toward a
+ * confident verdict.
+ */
+export function interpolateNearerTerrainOccluder(
+  profile: HorizonProfile,
+  bearingDeg: number,
+  cutoffDistanceKm: number,
+): NearerTerrain | undefined {
+  const { before, after, weight } = bracketAtBearing(profile, bearingDeg);
+  const beforeStep = nearerTerrainOccluderStep(before, cutoffDistanceKm);
+  const afterStep = nearerTerrainOccluderStep(after, cutoffDistanceKm);
+
+  if (beforeStep === undefined && afterStep === undefined) return undefined;
+  if (beforeStep === undefined || afterStep === undefined) {
+    const only = beforeStep ?? afterStep;
+    if (only === undefined) return undefined; // unreachable; keeps the narrowing honest
+    return { altitudeDeg: only.maxAltitudeDeg, occluderDistanceKm: only.distanceKm };
+  }
+  return {
+    altitudeDeg:
+      beforeStep.maxAltitudeDeg + weight * (afterStep.maxAltitudeDeg - beforeStep.maxAltitudeDeg),
+    occluderDistanceKm: Math.min(beforeStep.distanceKm, afterStep.distanceKm),
+  };
+}
+
+/**
  * Index of the last profile point at or before `targetDeg`, or -1 if the
  * target sits before the first sample. Binary search — profiles are sorted and
  * a 0.5°-resolution 360° sweep has 720 points that get queried once per peak.

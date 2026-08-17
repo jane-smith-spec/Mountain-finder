@@ -55,7 +55,7 @@ import {
   initialBearingDeg,
 } from '../../fixtures/scenes';
 
-import { annotateScene } from './annotate';
+import { annotateScene, nearFieldElevationBandM } from './annotate';
 import { PipelineError } from './errors';
 import {
   FunctionElevationSource,
@@ -848,5 +848,187 @@ describe('annotateScene — a peak farther out than the sweep reached', () => {
 
     expect(scene.unmeasured).toEqual([]);
     expect(byId(scene.peaks, 'test/behind').visible).toBe(true);
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * P1.6 — the phantom wall: verdicts measured against unresolvable near ground
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * The Railroad Ridge shape (docs/NEAR-FIELD.md) in checkable numbers: eye 2 m
+ * over flat ground, a 3 m wall exactly one sample away at 90 m, and summits
+ * 11 km east whose clearances land inside and outside the wall's noise.
+ *
+ * Closed forms, same derivation as the ring ridge above (R_eff = 7 322 998.62,
+ * drop = d²/2R_eff), eye at 2 m:
+ *
+ *   wall     d =    90 m, h =   3 m: drop 0.00055 m → α = +0.636242°
+ *   CLEAR    d = 11 km,   h = 400 m: drop 8.2617 m  → α = +2.029184°, clears by +1.392943°
+ *   UP       d = 11 km,   h = 150 m:                → α = +0.727817°, clears by +0.091576°
+ *   DOWN     d = 11 km,   h = 130 m:                → α = +0.623657°, falls short by −0.012584°
+ *
+ * The DEM's own relief within 150 m is the wall against the flat ground:
+ * (3 − 0)/2 = 1.5 m either way, which at the wall's 90 m subtends
+ * atan(1.5/90) = 0.954841°. So UP and DOWN sit deep inside the noise —
+ * marginal, both of them — while CLEAR beats it and stays a confident verdict
+ * even though its occluder is the same unresolvable wall.
+ */
+const NF_EYE_HEIGHT_M = 2;
+const WALL_ALTITUDE_DEG = expectedAltitudeDeg(3, 90, NF_EYE_HEIGHT_M);
+const NF_BAND_DEG = (Math.atan(1.5 / 90) * 180) / Math.PI;
+
+const phantomWall: TerrainFunctionM = (point) => {
+  const distanceM = greatCircleDistanceM(ORIGIN, point);
+  return distanceM >= 75 && distanceM <= 105 ? 3 : 0;
+};
+
+const nearFieldPeaks: readonly Peak[] = [
+  { id: 'test/clear', name: 'Clear', ...east(11_000), elevationM: 400, elevationSource: 'unknown' },
+  { id: 'test/up', name: 'Up', ...east(11_000), elevationM: 150, elevationSource: 'unknown' },
+  { id: 'test/down', name: 'Down', ...east(11_000), elevationM: 130, elevationSource: 'unknown' },
+];
+
+function nearFieldRequest(nearFieldRadiusM: number): AnnotateSceneRequest {
+  return request({
+    observer: { lat: 0, lon: 0, eyeHeightM: NF_EYE_HEIGHT_M },
+    elevation: new FunctionElevationSource(phantomWall, 'phantom-wall'),
+    peaks: new StaticPeakSource(nearFieldPeaks),
+    config: {
+      sweep: { bearingStepDeg: 1, rangeStepM: 30, maxRangeKm: 12 },
+      peakRadiusKm: 50,
+      nearFieldRadiusM,
+      clock: () => FIXED_CLOCK,
+    },
+  });
+}
+
+describe('annotateScene — near-field marginality (P1.6)', () => {
+  it('measures the near ground disagreement the DEM itself admits to', async () => {
+    const scene = await annotateScene(nearFieldRequest(150));
+    expect(scene.nearFieldUncertainty).toBeDefined();
+    expect(scene.nearFieldUncertainty?.radiusM).toBe(150);
+    // Readings within 150 m: the wall's 3 m and flat 0 m → half-span 1.5 m.
+    expect(scene.nearFieldUncertainty?.elevationBandM).toBeCloseTo(1.5, 10);
+    // The skyline due east IS the wall, at the closed-form angle above.
+    const dueEast = scene.horizon.find((point) => point.bearingDeg === 90);
+    expect(dueEast?.altitudeDeg).toBeCloseTo(WALL_ALTITUDE_DEG, 9);
+    expect(dueEast?.altitudeDeg).toBeCloseTo(0.636242, 5);
+    expect(dueEast?.distanceKm).toBeCloseTo(0.09, 9);
+  });
+
+  it('reports a verdict that flips inside the noise as marginal, in BOTH directions', async () => {
+    const scene = await annotateScene(nearFieldRequest(150));
+
+    const up = byId(scene.peaks, 'test/up');
+    const down = byId(scene.peaks, 'test/down');
+    expect(up.visibility).toBe('marginal');
+    expect(down.visibility).toBe('marginal');
+    // The band is the wall's own height uncertainty at the wall's distance.
+    expect(up.clearanceBandDeg).toBeCloseTo(NF_BAND_DEG, 10);
+    expect(up.clearanceBandDeg).toBeCloseTo(0.954841, 5);
+    expect(up.occluderDistanceKm).toBeCloseTo(0.09, 10);
+    // The raw geometric side each fell on is preserved, band-free.
+    expect(up.visible).toBe(true);
+    expect(down.visible).toBe(false);
+    expect(up.clearanceDeg).toBeCloseTo(0.091576, 5);
+    expect(down.clearanceDeg).toBeCloseTo(-0.012584, 5);
+
+    expect(scene.marginal.map((peak) => peak.id).sort()).toEqual(['test/down', 'test/up']);
+    // Marginal peaks are labelled — a direction the user can check — but the
+    // confident lists exclude them, and no occlusion story is told for them.
+    expect(scene.labelled.map((peak) => peak.id)).toContain('test/up');
+    expect(scene.labelled.map((peak) => peak.id)).toContain('test/down');
+    expect(scene.visible.map((peak) => peak.id)).toEqual(['test/clear']);
+    expect(scene.occluded).toEqual([]);
+    expect(up.occlusion).toBeUndefined();
+    expect(down.occlusion).toBeUndefined();
+    expect(down.occludedBy).toBeUndefined();
+    expect(scene.warnings.some((warning) => warning.includes('no confident verdict'))).toBe(true);
+  });
+
+  it('keeps a confident verdict whose clearance beats the band, same occluder', async () => {
+    const scene = await annotateScene(nearFieldRequest(150));
+    const clear = byId(scene.peaks, 'test/clear');
+    // +1.392943° against ±0.954841°: stable at both ends of the band, so the
+    // near-field occluder does NOT demote it. Uncertainty narrows claims to
+    // what survives it — it is not a blanket refusal.
+    expect(clear.visibility).toBe('visible');
+    expect(clear.clearanceBandDeg).toBeCloseTo(NF_BAND_DEG, 10);
+    expect(clear.clearanceDeg).toBeCloseTo(1.392943, 5);
+  });
+
+  it('changes NOTHING when the radius is unset — the pre-P1.6 verdicts stand', async () => {
+    const scene = await annotateScene(nearFieldRequest(0));
+    expect(scene.nearFieldUncertainty).toBeUndefined();
+    expect(scene.marginal).toEqual([]);
+    expect(byId(scene.peaks, 'test/up').visibility).toBe('visible');
+    expect(byId(scene.peaks, 'test/up').clearanceBandDeg).toBe(0);
+    // DOWN is decided by the wall: crest at 90 m, ground drops 3 m behind it —
+    // a col, so a different landform: foreground-occluded, never drawn.
+    const down = byId(scene.peaks, 'test/down');
+    expect(down.visibility).toBe('foreground-occluded');
+    expect(down.occlusion?.evidence).toBe('col-between-occluder-and-summit');
+    expect(scene.labelled.map((peak) => peak.id).sort()).toEqual(['test/clear', 'test/up']);
+  });
+
+  it('leaves a resolvable occluder alone: the ring ridge at 5 km is not near field', async () => {
+    // The original scene with the near-field test ON: the ridge occluding
+    // Hidden Peak stands 5 km out, far beyond 150 m, and the sweep's first
+    // sample is at 250 m so the DEM reports no relief inside the radius at
+    // all. Every verdict must equal the radius-0 run's.
+    const scene = await annotateScene(
+      request({ config: { ...request().config, nearFieldRadiusM: 150 } }),
+    );
+    expect(scene.nearFieldUncertainty?.elevationBandM).toBe(0);
+    expect(scene.marginal).toEqual([]);
+    expect(byId(scene.peaks, 'test/high').visibility).toBe('visible');
+    expect(byId(scene.peaks, 'test/hidden').visibility).toBe('foreground-occluded');
+    expect(byId(scene.peaks, 'test/hidden').clearanceBandDeg).toBe(0);
+  });
+});
+
+describe('nearFieldElevationBandM', () => {
+  const ray = (bearingDeg: number, samples: readonly [number, number][]) => ({
+    bearingDeg,
+    samples: samples.map(([distanceM, elevationM]) => ({ distanceM, elevationM })),
+  });
+
+  it('is half the span of readings inside the radius, observer cell included', () => {
+    // Observer ground 10 m, near samples 0 m and 16 m: span 16, half 8.
+    expect(nearFieldElevationBandM(10, [ray(0, [[50, 0], [100, 16]])], 150)).toBe(8);
+    // The observer's own reading can be an extreme: ground 10, samples all 0.
+    expect(nearFieldElevationBandM(10, [ray(0, [[50, 0], [100, 0]])], 150)).toBe(5);
+  });
+
+  it('ignores samples beyond the radius', () => {
+    expect(nearFieldElevationBandM(0, [ray(0, [[50, 2], [200, 90]])], 150)).toBe(1);
+  });
+
+  it('charges a directional band only with ground in that direction', () => {
+    // The ridge-crest case that forced the window (found on the first real
+    // run): flat ground ahead at bearing 0, a valley 50 m deep behind at 180.
+    // A verdict looking north must not carry the southern valley's relief —
+    // no mis-placed camera raises that valley into the northward view.
+    const crest = [ray(0, [[90, 12]]), ray(180, [[90, -50]])];
+    expect(nearFieldElevationBandM(10, crest, 150, 0)).toBe(1);
+    expect(nearFieldElevationBandM(10, crest, 150, 180)).toBe(30);
+    // All directions — the scene-level figure — spans both: (12−(−50))/2.
+    expect(nearFieldElevationBandM(10, crest, 150)).toBe(31);
+    // The window is ±15° and wrap-safe: a ray at 350° serves a peak at 4°.
+    expect(nearFieldElevationBandM(10, [ray(350, [[90, 12]])], 150, 4)).toBe(1);
+    expect(nearFieldElevationBandM(10, [ray(350, [[90, 12]])], 150, 20)).toBe(0);
+  });
+
+  it('is 0 when the sweep holds no sample inside the radius', () => {
+    // minRangeM excluded them, or the first step lands beyond: nothing was
+    // sampled there, so there is no relief to report — and rangeIsMeasured is
+    // already refusing verdicts on the caller's behalf in that configuration.
+    expect(nearFieldElevationBandM(10, [ray(0, [[250, 0]])], 150)).toBe(0);
+    expect(nearFieldElevationBandM(10, [], 150)).toBe(0);
+  });
+
+  it('is 0 at radius 0 — the switch in its off position', () => {
+    expect(nearFieldElevationBandM(10, [ray(0, [[50, 999]])], 0)).toBe(0);
   });
 });

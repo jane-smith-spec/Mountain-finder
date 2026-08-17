@@ -11,8 +11,10 @@ import { altitudeAngleDeg, sightPeak } from './sightline';
 import type { RaySample } from './sightline';
 import {
   classifyOcclusion,
+  clearanceBandDeg,
   filterVisiblePeaks,
   isLabelled,
+  isMarginalVisibility,
   isPeakVisible,
   resolveAgainstHorizon,
   NO_NEARER_TERRAIN_ALTITUDE_DEG,
@@ -1016,5 +1018,123 @@ describe('isLabelled', () => {
     expect(isLabelled('visible')).toBe(true);
     expect(isLabelled('self-occluded')).toBe(true);
     expect(isLabelled('foreground-occluded')).toBe(false);
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * P1.6 — the marginal state: verdicts inside the near field's noise
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+describe('clearanceBandDeg', () => {
+  const nearField = { radiusM: 150, elevationBandM: 3 };
+
+  it('is the angle the elevation band subtends at the occluder, inside the radius', () => {
+    // atan(3 m / 90 m): 3/90 = 1/30 = 0.0333333…; the series x − x³/3 + x⁵/5
+    // gives 0.0333333 − 0.0000123 + 0.0000000 = 0.0333210 rad = 1.909152°.
+    // The same figure appears in near-field.test.ts, derived the same way.
+    expect(clearanceBandDeg(0.09, nearField)).toBeCloseTo(1.909152, 5);
+    expect(clearanceBandDeg(0.09, nearField)).toBeCloseTo((Math.atan(3 / 90) * 180) / Math.PI, 12);
+  });
+
+  it('is 0 for an occluder at or beyond the radius — that ground is resolvable', () => {
+    expect(clearanceBandDeg(0.15, nearField)).toBe(0);
+    expect(clearanceBandDeg(5, nearField)).toBe(0);
+  });
+
+  it('is 0 with no occluder, no near-field input, or a zero band', () => {
+    expect(clearanceBandDeg(undefined, nearField)).toBe(0);
+    expect(clearanceBandDeg(0.09, undefined)).toBe(0);
+    expect(clearanceBandDeg(0.09, { radiusM: 150, elevationBandM: 0 })).toBe(0);
+    expect(clearanceBandDeg(0.09, { radiusM: 0, elevationBandM: 3 })).toBe(0);
+  });
+});
+
+describe('isMarginalVisibility', () => {
+  it('flags a clearance smaller than the band, in BOTH directions', () => {
+    // Castle Peak's shape: +0.065° against a ~1.9° band. And its mirror: a
+    // summit 0.065° SHORT of the same phantom is exactly as undecided.
+    expect(isMarginalVisibility(0.065, 1.9)).toBe(true);
+    expect(isMarginalVisibility(-0.065, 1.9)).toBe(true);
+  });
+
+  it('leaves a verdict alone when it is stable across the whole band', () => {
+    // 2.0 − 1.9 = +0.1 at the low end: still visible. −2.0 + 1.9 = −0.1 at
+    // the high end: still hidden. Neither flips, so neither is marginal.
+    expect(isMarginalVisibility(2.0, 1.9)).toBe(false);
+    expect(isMarginalVisibility(-2.0, 1.9)).toBe(false);
+  });
+
+  it('is never marginal at band 0, whatever the clearance', () => {
+    expect(isMarginalVisibility(0.001, 0)).toBe(false);
+    expect(isMarginalVisibility(-0.001, 0)).toBe(false);
+    expect(isMarginalVisibility(0, 0)).toBe(false);
+  });
+
+  it('respects the caller tolerance the verdict itself was taken at', () => {
+    // With 0.15° of slack, −0.1° is visible. A ±0.02° band moves the
+    // clearance across [−0.12, −0.08], every point of which is still visible
+    // under the slack — stable, not marginal.
+    expect(isMarginalVisibility(-0.1, 0.02, 0.15)).toBe(false);
+    // A ±0.2° band spans [−0.3, +0.1]: −0.3 is below the −0.15 line and
+    // +0.1 is above it — the verdict flips, so it is marginal.
+    expect(isMarginalVisibility(-0.1, 0.2, 0.15)).toBe(true);
+  });
+
+  it('treats the exact band edge as stable — the boundary is not a flip', () => {
+    // clearance = band: the low end lands exactly ON the line, and the line
+    // itself is visible (clearance ≥ −tolerance), so both ends agree.
+    expect(isMarginalVisibility(1.9, 1.9)).toBe(false);
+  });
+
+  it('refuses a negative band or tolerance', () => {
+    expect(() => isMarginalVisibility(0, -0.1)).toThrow(RangeError);
+    expect(() => isMarginalVisibility(0, 0.1, -0.1)).toThrow(RangeError);
+  });
+});
+
+describe('resolveAgainstHorizon — occluder provenance (P1.6)', () => {
+  const walled: HorizonProfile = [
+    {
+      bearingDeg: 90,
+      altitudeDeg: 1.9,
+      distanceKm: 0.09,
+      elevationM: 3173,
+      skylineSteps: [{ distanceKm: 0.09, maxAltitudeDeg: 1.9, elevationM: 3173 }],
+    },
+  ];
+
+  it('carries the distance of the terrain the clearance was measured against', () => {
+    const sighting: PeakSighting = {
+      id: 'p',
+      name: 'P',
+      lat: 0,
+      lon: 0.1,
+      elevationM: 3600,
+      elevationSource: 'unknown',
+      bearingDeg: 90,
+      altitudeDeg: 2.2,
+      distanceKm: 11,
+    };
+    const resolved = resolveAgainstHorizon(sighting, walled);
+    expect(resolved.occludingAltitudeDeg).toBe(1.9);
+    expect(resolved.occluderDistanceKm).toBe(0.09);
+    expect(resolved.clearanceDeg).toBeCloseTo(0.3, 12);
+  });
+
+  it('reports no occluder distance when nothing is nearer than the peak', () => {
+    const nearer: PeakSighting = {
+      id: 'n',
+      name: 'N',
+      lat: 0,
+      lon: 0.0001,
+      elevationM: 3200,
+      elevationSource: 'unknown',
+      bearingDeg: 90,
+      altitudeDeg: 5,
+      distanceKm: 0.06,
+    };
+    const resolved = resolveAgainstHorizon(nearer, walled);
+    expect(resolved.occludingAltitudeDeg).toBe(NO_NEARER_TERRAIN_ALTITUDE_DEG);
+    expect(resolved.occluderDistanceKm).toBeUndefined();
   });
 });

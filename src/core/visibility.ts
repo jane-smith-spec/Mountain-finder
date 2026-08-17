@@ -38,7 +38,7 @@
  * It is supplied by the caller, never guessed here.
  */
 
-import { COINCIDENT_DISTANCE_TOLERANCE, interpolateNearerTerrainAltitudeDeg } from './horizon';
+import { COINCIDENT_DISTANCE_TOLERANCE, interpolateNearerTerrainOccluder } from './horizon';
 import { altitudeAngleDeg } from './sightline';
 import type { RaySample, SightlineOptions } from './sightline';
 import type { HorizonProfile, PeakSighting, PeakVisibility, VisiblePeak } from './types';
@@ -87,16 +87,19 @@ export function resolveAgainstHorizon(
   sighting: PeakSighting,
   profile: HorizonProfile,
 ): VisiblePeak {
-  const nearerTerrainDeg = interpolateNearerTerrainAltitudeDeg(
+  const nearerTerrain = interpolateNearerTerrainOccluder(
     profile,
     sighting.bearingDeg,
     sighting.distanceKm,
   );
-  const occludingAltitudeDeg = nearerTerrainDeg ?? NO_NEARER_TERRAIN_ALTITUDE_DEG;
+  const occludingAltitudeDeg = nearerTerrain?.altitudeDeg ?? NO_NEARER_TERRAIN_ALTITUDE_DEG;
   return {
     ...sighting,
     occludingAltitudeDeg,
     clearanceDeg: sighting.altitudeDeg - occludingAltitudeDeg,
+    ...(nearerTerrain === undefined
+      ? {}
+      : { occluderDistanceKm: nearerTerrain.occluderDistanceKm }),
   };
 }
 
@@ -111,6 +114,91 @@ export function isPeakVisible(peak: VisiblePeak, toleranceDeg = 0): boolean {
     throw new RangeError(`toleranceDeg must be >= 0, received ${toleranceDeg}`);
   }
   return peak.clearanceDeg >= -toleranceDeg;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * The near field: verdicts measured against ground the DEM cannot resolve
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * What the caller knows about the unresolvable ground around the camera —
+ * the two numbers the marginal test (P1.6, docs/NEAR-FIELD.md) runs on.
+ *
+ * Core does not compute these: they depend on the DEM's posting, the camera's
+ * position uncertainty and the terrain actually sampled nearby, all of which
+ * live with the caller. The pipeline derives them from its own sweep; a test
+ * states them outright.
+ */
+export interface NearFieldUncertainty {
+  /**
+   * Ground distance below which an occluder is unresolvable, metres. A few DEM
+   * postings (~30 m each for SRTM1) widened by the camera's own position
+   * uncertainty is the honest floor.
+   */
+  readonly radiusM: number;
+  /**
+   * Half-band on the height of near ground relative to the eye, metres — how
+   * far up or down the ground beside the camera might really be. The local
+   * relief the DEM itself reports within `radiusM` is the measurable lower
+   * bound: at Railroad Ridge adjacent cells within 90 m disagree by metres,
+   * and that disagreement IS the uncertainty of any occluder built from them.
+   */
+  readonly elevationBandM: number;
+}
+
+/**
+ * Half-width of the uncertainty band on a peak's `clearanceDeg`, degrees.
+ *
+ * Zero — a fully trusted comparison — unless the occluding terrain sits inside
+ * the near field, in which case the band is the angle the elevation band
+ * subtends at the occluder's distance: atan(elevationBandM / distance). The
+ * flat-earth arithmetic is deliberate; at ≤ a few hundred metres the curvature
+ * drop is sub-millimetre and this is an uncertainty estimate, not a survey.
+ *
+ * `occluderDistanceKm === undefined` (no nearer terrain at all) is 0: nothing
+ * occludes the peak, so there is no comparison to distrust.
+ */
+export function clearanceBandDeg(
+  occluderDistanceKm: number | undefined,
+  nearField: NearFieldUncertainty | undefined,
+): number {
+  if (nearField === undefined || occluderDistanceKm === undefined) return 0;
+  if (!(nearField.radiusM > 0) || !(nearField.elevationBandM > 0)) return 0;
+  const occluderDistanceM = occluderDistanceKm * 1000;
+  if (!(occluderDistanceM > 0) || occluderDistanceM >= nearField.radiusM) return 0;
+  return (Math.atan(nearField.elevationBandM / occluderDistanceM) * 180) / Math.PI;
+}
+
+/**
+ * Whether the visible/occluded verdict FLIPS somewhere inside the band — the
+ * definition of `'marginal'`.
+ *
+ * The occluding angle is uncertain by ±`bandDeg`, so `clearanceDeg` spans
+ * [clearance − band, clearance + band]. If the verdict is the same at both
+ * ends it is stable under the uncertainty and stands, in whichever direction;
+ * if the ends disagree, the data cannot decide and the only honest state is
+ * `'marginal'`. Both directions are covered on purpose: a summit 0.05° SHORT
+ * of a 1.9° phantom wall is exactly as undecided as one 0.05° over it, and
+ * declaring the first `foreground-occluded` would silently erase a mountain
+ * that may well be in the photograph.
+ *
+ * A band of 0 can never be marginal, so callers with no near-field input get
+ * the unchanged three-way verdict.
+ */
+export function isMarginalVisibility(
+  clearanceDeg: number,
+  bandDeg: number,
+  toleranceDeg = 0,
+): boolean {
+  if (bandDeg < 0) {
+    throw new RangeError(`bandDeg must be >= 0, received ${bandDeg}`);
+  }
+  if (toleranceDeg < 0) {
+    throw new RangeError(`toleranceDeg must be >= 0, received ${toleranceDeg}`);
+  }
+  const visibleAtHigh = clearanceDeg + bandDeg >= -toleranceDeg;
+  const visibleAtLow = clearanceDeg - bandDeg >= -toleranceDeg;
+  return visibleAtHigh !== visibleAtLow;
 }
 
 /**
@@ -305,7 +393,15 @@ export function rangeIsMeasured(
   return toM - previousM <= maxGapM;
 }
 
-/** Whether a peak in this state may be drawn on the overlay. */
+/**
+ * Whether a peak in this state may be drawn on the overlay.
+ *
+ * `'marginal'` is labelled: the summit may genuinely be in the picture, the
+ * data simply cannot say, and D9 already makes every label a direction rather
+ * than an identification — so drawing it de-emphasised claims exactly what is
+ * known. Only `'foreground-occluded'`, the one state that positively asserts
+ * the peak is NOT in view behind someone else's landform, is never drawn.
+ */
 export function isLabelled(visibility: PeakVisibility): boolean {
   return visibility !== 'foreground-occluded';
 }

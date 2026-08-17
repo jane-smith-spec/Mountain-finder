@@ -124,15 +124,20 @@ export function sweepForPose(pose: CameraPose): Pick<SweepConfig, 'spanDeg' | 's
  * Which peaks the overlay is entitled to draw.
  *
  * `labelled` is the pipeline's own answer to that question (visible plus
- * self-occluded, decision D8); the switch only ever narrows it to `visible`.
- * Foreground-occluded summits appear in neither list, so this function cannot
- * leak one however it is called.
+ * self-occluded plus marginal — decisions D8 and P1.6); the switch only ever
+ * removes the SELF-OCCLUDED ones. Marginal summits stay either way: the
+ * switch is "hide summits tucked behind their own hill", and a marginal
+ * summit may be in plain view — hiding it would convert "the data cannot
+ * decide" into "hidden", the exact promotion the state exists to prevent.
+ * Foreground-occluded summits are never in `labelled`, so this function
+ * cannot leak one however it is called.
  */
 export function selectOverlayPeaks<T extends { readonly visibility?: PeakVisibility }>(
   scene: { readonly visible: readonly T[]; readonly labelled: readonly T[] },
   showObscuredPeaks: boolean,
 ): readonly T[] {
-  return showObscuredPeaks ? scene.labelled : scene.visible;
+  if (showObscuredPeaks) return scene.labelled;
+  return scene.labelled.filter((peak) => peak.visibility !== 'self-occluded');
 }
 
 /** Up to `limit` names, then "and N more" — for a one-line note. */

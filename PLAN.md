@@ -62,6 +62,7 @@ Open work is tracked in [TODO.md](TODO.md); every confirmed finding is indexed i
 | P1.3 Horizon profile | 360° profile build from samples; interpolation at arbitrary bearing with 0°/360° wrap | Interpolation exactness at sample points; midpoint linearity; wrap continuity at 359.5° |
 | P1.4 Camera projection | (bearing, altitude angle) → normalized image x/y given heading, pitch, roll, hFOV/vFOV; FOV from focal length (35mm-equiv) | Identity tests: peak dead-ahead → x=0.5; peak at heading+hFOV/2 → x=1.0; focal 24mm/50mm → known FOV values |
 | P1.5 Visibility filter | Peak visible iff its angle clears interpolated horizon at its bearing (tolerance param) | Synthetic scene with one exposed and one ridge-hidden peak → exactly the right one survives |
+| P1.6 `marginal` state *(added 2026-08-17)* | A verdict that flips within the near field's own elevation uncertainty is `marginal` — labelled "may be hidden" — instead of decided; opt-in via `nearFieldRadiusM`, default 0 ([docs/NEAR-FIELD.md](docs/NEAR-FIELD.md), decision D10) | Phantom-wall scene with closed-form angles: clearances of +0.09°/−0.01° inside a ±0.95° band both come out `marginal`, +1.39° stays `visible`; radius 0 reproduces the pre-P1.6 verdicts bit-for-bit; ring-ridge scene (occluder at 5 km) is untouched with the radius ON |
 
 ### Phase 2 — Data providers ⚠️ *(agent group B — P2.4's self-check is unmet)*
 

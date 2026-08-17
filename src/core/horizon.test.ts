@@ -6,7 +6,9 @@ import {
   horizonCoverage,
   interpolateHorizonAltitudeDeg,
   interpolateNearerTerrainAltitudeDeg,
+  interpolateNearerTerrainOccluder,
   maxAltitudeNearerThanDeg,
+  nearerTerrainOccluderStep,
   normaliseHorizonProfile,
   skylineStepsOf,
 } from './horizon';
@@ -847,5 +849,126 @@ describe('hasTerrainAtBearing — degenerate profiles', () => {
 
   it('reports data everywhere when the caller states no coverage loss', () => {
     expect(hasTerrainAtBearing(QUARTERS, 45, { unmeasuredBearingsDeg: [] })).toBe(true);
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * P1.6 — which piece of terrain the occluding angle was measured against
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+describe('nearerTerrainOccluderStep', () => {
+  /**
+   * A staircase shaped like the Railroad Ridge finding: a near step 90 m out
+   * (the phantom wall) and a far step at 11 km (the real ridge). Every number
+   * below is stated, not computed.
+   */
+  const point: HorizonPoint = {
+    bearingDeg: 175,
+    altitudeDeg: 2.2,
+    distanceKm: 11,
+    elevationM: 3600,
+    skylineSteps: [
+      { distanceKm: 0.09, maxAltitudeDeg: 1.9, elevationM: 3173 },
+      { distanceKm: 11, maxAltitudeDeg: 2.2, elevationM: 3600 },
+    ],
+  };
+
+  it('returns the step that set the nearer-terrain maximum, distance included', () => {
+    // Cutoff 5 km: only the wall is nearer, so the wall is the occluder.
+    expect(nearerTerrainOccluderStep(point, 5)).toEqual({
+      distanceKm: 0.09,
+      maxAltitudeDeg: 1.9,
+      elevationM: 3173,
+    });
+    // Cutoff 20 km: the 11 km step out-angles the wall and wins.
+    expect(nearerTerrainOccluderStep(point, 20)?.distanceKm).toBe(11);
+    expect(nearerTerrainOccluderStep(point, 20)?.maxAltitudeDeg).toBe(2.2);
+  });
+
+  it('agrees with maxAltitudeNearerThanDeg about the angle, always', () => {
+    for (const cutoffKm of [0.05, 0.5, 5, 10.99, 11.01, 20]) {
+      expect(nearerTerrainOccluderStep(point, cutoffKm)?.maxAltitudeDeg).toBe(
+        maxAltitudeNearerThanDeg(point, cutoffKm),
+      );
+    }
+  });
+
+  it('returns undefined when nothing is nearer than the cutoff', () => {
+    expect(nearerTerrainOccluderStep(point, 0.05)).toBeUndefined();
+  });
+
+  it('keeps the NEARER step on an angle tie, without assuming sorted steps', () => {
+    const tied: HorizonPoint = {
+      bearingDeg: 0,
+      altitudeDeg: 2,
+      distanceKm: 1,
+      elevationM: 100,
+      // Deliberately far-first: the scan must not depend on order.
+      skylineSteps: [
+        { distanceKm: 1, maxAltitudeDeg: 2, elevationM: 100 },
+        { distanceKm: 0.5, maxAltitudeDeg: 2, elevationM: 60 },
+      ],
+    };
+    expect(nearerTerrainOccluderStep(tied, 5)?.distanceKm).toBe(0.5);
+  });
+
+  it('treats a step-less point as the one-step staircase it is', () => {
+    const bare: HorizonPoint = { bearingDeg: 0, altitudeDeg: 3, distanceKm: 2, elevationM: 400 };
+    expect(nearerTerrainOccluderStep(bare, 5)).toEqual({
+      distanceKm: 2,
+      maxAltitudeDeg: 3,
+      elevationM: 400,
+    });
+    expect(nearerTerrainOccluderStep(bare, 1)).toBeUndefined();
+  });
+});
+
+describe('interpolateNearerTerrainOccluder', () => {
+  /** Two bearings, occluders at very different ranges: 90 m and 2 km. */
+  const profile: HorizonProfile = [
+    {
+      bearingDeg: 0,
+      altitudeDeg: 2,
+      distanceKm: 0.09,
+      elevationM: 3173,
+      skylineSteps: [{ distanceKm: 0.09, maxAltitudeDeg: 2, elevationM: 3173 }],
+    },
+    {
+      bearingDeg: 10,
+      altitudeDeg: 4,
+      distanceKm: 2,
+      elevationM: 3400,
+      skylineSteps: [{ distanceKm: 2, maxAltitudeDeg: 4, elevationM: 3400 }],
+    },
+  ];
+
+  it('interpolates the angle exactly as the angle-only query does', () => {
+    // Midway between 2° and 4° is 3° — and the two functions must agree at
+    // every weight, because they read the same bracket.
+    const at5 = interpolateNearerTerrainOccluder(profile, 5, 10);
+    expect(at5?.altitudeDeg).toBe(3);
+    for (const bearingDeg of [0, 2.5, 5, 7.5, 10]) {
+      expect(interpolateNearerTerrainOccluder(profile, bearingDeg, 10)?.altitudeDeg).toBe(
+        interpolateNearerTerrainAltitudeDeg(profile, bearingDeg, 10),
+      );
+    }
+  });
+
+  it('reports the MINIMUM of the two occluder distances, not an interpolation', () => {
+    // 90 m and 2 km are two different pieces of ground; a weighted average of
+    // their ranges is a distance to nothing. The suspicious one governs.
+    expect(interpolateNearerTerrainOccluder(profile, 5, 10)?.occluderDistanceKm).toBe(0.09);
+    expect(interpolateNearerTerrainOccluder(profile, 9.9, 10)?.occluderDistanceKm).toBe(0.09);
+  });
+
+  it('uses the one-sided value verbatim when only one bracket has nearer terrain', () => {
+    // Cutoff 1 km: bearing 10's occluder at 2 km is excluded, bearing 0's
+    // 90 m step remains — same one-sided rule as the angle-only query.
+    const oneSided = interpolateNearerTerrainOccluder(profile, 5, 1);
+    expect(oneSided).toEqual({ altitudeDeg: 2, occluderDistanceKm: 0.09 });
+  });
+
+  it('returns undefined when neither bracket has terrain nearer than the cutoff', () => {
+    expect(interpolateNearerTerrainOccluder(profile, 5, 0.05)).toBeUndefined();
   });
 });

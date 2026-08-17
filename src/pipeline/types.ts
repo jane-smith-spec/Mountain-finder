@@ -26,7 +26,7 @@ import type {
   VisiblePeak,
 } from '../core/types.js';
 import type { SightlineOptions } from '../core/sightline.js';
-import type { OcclusionClassification } from '../core/visibility.js';
+import type { NearFieldUncertainty, OcclusionClassification } from '../core/visibility.js';
 import type { ElevationProvider } from '../providers/elevation.js';
 
 /**
@@ -142,6 +142,26 @@ export interface PipelineConfig {
    * for why raising it is paid for in the dangerous direction.
    */
   readonly colToleranceM?: number;
+  /**
+   * Ground distance below which an occluder counts as unresolvable near-field
+   * terrain, metres — the P1.6 switch (docs/NEAR-FIELD.md). **Default 0: off**,
+   * and every verdict is exactly what it was before this field existed.
+   *
+   * When set, the pipeline measures the DEM's own local relief within this
+   * radius of the camera (the observed disagreement between adjacent cells,
+   * which is the floor of what "the ground beside you" could be), and any peak
+   * whose verdict would flip within that band gets `'marginal'` instead of a
+   * confident answer. A caller should use a few DEM postings (~30 m each for
+   * SRTM1) widened by its own position uncertainty — the annotate script uses
+   * 150 m.
+   *
+   * This is deliberately a different lever from `sweep.minRangeM`, which
+   * EXCLUDES the near field and thereby (correctly) refuses every verdict via
+   * `rangeIsMeasured`. This one keeps the near field and carries its
+   * uncertainty instead — the resolution of the tension NEAR-FIELD.md left
+   * open.
+   */
+  readonly nearFieldRadiusM?: number;
   /** Source of the timestamp on the result. Default `() => new Date()`. */
   readonly clock?: () => Date;
 }
@@ -155,6 +175,7 @@ export interface ResolvedPipelineConfig {
   readonly minPeakDistanceKm: number;
   readonly colToleranceM: number;
   readonly judgeBeyondMeasuredTerrain: boolean;
+  readonly nearFieldRadiusM: number;
 }
 
 /**
@@ -186,23 +207,40 @@ export interface ObserverResolution {
 
 /** One peak carried all the way through the pipeline, verdict attached. */
 export interface AnnotatedPeak extends VisiblePeak {
-  /** Did it clear the terrain standing in front of it? */
+  /**
+   * Did it clear the terrain standing in front of it — the raw geometric
+   * comparison, taken with no uncertainty band. A `'marginal'` peak keeps here
+   * the side of the line it happened to fall on; `visibility` is what says
+   * whether that side means anything. This is also the flag the pipeline's
+   * cross-check against `filterVisiblePeaks` runs on, which is why it stays
+   * band-free.
+   */
   readonly visible: boolean;
   /**
-   * The three-way state the overlay renders from (decision D8): visible,
-   * self-occluded (hidden behind a shoulder of its own hill — labelled and
-   * de-emphasised), or foreground-occluded (hidden behind a different landform
-   * — never labelled).
+   * The state the overlay renders from (decisions D8 and P1.6): visible,
+   * marginal (the verdict flips within the near field's uncertainty — labelled
+   * and de-emphasised), self-occluded (hidden behind a shoulder of its own
+   * hill — labelled and de-emphasised), or foreground-occluded (hidden behind
+   * a different landform — never drawn).
    *
-   * `visible === (visibility === 'visible')` always: this field SPLITS the
-   * occluded half and reinterprets nothing. `isLabelled(visibility)` from
-   * src/core/visibility.ts is the one place that answers "may this be drawn".
+   * With `nearFieldRadiusM` unset, `visible === (visibility === 'visible')`
+   * always, exactly as before P1.6: the field splits the occluded half and
+   * reinterprets nothing. `isLabelled(visibility)` from src/core/visibility.ts
+   * is the one place that answers "may this be drawn".
    */
   readonly visibility: PeakVisibility;
   /**
+   * Half-width of the uncertainty band `visibility` was decided under, degrees.
+   * 0 whenever the occluder is resolvable (or no near-field radius was set) —
+   * see `clearanceBandDeg` in src/core/visibility.ts.
+   */
+  readonly clearanceBandDeg: number;
+  /**
    * The terrain evidence behind an occluded verdict: which crest got in the
-   * way and how deep the col between it and the summit is. Absent for a visible
-   * peak, because there is no occlusion to classify.
+   * way and how deep the col between it and the summit is. Absent for a
+   * visible peak, because there is no occlusion to classify — and absent for a
+   * marginal one, because classifying WHAT hides a summit presumes it is
+   * hidden, which is exactly what a marginal verdict declines to assert.
    */
   readonly occlusion?: OcclusionClassification;
   /**
@@ -253,10 +291,35 @@ export interface AnnotatedScene {
    * because there is no verdict to carry.
    */
   readonly peaks: readonly AnnotatedPeak[];
-  /** The subset that cleared the terrain in front of it, in the same order. */
+  /**
+   * The subset that cleared the terrain in front of it BY MORE THAN the
+   * near-field uncertainty band, in the same order — the confident answers.
+   * With `nearFieldRadiusM` unset the band is 0 everywhere and this is simply
+   * every peak that cleared, as it always was.
+   */
   readonly visible: readonly AnnotatedPeak[];
-  /** The subset that did not. Equals `selfOccluded` ∪ `foregroundOccluded`. */
+  /**
+   * The subset that confidently did not clear. Equals `selfOccluded` ∪
+   * `foregroundOccluded`. `peaks` = `visible` ∪ `marginal` ∪ `occluded`.
+   */
   readonly occluded: readonly AnnotatedPeak[];
+  /**
+   * Peaks whose verdict FLIPS within the near field's uncertainty (P1.6):
+   * their occluding terrain sits on ground the DEM cannot resolve, and their
+   * clearance is inside its noise. Labelled, de-emphasised — "about here, if
+   * anything blocks it we cannot tell". Empty whenever `nearFieldRadiusM` is
+   * unset. Same nearest-first order as `peaks`.
+   */
+  readonly marginal: readonly AnnotatedPeak[];
+  /**
+   * The near-field situation the marginal test ran in, when it ran: the
+   * configured radius and the elevation half-band of the DEM's local relief
+   * within it, ALL directions — the scene-level "how bad is the near field
+   * here" figure. Each peak's own `clearanceBandDeg` is measured over the
+   * ground in that peak's direction only, so it is usually narrower than this.
+   * Absent when `nearFieldRadiusM` is 0 — no test, so nothing to report.
+   */
+  readonly nearFieldUncertainty?: NearFieldUncertainty;
   /**
    * Peaks the run refused to judge, because the terrain their verdict would
    * rest on was never measured. Two ways that happens, and both are refusals

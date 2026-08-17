@@ -17,7 +17,6 @@ write-ups are in the three `REVIEW-FINDINGS*.md` files and are not repeated here
 | **Q9** | Re-measure the DEPLOY.md size table | "What it costs" predates the four committed regions and the attribution footer. It has **no row for `/peaks/`** at all (3.2 MB staged — california 1.26, cascades 1.02, zermatt 0.67, fort-william 0.26 MB), and nothing states what one *session* costs once the app fetches cells rather than bundling them — which is the number a deployer budgets with. The bundle figure was 302 KB and is now 318.40 kB / 104.34 kB gzipped; the windows-only demo row moved 1.77 → 1.78 MB. Those two were measured; the `/peaks/` row only means something after Q8 |
 | **P7.4** | CV integration — deliberately not done | Seam is `src/pipeline/cv-alignment.ts`, exported from nothing and imported by nothing. Pre-set the P5.1 trim sliders rather than replace them: an automatic correction the user cannot see or undo is worse than a manual one. Blocked behind P7.5 — there is no point wiring in an extractor that stitches two edges together. See `src/cv/README.md` |
 | **P7.5** | The extractor on real photographs | **Narrowed from "it stitches edges together" to one measurable bias.** The continuity constraint fixed the span (15.96° → 8.44°, ceiling 8.80°). What is left is that ~40 columns near x ≈ 0.35–0.42 sit on the snow/rock boundary *below* the crest, and that bias is now shown to land almost entirely in **pitch**: against a photogrammetrically solved pose the aligner recovers heading to 0.207° and pitch to only 1.97°, in the direction a downward-pulled skyline predicts ([CV-6](docs/FINDINGS.md), [docs/REAL-PHOTO-POSE.md](docs/REAL-PHOTO-POSE.md)). Roll was tested and is not the missing term (±10° of roll buys 1.133° → 1.037°). Snow-dominant hazy scenes still need a texture or gradient cue ([CV-2](docs/FINDINGS.md)) |
-| **P1.6** | A `marginal` visibility state for the unresolvable near field | **The most consequential open item, and it is in `src/core`, not `src/cv`.** A DEM cannot resolve the ground beside the camera, so a horizon built from it is the sampling grid talking — measured at Railroad Ridge as a 1.9° phantom wall across 154 of 169 in-frame bearings, which Castle Peak cleared by **0.065°** ([CV-9](docs/FINDINGS.md), [docs/NEAR-FIELD.md](docs/NEAR-FIELD.md)). Trusting it is confidently wrong; excluding it makes `rangeIsMeasured` refuse all 42 peaks, correctly. The fix is neither: carry the near horizon's UNCERTAINTY (the DEM's local relief within the camera's own position uncertainty) and report a summit clearing by less than that as `marginal`. Changes `PeakVisibility` and every gate built on it, so it is filed rather than rushed. Nothing has been made the default and no verdict has moved |
 | **P7.7** | Pitch is unrecorded and always wrong at zero | EXIF carries no pitch, `--pitch` defaults to 0, and in all three annotated photographs the drawn horizon sits low because of it — measured at Railroad Ridge as **−3.52°**, the largest single error in that render. Options, none chosen: recover it from the aligner — whose pitch is bad for a reason now understood and NOT a CV defect, see [CV-9](docs/FINDINGS.md) and P1.6, and which improves 16× once the near-field phantom is removed; expose it as a trim slider the user nudges (P5.1 already has the machinery); or estimate it from the fraction of the frame below the computed horizon. The first is the right answer if P7.5 lands |
 | **P7.6** | ~~The two wide frames refuse~~ — **tested, refuted, folded into P7.5** | The hypothesis was near-field foreground the sweep never sampled. Measured, the error is largest at frame CENTRE and smallest at the edges, and the extractor puts its boundary at `rowNorm` **0.999** — the bottom row of the picture. It is tracking foreground tundra, not sky. No near-field term is needed: this is CV-2 again, a sky/land cue that a snowfield or sunlit tundra edge can also satisfy. One fix, two symptoms — see [docs/REAL-PHOTO-POSE.md](docs/REAL-PHOTO-POSE.md) |
 | **X-4** | Kerry Park: the Mount Baker gate is not observer-height-insensitive | The verdict flips inside the case file's own stated uncertainty band — DEM 103.8 m → hidden (−1.67°), cited 113 ± 15 m → visible (+0.31°). The suite takes the ground height from the DEM and reports the comparison; the case file still wants the note |
@@ -36,6 +35,26 @@ write-ups are in the three `REVIEW-FINDINGS*.md` files and are not repeated here
 ---
 
 ## Done
+
+### P1.6 — the `marginal` visibility state, built 2026-08-17
+
+`PeakVisibility` gained `'marginal'`: a peak whose visible/occluded verdict FLIPS within the
+uncertainty of the near-field ground it was measured against is labelled, de-emphasised, and
+says **"may be hidden"** — in either direction, because a summit 0.05° short of a phantom is
+exactly as undecided as one 0.05° over it. All opt-in behind `PipelineConfig.nearFieldRadiusM`
+(default 0): with it unset every verdict is bit-identical to before, proven by the 1 128-test
+suite passing unchanged before the new tests were added. Each peak's band is measured over the
+ground in ITS direction only (±15° of its bearing) — the first real run showed why: an
+all-directions band on a ridge crest reached ±17° and flagged summits under kilometres of rock.
+Measured on Railroad Ridge (`npm run annotate`): **9 visible, 4 marginal, 29 occluded** — the
+four marginal peaks (clearances −0.98° to −1.55° against bands ±1.5–2.1°) were previously
+foreground-occluded, i.e. silently dropped, on the strength of a 90 m phantom; Castle Peak
+stays confidently visible because its occluder is its own ridge at 11 km. Self-check:
+`npx vitest run src/pipeline/annotate.test.ts src/core/visibility.test.ts src/core/horizon.test.ts`
+(the P1.6 blocks), plus the unchanged 178-assertion acceptance suite. Full write-up appended to
+[docs/NEAR-FIELD.md](docs/NEAR-FIELD.md). **P7.7 note:** the aligner-pitch option now has its
+prerequisite: the near-field phantom this state carries is the same one that made the aligner's
+pitch wrong.
 
 ### v2.0 ship gate — MET 2026-08-16
 

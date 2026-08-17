@@ -47,8 +47,10 @@ import { projectToImage } from '../core/projection.js';
 import { sightPeak } from '../core/sightline.js';
 import type { HorizonProfile, PeakSighting } from '../core/types.js';
 import {
+  clearanceBandDeg,
   filterVisiblePeaks,
   isLabelled,
+  isMarginalVisibility,
   isPeakVisible,
   rangeIsMeasured,
   resolveAgainstHorizon,
@@ -110,6 +112,10 @@ export function resolveConfig(config: PipelineConfig = {}): ResolvedPipelineConf
   if (colToleranceM < 0) {
     throw new RangeError(`colToleranceM must be >= 0, received ${colToleranceM}`);
   }
+  const nearFieldRadiusM = config.nearFieldRadiusM ?? 0;
+  if (!(nearFieldRadiusM >= 0)) {
+    throw new RangeError(`nearFieldRadiusM must be >= 0, received ${nearFieldRadiusM}`);
+  }
   return {
     sweep: resolveSweep(config.sweep),
     sightline: config.sightline ?? {},
@@ -118,7 +124,84 @@ export function resolveConfig(config: PipelineConfig = {}): ResolvedPipelineConf
     minPeakDistanceKm: config.minPeakDistanceKm ?? DEFAULT_MIN_PEAK_DISTANCE_KM,
     colToleranceM,
     judgeBeyondMeasuredTerrain: config.judgeBeyondMeasuredTerrain ?? false,
+    nearFieldRadiusM,
   };
+}
+
+/**
+ * Half-width of the bearing window a peak's near-field band is measured over.
+ *
+ * A judgment call, recorded: the window must cover the interpolation bracket
+ * the verdict itself read (±½ bearing step) plus the ground a laterally
+ * mis-placed camera would actually find in the peak's direction — a 15 m GPS
+ * error subtends atan(15/d) at the occluder, which is 15° at d ≈ 55 m and
+ * shrinks with range. ±15° covers both down to that range; a still-nearer
+ * occluder is under-covered, and the band is declared a floor for exactly
+ * that kind of reason.
+ */
+export const NEAR_FIELD_BEARING_WINDOW_DEG = 15;
+
+/** Absolute angular separation of two bearings, wrap-safe, 0–180. */
+function bearingSeparationDeg(aDeg: number, bDeg: number): number {
+  return Math.abs(((aDeg - bDeg + 540) % 360) - 180);
+}
+
+/**
+ * The DEM's own local relief within `radiusM` of the camera, as a half-band on
+ * "how high is the ground beside me", metres (P1.6, docs/NEAR-FIELD.md).
+ *
+ * Half the spread between the highest and lowest reading inside the radius —
+ * the observer's own ground cell included, at distance zero. This is a floor,
+ * not a distribution: it is the disagreement the DEM itself admits to within
+ * the ground the camera might be standing near, before any allowance for what
+ * a 30 m posting does to a ridge crest.
+ *
+ * With `towardBearingDeg` set, only rays within {@link
+ * NEAR_FIELD_BEARING_WINDOW_DEG} of that bearing contribute. That is the form
+ * a PEAK's verdict uses, and the restriction is load-bearing, found on the
+ * first real run: the camera at Railroad Ridge stands on a ridge crest, so the
+ * ground within 150 m spans 55 m of relief — almost all of it the slope
+ * falling away BEHIND and BESIDE the camera, which no mis-placed position
+ * could ever raise into the southward view. Charging a southward verdict with
+ * the western valley's relief turned the band into ±17° and flagged summits
+ * buried under kilometres of rock as "may be hidden". The ground that can
+ * occlude a peak is the ground in the peak's direction; only its disagreement
+ * belongs in the band. Omitting `towardBearingDeg` measures every direction —
+ * the honest scene-level "how bad is the near field here" figure.
+ *
+ * 0 when the sweep holds no sample inside the radius (`minRangeM` excluded
+ * them, or the radius is smaller than the first step) — with nothing sampled
+ * there, the near field contributes no occluders either, and `rangeIsMeasured`
+ * is already refusing on the caller's behalf.
+ */
+export function nearFieldElevationBandM(
+  observerGroundElevationM: number,
+  rays: readonly {
+    readonly bearingDeg: number;
+    readonly samples: readonly { distanceM: number; elevationM: number }[];
+  }[],
+  radiusM: number,
+  towardBearingDeg?: number,
+): number {
+  if (!(radiusM > 0)) return 0;
+  let sawSample = false;
+  let lowestM = observerGroundElevationM;
+  let highestM = observerGroundElevationM;
+  for (const ray of rays) {
+    if (
+      towardBearingDeg !== undefined &&
+      bearingSeparationDeg(ray.bearingDeg, towardBearingDeg) > NEAR_FIELD_BEARING_WINDOW_DEG
+    ) {
+      continue;
+    }
+    for (const sample of ray.samples) {
+      if (sample.distanceM > radiusM) continue;
+      sawSample = true;
+      if (sample.elevationM < lowestM) lowestM = sample.elevationM;
+      if (sample.elevationM > highestM) highestM = sample.elevationM;
+    }
+  }
+  return sawSample ? (highestM - lowestM) / 2 : 0;
 }
 
 /**
@@ -256,27 +339,64 @@ export async function annotateScene(request: AnnotateSceneRequest): Promise<Anno
   }
 
   const eyeM = eyeElevationM(observer);
+  // P1.6: the uncertainty of the ground beside the camera, measured from the
+  // sweep's own near samples. Present only when the caller set a radius; with
+  // none, every band below is 0 and every verdict is the pre-P1.6 one. The
+  // scene-level figure spans every direction; each PEAK's band is measured
+  // over the ground in ITS direction only — see nearFieldElevationBandM.
+  const nearField =
+    config.nearFieldRadiusM > 0
+      ? {
+          radiusM: config.nearFieldRadiusM,
+          elevationBandM: nearFieldElevationBandM(
+            observer.groundElevationM,
+            rays,
+            config.nearFieldRadiusM,
+          ),
+        }
+      : undefined;
   const peaks: AnnotatedPeak[] = sightings.map((sighting) => {
     const resolved = resolveAgainstHorizon(sighting, horizon);
     const visible = isPeakVisible(resolved, config.toleranceDeg);
+    // P1.6: a verdict measured against an occluder inside the near field is
+    // only worth the band that occluder's height is known to. If the verdict
+    // flips within it, neither side may be claimed.
+    const directionalNearField =
+      nearField === undefined
+        ? undefined
+        : {
+            radiusM: nearField.radiusM,
+            elevationBandM: nearFieldElevationBandM(
+              observer.groundElevationM,
+              rays,
+              nearField.radiusM,
+              sighting.bearingDeg,
+            ),
+          };
+    const bandDeg = clearanceBandDeg(resolved.occluderDistanceKm, directionalNearField);
+    const marginal = isMarginalVisibility(resolved.clearanceDeg, bandDeg, config.toleranceDeg);
     const image = projectToImage(request.camera, sighting.bearingDeg, sighting.altitudeDeg);
-    const occludedBy = visible ? undefined : describeOccluder(horizon, sighting);
     // D8: an occluded summit is split by WHAT hides it — its own hill's
     // shoulder (labelled, de-emphasised) or a different landform (not drawn).
     // The visible/hidden verdict above is untouched by this; the classifier is
-    // asked only about peaks that already lost.
-    const occlusion = visible
-      ? undefined
-      : classifyPeakOcclusion(eyeM, sighting, rays, {
+    // asked only about peaks that CONFIDENTLY lost. A marginal peak gets
+    // neither occluder note nor classification: both presume an occlusion the
+    // marginal state declines to assert.
+    const confidentlyOccluded = !visible && !marginal;
+    const occludedBy = confidentlyOccluded ? describeOccluder(horizon, sighting) : undefined;
+    const occlusion = confidentlyOccluded
+      ? classifyPeakOcclusion(eyeM, sighting, rays, {
           sampleSpacingM: config.sweep.rangeStepM,
           toleranceDeg: config.toleranceDeg,
           colToleranceM: config.colToleranceM,
           sightline: config.sightline,
-        });
+        })
+      : undefined;
     return {
       ...resolved,
       visible,
-      visibility: occlusion?.kind ?? 'visible',
+      visibility: marginal ? ('marginal' as const) : (occlusion?.kind ?? 'visible'),
+      clearanceBandDeg: bandDeg,
       image,
       ...(occludedBy === undefined ? {} : { occludedBy }),
       ...(occlusion === undefined ? {} : { occlusion }),
@@ -286,14 +406,26 @@ export async function annotateScene(request: AnnotateSceneRequest): Promise<Anno
   // Cross-check: the annotated verdicts must agree with core's own filter run
   // over the same inputs. They are computed by the same functions, so a
   // disagreement means this file grew a second opinion — fail loudly rather
-  // than ship a result whose `visible` list and `visible` flags differ.
+  // than ship a result whose lists and flags differ. The check runs on the
+  // band-free `visible` FLAG, deliberately: the marginal state reclassifies
+  // presentation, and this guard proves the underlying geometry did not move.
   const filtered = filterVisiblePeaks(sightings, horizon, { toleranceDeg: config.toleranceDeg });
-  const visible = peaks.filter((peak) => peak.visible);
-  if (filtered.length !== visible.length) {
+  const clearedCount = peaks.filter((peak) => peak.visible).length;
+  if (filtered.length !== clearedCount) {
     throw new PipelineError(
       'internal-inconsistency',
       `filterVisiblePeaks kept ${filtered.length} peaks but the ` +
-        `pipeline marked ${visible.length} visible.`,
+        `pipeline marked ${clearedCount} visible.`,
+    );
+  }
+
+  const marginal = peaks.filter((peak) => peak.visibility === 'marginal');
+  if (marginal.length > 0 && nearField !== undefined) {
+    warnings.push(
+      `${marginal.length} peak(s) get no confident verdict: their occluding terrain lies within ` +
+        `${nearField.radiusM} m of the camera, where the DEM's own readings disagree by up to ` +
+        `±${nearField.elevationBandM.toFixed(1)} m, and their clearance is inside that noise: ` +
+        `${describePeakNames(marginal)}. They are labelled, de-emphasised — see docs/NEAR-FIELD.md.`,
     );
   }
 
@@ -304,8 +436,12 @@ export async function annotateScene(request: AnnotateSceneRequest): Promise<Anno
     horizon,
     sweep: report,
     peaks,
-    visible,
-    occluded: peaks.filter((peak) => !peak.visible),
+    visible: peaks.filter((peak) => peak.visibility === 'visible'),
+    occluded: peaks.filter(
+      (peak) => peak.visibility === 'self-occluded' || peak.visibility === 'foreground-occluded',
+    ),
+    marginal,
+    ...(nearField === undefined ? {} : { nearFieldUncertainty: nearField }),
     unmeasured,
     selfOccluded: peaks.filter((peak) => peak.visibility === 'self-occluded'),
     foregroundOccluded: peaks.filter((peak) => peak.visibility === 'foreground-occluded'),

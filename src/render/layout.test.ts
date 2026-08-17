@@ -3,10 +3,12 @@ import { describe, expect, it } from 'vitest';
 import type { CameraPose, HorizonPoint, HorizonProfile, VisiblePeak } from '../core/types';
 import {
   formatPeakDetail,
+  isPeakObscured,
   labelBlockHeightPx,
   layoutOverlay,
   rectsOverlap,
   resolveOverlayOptions,
+  MARGINAL_DETAIL_SUFFIX,
 } from './layout';
 import type { OverlayOptions, OverlayScene, PeakMarker } from './types';
 
@@ -1071,5 +1073,21 @@ describe('layoutOverlay — summits that lose their name', () => {
     expect(layout.markers).toHaveLength(1);
     expect(layout.markers[0]?.overlapped).toBe(true);
     expect(layout.crowdedOutSummits).toHaveLength(0);
+  });
+});
+
+describe('marginal peaks (P1.6)', () => {
+  it('draws a marginal summit de-emphasised, like an obscured one', () => {
+    expect(isPeakObscured({ ...peak({ id: 'm', name: 'x' }), visibility: 'marginal' })).toBe(true);
+  });
+
+  it('says "may be hidden", not "summit obscured" — different claim, different words', () => {
+    expect(
+      formatPeakDetail({
+        ...peak({ id: 'm', name: 'x', elevationM: 3600, distanceKm: 11.07 }),
+        visibility: 'marginal',
+      }),
+    ).toBe(`3600 m · 11.1 km · ${MARGINAL_DETAIL_SUFFIX}`);
+    expect(MARGINAL_DETAIL_SUFFIX).toBe('may be hidden');
   });
 });
