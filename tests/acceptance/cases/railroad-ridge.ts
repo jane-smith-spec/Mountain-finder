@@ -56,6 +56,14 @@
  * deg away. Two unrelated instruments agreeing to under a degree is the
  * strongest statement available here, and it is still not an error bar.
  *
+ * AND ONE THING EXIF DOES NOT CARRY AT ALL: PITCH. Every run assumes zero, and
+ * on this photograph zero is wrong by 3.52 deg — the camera was pointed down,
+ * which is why the frame is half tundra. That is the largest single error in
+ * the first annotated render, larger than either heading estimate's. It is not
+ * recorded in `view` because `view` is about where the camera POINTED in
+ * bearing; it is recorded here so nobody reads the measured heading as though
+ * it settled the pose.
+ *
  * ONE CONSEQUENCE WORTH STATING PLAINLY: every alignment run before this date
  * assumed a 26 mm-equivalent lens, hFOV 69.4 deg, because the stripped JPEG
  * named no focal length. The true frame is 41.1 deg — a 1.69x error in image
@@ -221,13 +229,19 @@ export const railroadRidgeCase: PhotoCase = {
       note:
         'REPORTED, NOT ASSERTED, and it must never become the case\'s bearing: ' +
         'a heading this repository computed cannot also be the ground truth ' +
-        'this repository is graded against (CLAUDE.md rule 4). Its interest is ' +
-        'that terrain and magnetometer are wholly unrelated instruments and ' +
-        'they land 0.804 deg apart. The alignment itself returned ' +
-        'low-confidence, not a lock: NCC 0.578, margin 0.031 against a 0.03 ' +
-        'floor, residual 1.111 deg against a 1.5 deg limit, recovered pitch ' +
-        '-1.55 deg. A near-miss agreement from a near-miss alignment is worth ' +
-        'exactly what it says and no more.',
+        'this repository is graded against (CLAUDE.md rule 4). Terrain and ' +
+        'magnetometer are wholly unrelated instruments and they land 0.804 deg ' +
+        'apart. The alignment returned low-confidence, not a lock: NCC 0.578, ' +
+        'margin 0.031 against a 0.03 floor, residual 1.111 deg against a 1.5 ' +
+        'deg limit, recovered pitch -1.55 deg. ' +
+        'AND YET IT WAS THE CLOSER OF THE TWO. Solving the pose from the ' +
+        'photograph itself — Castle Peak\'s apex read off the full-resolution ' +
+        'image, which neither instrument can have influenced — puts the true ' +
+        'heading at 174.686 deg. The aligner missed by 0.207 deg and the ' +
+        'magnetometer by 0.596 deg. The EXIF value is still what this case ' +
+        'asserts, because it is the one of the three that is a tag in ' +
+        'committed bytes; being asserted is about provenance, not about being ' +
+        'the most accurate number in the room. See docs/REAL-PHOTO-POSE.md.',
     },
     note:
       'MEASURED, from GPSImgDirection in the camera original ' +

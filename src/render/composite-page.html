@@ -31,7 +31,7 @@
     -->
     <div id="mount"></div>
     <script type="module">
-      import { compositeToPngDataUrl } from '/src/render/composite.ts';
+      import { compositeToPngDataUrl, svgToDataUrl } from '/src/render/composite.ts';
 
       /**
        * Parse an SVG and report any error the browser finds. `drawImage` on a
@@ -44,14 +44,26 @@
         return error === null ? null : `${label}: ${error.textContent.trim().slice(0, 300)}`;
       }
 
-      window.mfComposite = async ({ backdropSvg, overlaySvg, widthPx, heightPx }) => {
+      window.mfComposite = async ({ backdropSvg, backdropDataUrl, overlaySvg, widthPx, heightPx }) => {
+        // A backdrop is EITHER a synthetic silhouette (SVG, from `npm run
+        // demo`) or a real photograph (an image data: URL, from `npm run
+        // annotate`). A photograph goes straight to the compositor: wrapping
+        // a 4 MB JPEG in an SVG and base64-ing the result twice costs ~10 MB
+        // of string for nothing, and it is the compositor's `photoSrc`
+        // parameter that this is for.
         const problem =
-          svgParseError(backdropSvg, 'backdrop') ?? svgParseError(overlaySvg, 'overlay');
+          (backdropDataUrl === undefined ? svgParseError(backdropSvg, 'backdrop') : null) ??
+          svgParseError(overlaySvg, 'overlay');
         if (problem !== null) throw new Error(problem);
 
-        const photoSrc = `data:image/svg+xml;base64,${btoa(
-          String.fromCharCode(...new TextEncoder().encode(backdropSvg)),
-        )}`;
+        // NOTE: `svgToDataUrl`, not a local re-implementation. This line used
+        // to read `String.fromCharCode(...new TextEncoder().encode(svg))`,
+        // which spreads one argument per byte and dies with "Maximum call
+        // stack size exceeded" somewhere north of a hundred kilobytes — never
+        // hit while every backdrop was a small synthetic silhouette, hit
+        // immediately by the first real photograph. composite.ts has always
+        // done this with a loop; this page had a second copy that did not.
+        const photoSrc = backdropDataUrl ?? svgToDataUrl(backdropSvg);
         const pngDataUrl = await compositeToPngDataUrl({
           photoSrc,
           overlaySvg,

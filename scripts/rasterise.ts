@@ -21,8 +21,20 @@ import { chromium } from '@playwright/test';
 import { createServer } from 'vite';
 
 export interface RasteriseInput {
-  /** Backdrop SVG — what the overlay is composited ONTO. */
+  /**
+   * Backdrop SVG — what the overlay is composited ONTO. Ignored when
+   * `backdropDataUrl` is set.
+   */
   readonly backdropSvg: string;
+  /**
+   * A real photograph as an `image/*` data URL, used instead of `backdropSvg`.
+   *
+   * Kept separate rather than folded into the SVG because a photograph put
+   * inside an `<image>` element inside an SVG is base64-encoded twice — a 4 MB
+   * JPEG becomes about 7.5 MB of string — and the compositor takes an image
+   * source directly. `npm run annotate` uses this; `npm run demo` does not.
+   */
+  readonly backdropDataUrl?: string;
   /** The overlay SVG from `buildOverlaySvgFromLayout`. */
   readonly overlaySvg: string;
   readonly widthPx: number;
