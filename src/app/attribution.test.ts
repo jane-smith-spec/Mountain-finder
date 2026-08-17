@@ -206,16 +206,35 @@ describe('the citations this build actually ships', () => {
   });
 
   it('counts the committed regions and their summits from the region indexes', () => {
-    // The four committed regions state their own totals:
-    //   california 3341 + cascades 2717 + fort-william 684 + zermatt 1786 = 8528
-    const regions = summariseRegions(
-      import.meta.glob('../../fixtures/peaks/regions/*/index.json', {
-        eager: true,
-        import: 'default',
-      }),
-    );
-    expect(regions.names).toEqual(['california', 'cascades', 'fort-william', 'zermatt']);
-    expect(regions.summits).toBe(8528);
+    // Derived, not frozen. An earlier version asserted the exact list
+    // ['california','cascades','fort-william','zermatt'] and the exact total 8528,
+    // and broke the moment a fifth region (idaho-central) was imported — a test
+    // failing because the data grew, not because the code regressed.
+    //
+    // What is actually worth asserting is the AGGREGATION: that the footer's
+    // total is the sum of what each region index states about itself, and that
+    // the regions it names are the ones on disk. Those hold however many
+    // regions exist.
+    const indexes = import.meta.glob('../../fixtures/peaks/regions/*/index.json', {
+      eager: true,
+      import: 'default',
+    });
+    const regions = summariseRegions(indexes);
+
+    const onDisk = Object.keys(indexes)
+      .map((path) => path.split('/').at(-2))
+      .filter((name): name is string => name !== undefined)
+      .sort();
+    expect(regions.names).toEqual(onDisk);
+    expect(regions.names.length).toBeGreaterThanOrEqual(4);
+
+    // The aggregate must equal the sum of each index's own declared total.
+    const declared = Object.values(indexes).reduce<number>((total, index) => {
+      const peaks = (index as { peakCount?: number }).peakCount;
+      return total + (typeof peaks === 'number' ? peaks : 0);
+    }, 0);
+    expect(regions.summits).toBe(declared);
+    expect(regions.summits).toBeGreaterThan(8000);
     // One citation, shared by all four regions — deduplicated by title, so the
     // footer states the Overture release once rather than four times.
     expect(regions.citations).toHaveLength(1);

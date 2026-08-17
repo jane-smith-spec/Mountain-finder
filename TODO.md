@@ -1,491 +1,320 @@
 # TODO
 
-## Queue (as of 2026-08-16)
+Live checklist. Check an item only after its self-check has been run and passed —
+[PLAN.md](PLAN.md) defines every check and carries the phase-by-phase status.
+Every confirmed finding is indexed in [docs/FINDINGS.md](docs/FINDINGS.md); the detailed
+write-ups are in the three `REVIEW-FINDINGS*.md` files and are not repeated here.
 
-**In flight — 4 agents, disjoint ownership:**
+**Where the project stands** is stated once, in [README.md](README.md#status-honestly).
 
-| # | Task | Owns | Delivers |
-|---|---|---|---|
-| 1 | Renderer | `src/render/`, `tests/e2e/render.spec.ts` | P4.1 SVG overlay (collision-avoided labels, XML escaping), P4.2 PNG export via Playwright Chromium |
-| 2 | Pipeline | `src/pipeline/`, `peak-store.ts`, `fixtures/peaks/`, `scripts/demo.ts`, `pipeline-hooks.test.ts` | Offline peak DB, end-to-end orchestration, switches on Group F's 26 `it.todo` hooks, real `npm run demo` |
-| 3 | Adversarial review | read-only + `tests/scratch/` | The review gate PLAN.md requires and we skipped. Must *demonstrate* each finding with a failing test — an undemonstrated finding is a hypothesis |
-| 4 | Web app shell | `src/app/`, `tests/e2e/app.spec.ts`, `index.html` | P5.1 drop-zone + EXIF autofill + honest provenance panel + trim sliders, P5.2 export seam |
+---
 
-**Queued behind them, in order:**
+## Open
 
-- [x] **Q1 — Integration.** Wired: `src/app/overlay-builder.ts` (pipeline → renderer → SVG) and
-      `src/app/composite-export.ts` (P4.2) are passed to `<App>` in `main.tsx`. `seam-probe.ts`
-      and the `?seam-probe=1` branch are DELETED; the e2e test that depended on them is
-      replaced by one that drives the real pipeline over real SRTM bytes.
-      **Browser terrain: static grids on the app's own origin** — an index at
-      `/terrain/manifest.json` plus the sample files it names
-      (`src/providers/terrain-manifest.ts` + `http-terrain-store.ts`), published in dev and
-      preview by `scripts/terrain-server.ts` from `data/tiles/` (whole tiles) and
-      `fixtures/tiles/cases/` (committed real-SRTM windows). One code path for both, because a
-      whole tile is just a bigger grid; the largest grid covering a point wins, since a window
-      can produce a false visible and only the tile can prove an occlusion. Synthetic test
-      tiles are never served. D7 holds: no live API at runtime.
-      **Missing terrain is a named absence**, in the same family as `needs-manual`: the builder
-      checks coverage BEFORE running the pipeline and refuses with the position, the tile
-      needed (`N45E006`), what the app does hold and the `fetch:tiles` command — never a blank
-      overlay, which would read as "no peaks are visible". `OverlayResult.notes` does the same
-      job for a sparse overlay: off-frame summits, foreground-occluded summits, blind bearings,
-      and "the peak database has nothing within 200 km of here".
-- [~] **Q2 — Fix review findings** from task 3, by severity: silent-wrong-answer bugs first.
-      Done (see REVIEW-FINDINGS.md for the numbering): 1 range-0 ray sample no longer walls off a
-      bearing (`sweepRay` skips d = 0, throws on negative/NaN); 2 the cone fixture now states the
-      nearer-terrain occluder (7.976826°, clearance 0.502750°) instead of measuring the apex
-      against itself; 3 `normaliseHorizonProfile` merges the UNION of both staircases; 4 an
-      out-of-range override surfaces as `needs-manual` / `'out-of-range'` and is never replaced by
-      EXIF (lat, lon, eyeHeightM ≥ 0, hFov/vFov in (0,180)); 5 `HgtTile` compares longitude mod 360
-      so lon +180 reads from `W180`; 6 a peak coinciding with a terrain sample is no longer its own
-      occluder (`COINCIDENT_DISTANCE_TOLERANCE`).
-      **The deferred rename is done (2026-08-16), no behaviour change:**
-      `ExpectedPeakVerdict.skylineAltitudeDeg` → `.occludingAltitudeDeg` in `fixtures/scenes`,
-      and `VisiblePeak.horizonAltitudeDeg` → `.occludingAltitudeDeg` in `src/core/types.ts`,
-      which carried the identical misnomer one layer down — its doc comment had to spend a
-      paragraph insisting it was not the skyline, and that paragraph is now unnecessary.
-      Both fields mean "highest angle reached by terrain NEARER than the peak". Genuine
-      skylines keep the name: `HorizonPoint.altitudeDeg`, `HorizonPoint.skylineSteps`,
-      `ExpectedSkylinePoint`, `interpolateHorizonAltitudeDeg` and twin-ridges.ts's local
-      `skylineAltitudeDeg` (which feeds `expectedSkyline` and IS the maximum over all
-      distances). Every expected value is byte-identical; only identifiers and prose moved.
-      **Suspicion 1 (gap bridging) is CONFIRMED and fixed (2026-08-16) — now finding 6.**
-      A wedge of unfetched tiles drops whole rays, and the profile bridged the hole: the same
-      peak at bearing 120° inside a 40°-wide hole with zero terrain samples came out
-      `foreground-occluded` (clearance −5.14°, "behind" a ridge on the ray at 100°) or `visible`
-      and labelled (clearance +4.30°) purely according to terrain 20° away on the far side of
-      the hole. `horizonCoverage` + `hasTerrainAtBearing` in `src/core/horizon.ts` (pure) now
-      take the sweep's own bearing list and refuse a bearing whose bracketing pair has a lost
-      ray between them; `annotateScene` reaches NO verdict for such peaks and reports them in
-      `AnnotatedScene.unmeasured` with a warning. A bounded sweep is not a hole — a 60° sector
-      that walked all its rays lost nothing, so its peaks are untouched; the distinction is
-      exact (a bearing the sweep asked about and lost) rather than a gap-width heuristic.
-      All 4 ground-truth cases lose no rays, so 148/148 acceptance verdicts are unchanged.
-      **Suspicion 2 (`nearest-valid` over-reporting) is CONFIRMED and fixed (2026-08-16) —
-      now finding 7,** and it was a value error as well as a reporting one. `HgtTile.bilinear`
-      demoted a reading whenever ANY corner of the cell was void, without asking what WEIGHT
-      that corner carried. On a grid line the off-line corners weigh exactly zero, so a query
-      landing on a valid sample — or anywhere along an edge whose void sits off that edge —
-      was reported `'nearest-valid'` though its value could not depend on the void, and under
-      `voidPolicy: 'no-data'` a correct measurement was thrown away as `status: 'void'`. Worse:
-      mid the north edge of the demo tile the exact answer 0.5·200 + 0.5·300 = 250 m was
-      computed and then DISCARDED for the nearest corner's 200 m — 50 m of avoidable error.
-      The fix sums the void corners' weights instead of setting a flag; a total below
-      `NEGLIGIBLE_VOID_WEIGHT` (1 mm ÷ the format's ±32767 m extreme ≈ 3.05e-8, a bound on the
-      reading's ERROR because 1/3600° is not binary-representable and an on-line query lands
-      ~1e-12 off) reads `'bilinear'` under both policies. Above it nothing changes: the
-      fallback and the strict refusal still fire the moment a void can move the answer.
-      Void semantics untouched — voids stay `null` and are still never averaged in. The AWS
-      mirror has 0 voids in 51.8 M samples, so no shipped reading moves; this is the defensive
-      path other SRTM distributions need. **Both open suspicions from the first review are now
-      closed** (suspicion 3, negative `eyeHeightM`, was real and is covered by item 4 above).
-      Still open, both noted under finding 6: peaks outside a bounded sweep are still judged
-      against the bridged complement, and `src/cv/rays.ts:profileCoverage` duplicates the
-      coverage notion with a largest-gap heuristic that should be reconciled onto the exact
-      one. Finding 7 adds a third: `'nearest-valid'` is discontinuous at a grid line (250 m on
-      it, 200 m a hair off it) because it returns a corner rather than re-normalising the valid
-      weights — the documented policy, flagged to the caller, and a policy decision to change.
-- [~] **Q2b — Fix WAVE-2 review findings** (`REVIEW-FINDINGS-2.md`), in the review's own order.
-      Each fix has a test that was watched failing first, on the review's own reproduction.
-      **Finding 1 (HIGH) — D8 measured the col from the wrong crest.** `classifyOcclusion` took
-      the FIRST nearer sample that out-angled the summit; with anything taller behind it, the
-      col separating the two mountains was measured against the wrong, lower reference and read
-      0, so a summit across a 400 m col came out `self-occluded` — a greyed label planted on a
-      different mountain's face, below the skyline. The crest is now the HIGHEST-ANGLE nearer
-      sample, i.e. the one that forms the skyline and the same ground the visibility verdict
-      was taken against. The old docstring defended first-blocker selection as "a stronger test
-      over a longer span"; that is backwards, because a lower crest LOWERS the bar the
-      intervening ground must clear to count as "no col", biasing toward labelling. The review's
-      terrain now reads `colDepthM` 400 and `foreground-occluded` (unit + pipeline tests).
-      **No ground-truth verdict moved** — Cow Hill is still self-occluded with col 0, Ben Nevis
-      still foreground-occluded, its col now 216.1 m below a 232 m crest instead of 128.5 m
-      below a 144 m one. One unit fixture had to be rebuilt: the `colToleranceM` test put its
-      6 m dip BEHIND the skyline-forming sample, so under the corrected rule its scene is
-      genuinely one landform and no longer exercised the allowance.
-      **Finding 2 (HIGH) — peaks beyond the swept range got a confident `visible`.** Peak radius
-      200 km against a 30 km sweep meant every summit from 30–200 km was judged on ≤15 % of its
-      sightline with no warning. The RANGE axis now gets the refusal the bearing axis has:
-      `rangeIsMeasured` (pure, in `src/core/visibility.ts`, shared with `classifyOcclusion`'s
-      own coverage check) asks whether the ray records terrain continuously out to the peak, and
-      `annotateScene` puts a peak that fails it in `AnnotatedScene.unmeasured` with a warning
-      naming it. Keyed to terrain MEASURED, not to the configured range, so a ray truncated by
-      missing tiles is refused on the same footing as one truncated by `maxRangeKm`. The
-      defaults are unchanged and deliberately asymmetric: looking 200 km wide and refusing out
-      loud beats looking 30 km wide and never mentioning the mountain. `judgeBeyondMeasuredTerrain`
-      (default false) is how a caller with a deliberately truncated sweep declares it; the two
-      acceptance cases whose committed windows are 3–5 km against 60–292 km sightlines set it via
-      `CaseTerrainSpec.judgeBeyondWindow`, and Gornergrat and Fort William leave it off, so the
-      refusing default is gated end to end by real viewpoints.
-      **Finding 3 (MEDIUM-HIGH) — portrait FOV on the wrong axis, `Orientation` never read.**
-      `2·atan(36/(2·f35))` is the angle across the LONG side of the 35 mm gate and was attributed
-      to image width unconditionally — right in landscape, 12.4 % of frame width wrong on the
-      repo's own portrait fixture, and badged `EXIF` either way. `extract.ts` now reads
-      `Orientation` (nothing in `src/` did), reports the DISPLAYED pixel dimensions, and
-      `fovDegFromFocalLength35mm` gives the 36 mm angle to the longer displayed axis. New fixture
-      `fixtures/photos/portrait-orientation-6.jpg` (stored landscape, displayed portrait) — every
-      other fixture pins Orientation 1, so no test could see the tag. **`extract.test.ts` PINNED
-      THE BUG** with a hand-derived expectation encoding the wrong model (hFov 39.597753 on a
-      3:4 frame); it now states 30.219150 and says in the test why it changed. The long-side vs
-      diagonal reading of `FocalLengthIn35mmFormat` is a convention — they agree exactly at 3:2
-      and differ by ~1° at 4:3 — and `fov.ts` states the choice, the alternative and the cost.
-      **Gates (from the review's mutation testing).** Fort William's Ben Nevis must-NOT-see claim
-      promoted `medium` → `high`: its blocking ridge is the only one wholly inside a committed
-      window, and the case file itself said to promote it once the DEM answered the shoulder
-      question. Verified: mutating `classifyOcclusion` to return `self-occluded` unconditionally
-      now fails a HIGH-confidence gate (it previously survived every one). And the first
-      horizontal-placement assertions in the suite — each analytic scene's flag is now predicted
-      at Δ = ±20° off the optical axis from the rectilinear closed form, x through `tan Δ` and y
-      through its `1/cos Δ` magnification. Verified: mutating the projection to be angle-linear
-      in x now fails 3 assertions (it previously passed all 148).
-      Acceptance: **153 passed** (was 148; none weakened, 5 added).
+| # | Item | What it needs |
+|---|---|---|
+| **Q8** | Switch the app to the 8 528-summit dataset | One file. `src/app/main.tsx` imports `fixtures/peaks/ground-truth-peaks.json` (15 cited summits) and hands `groundTruthPeakStore` to `createOverlayBuilder`; the Overture regions are already staged at `/peaks/<region>/index.json` + `cells/N45E007.json` in exactly the layout `TiledPeakStore` expects, and `npm run test:deploy` already proves they are served. Two things move in the same commit: `peakDataReadByThisBuild` in `src/app/data-credits.ts` (`'bundled'` → `'regions'`, or the footer keeps saying "not read by this build yet"), and `verifyPeaksAreBundled` in `scripts/package-deploy.ts`, which deliberately **fails** the day the summit name leaves the bundle. Expect the density findings to bite: `Breithorn` is ambiguous (four in the Valais), one mountain arrives as a cluster (Matterhorn 4 nodes, Rainier 8), and California alone repeats 306 names |
+| **Q9** | Re-measure the DEPLOY.md size table | "What it costs" predates the four committed regions and the attribution footer. It has **no row for `/peaks/`** at all (3.2 MB staged — california 1.26, cascades 1.02, zermatt 0.67, fort-william 0.26 MB), and nothing states what one *session* costs once the app fetches cells rather than bundling them — which is the number a deployer budgets with. The bundle figure was 302 KB and is now 318.40 kB / 104.34 kB gzipped; the windows-only demo row moved 1.77 → 1.78 MB. Those two were measured; the `/peaks/` row only means something after Q8 |
+| **P7.4** | CV integration — deliberately not done | Seam is `src/pipeline/cv-alignment.ts`, exported from nothing and imported by nothing. Pre-set the P5.1 trim sliders rather than replace them: an automatic correction the user cannot see or undo is worse than a manual one. Blocked behind P7.5 — there is no point wiring in an extractor that stitches two edges together. See `src/cv/README.md` |
+| **P7.5** | The extractor on real photographs | The current work. `fitStep` fits each column independently and stitches a foreground ridge to the distant horizon ([CV-4](docs/FINDINGS.md)); snow-dominant hazy scenes need a texture or gradient cue and a non-monotonic segmentation ([CV-2](docs/FINDINGS.md)). Both now have a real photograph to be measured against |
+| **X-4** | Kerry Park: the Mount Baker gate is not observer-height-insensitive | The verdict flips inside the case file's own stated uncertainty band — DEM 103.8 m → hidden (−1.67°), cited 113 ± 15 m → visible (+0.31°). The suite takes the ground height from the DEM and reports the comparison; the case file still wants the note |
+| **X-5** | Occluding-angle report at an exact tie | **The record disagrees with itself**: Q2 below lists this fixed via `COINCIDENT_DISTANCE_TOLERANCE` (present at `src/core/horizon.ts:369`), and it was also carried as an open finding. Verdicts are unaffected either way — an equal angle still clears — but UI sorting or thresholding on `clearanceDeg` would be misled. Resolve which record is right before anything depends on `clearanceDeg` |
+| **R-1…R-4** | Residuals the reviews left open by decision | Peaks outside a bounded sweep still judged against the bridged complement; `src/cv/rays.ts:profileCoverage` duplicates the coverage notion with a largest-gap heuristic; `'nearest-valid'` is discontinuous at a grid line (a policy decision, not a bug); `scripts/terrain-server.ts` should use `datasetLabelForStepDeg`. Detail in [docs/FINDINGS.md](docs/FINDINGS.md#residuals-left-open-by-the-reviews) |
+| **Phase 8** | Live view (v3) | Not started, by decision D5 — after v2.1. Products and self-checks are in [PLAN.md](PLAN.md) |
 
-- [x] **Q3 — The demo PNG.** `npm run demo -- gornergrat` writes `out/annotated.png`: the real
-      pipeline over the full `data/tiles/N45E007.hgt`, laid out by `src/render` and composited by
-      `src/render/composite.ts` in Chromium (`scripts/rasterise.ts` + `src/render/composite-page.html`
-      — no second rasteriser, no new dependency). Full tiles are now the DEFAULT and a missing
-      tile stops the run with instructions (`--window` asks for the committed cut on purpose);
-      the old `--full-tiles` silently fell back to the window, which is fixed.
-      **The overlay is composited onto a synthetic backdrop** — this run's own terrain
-      silhouette, hatched and captioned "not a photograph" on the image itself
-      (`src/render/synthetic-backdrop.ts`). The horizon line lying on that silhouette is
-      TAUTOLOGICAL and says so in the report; the peak markers are not, because they come from
-      the peak database and the projection with no reference to the terrain sweep.
-      **What the image shows:** the Matterhorn flag lands 1.92° above the drawn ridge — that is
-      SRTM under-reading a sharp summit (MISSION.md: −248 m, displaced ~320 m), and 1.92° at
-      9.58 km is ~327 m, so the picture reproduces the documented DEM error rather than a
-      labelling bug. Broad summits do not show it: in the wide framing
-      (`--heading 238 --hfov 85`) the Breithorn flag sits 0.27° above its own ridge, on it.
-- [x] **Q4 — v2.0 ship gate MET (2026-08-16).** Every gate verified at the coordinator, not
-      taken from an agent's report:
+## Blocked on the environment, not on code
 
-      | Gate | Result |
-      |---|---|
-      | `npm run check` | 38 files, **746 tests** ✅ |
-      | `npm run test:acceptance` | **148 passed, 0 todo, 0 failing** ✅ |
-      | `npx playwright test` | **13 e2e** ✅ |
-      | `npm run build` | production bundle ✅ |
-      | Demo artifact | produced, **opened and inspected**, committed to `docs/artifacts/` ✅ |
-      | High-confidence ground truth | all passing, incl. Cow Hill now passing *honestly* ✅ |
+| # | Item | Blocker |
+|---|---|---|
+| **P2.4** | Re-record `fixtures/api/**` from live OpenTopoData + Overpass | Egress 403s both at the proxy. The recorder and its offline `--verify` work; the fixtures are **hand-authored against documented schemas and labelled as such**. The elevation fixtures are superseded anyway (real SRTM bytes from AWS are better evidence than recorded JSON) — but the Overpass recording genuinely never happened. Recorded `[~]`, never ticked |
+| **P6.2** | Real-viewpoint research against reachable reference sources | Wikipedia, parks.ca.gov and seattle.gov all 403. The four case files' coordinates carry resolvable source ids and an `access` field, and must be re-verified against live pages before they gate a release |
+| **X-6** | Turn the two real photographs into acceptance cases | EXIF did not survive the upload path — `Orientation` and dimensions only, no GPS, no `GPSImgDirection`, no focal length. Both positions are now established and cross-checked against SRTM (Sunset Mountain to 0.7 m, Railroad Ridge to the foot); **neither heading is measured**, and recovering it is exactly what `src/cv` exists to do. See [docs/IDAHO-PHOTO-CASES.md](docs/IDAHO-PHOTO-CASES.md) |
 
-      **Two things v2.0 ships with, stated rather than buried:**
+---
 
-      1. **P2.4's self-check is unmet** and is recorded `[~]`, not ticked. The live fixture
-         recorder cannot run while egress 403s OpenTopoData and Overpass. The elevation
-         fixtures it would have produced are superseded anyway — real SRTM bytes from AWS are
-         better evidence than recorded JSON — but the Overpass recording genuinely never happened.
-      2. **Peak coverage is the binding constraint, not the code.** The bundled database holds
-         three alpine summits, which is why the demo shows one label rather than a skyline of
-         them. Everything downstream of the database is finished and tested; the database is
-         what stops this being usable anywhere. See Q5.
+## Done
 
-- [ ] **Q5 — Peak coverage (next phase).** Every peak source is blocked from here
-      (`download.geonames.org`, geofabrik, naturalearthdata, `planet.openstreetmap.org`,
-      taginfo all fail at the proxy; Overpass 403) — **but `s3.amazonaws.com` is reachable and
-      both `osm-pds` and the Overture Maps distribution list from here.** Overture's `base`
-      theme carries peaks in `type=land`.
-      Parts are ~800 MB each, so a bulk download is the wrong shape. Parquet footers carry
-      per-row-group statistics including bbox, and S3 honours HTTP Range requests, so fetching
-      only the row groups covering a bounding box is both feasible and the correct design — and
-      it matches the existing architecture exactly: an acquisition step that writes a local
-      dataset, never a runtime dependency, like `fetch:tiles`.
+### v2.0 ship gate — MET 2026-08-16
 
-      **DONE (2026-08-16). The design works and Overture carries summit heights.**
-      `npm run fetch:peaks -- --region zermatt` imported **1 786 named summits** (61 above
-      4 000 m) for **42.17 MB of a 29.47 GB release — 0.1431%**; a re-run with the footer
-      cache warm costs 10.77 MB. 14 row groups of 5 056 were read, and only six of thirteen
-      columns from those, because `geometry` is ~96% of the bytes. Gates after: `npm run check`
-      **41 files / 809 tests**, `npm run test:acceptance` **148**, `npx playwright test` **13**,
-      `npm run build` clean (299.49 kB bundle, no parquet decoder in it).
+Every gate verified at the coordinator, not taken from an agent's report.
 
-      **The open question of P9.4 is answered: Overture DOES carry elevations.** The
-      `elevation` INT32 column is the OpenStreetMap `ele` tag carried through unchanged —
-      checked row-by-row against the same rows' `source_tags.ele` (Matterhorn `"4478"` → 4478,
-      Weisshorn `"4505"` → 4505). So imported records declare `elevationSourceKind: 'osm'`
-      honestly, and **nothing is ever sampled from the DEM**: a summit with no `ele` is
-      dropped and counted (285 in the Zermatt area), never filled in.
+| Gate | Result |
+|---|---|
+| `npm run check` | 38 files, **746 tests** ✅ |
+| `npm run test:acceptance` | **148 passed, 0 todo, 0 failing** ✅ |
+| `npx playwright test` | **13 e2e** ✅ |
+| `npm run build` | production bundle ✅ |
+| Demo artifact | produced, **opened and inspected**, committed to `docs/artifacts/` ✅ |
+| High-confidence ground truth | all passing, incl. Cow Hill now passing *honestly* ✅ |
 
-      **Overture agrees with the cited ground truth**: 13 of 15 heights exact or within 2 m.
-      Two real conflicts, reported and NOT resolved in favour of Overture — the disagreement
-      table is in `fixtures/peaks/README.md`. Mount Hamilton 1300 m cited vs 1279 m OSM
-      (−21 m), and **Mount Tamalpais East Peak's two coordinates are 1 754 m apart**, which
-      needs re-checking before that summit backs any assertion. Also: "Breithorn" is
-      ambiguous once real coverage is on — OSM calls the cited 4 164 m summit
-      `Breithorn Occidentale / Westgipfel` and the Valais holds three other `Breithorn`s.
+**Two things v2.0 shipped with, stated rather than buried:** P2.4's self-check is unmet (above),
+and **peak coverage was the binding constraint, not the code** — the bundled database held three
+alpine summits, which is why the first demo showed one label rather than a skyline of them.
+Everything downstream of the database was finished and tested. Q5 fixed the database.
 
-- [x] **Q6 — Visible data attribution (2026-08-16).** The gap was real and verified: the built
-      bundle contained no `OpenStreetMap`, `ODbL`, `Overture` or `attribution` string anywhere,
-      while `fixtures/peaks/regions/` holds **8 528 Overture summits under ODbL-1.0**, whose
-      licence requires the notice to reach *users of the app*. `dist/ATTRIBUTION.txt` did not
-      discharge that: a file nobody links to is not attribution.
-      **What now renders** (`src/app/components/AttributionFooter.tsx`, footer, sticky, on first
-      paint, no interaction): `© OpenStreetMap contributors, ODbL-1.0, via Overture Maps
-      Foundation — Attribution required by ODbL-1.0`, plus NASA/USGS SRTM as courtesy and the
-      15 cited summits by hostname.
-      **It is derived, not typed.** `src/app/attribution.ts` reads the licence out of each
-      dataset's own `sources[]` citation (the same records `package-deploy.ts` writes
-      ATTRIBUTION.txt from) — licence by table match, holder from the `©` clause, publisher from
-      the title's first clause — and `data-credits.ts` globs the region indexes, so a region
-      added under CC-BY-4.0 credits itself and removing every region removes the notice. A bare
-      `ODbL` stays `ODbL`; the version is never invented.
-      Gates: `npm run check` **50 files / 1 025 tests**, `npm run test:acceptance` **153**,
-      `npx playwright test` **21**, `npm run test:deploy` **5**, and
-      `grep -o OpenStreetMap dist/assets/*.js | wc -l` → **13** (was 0).
-      Mutation-checked, not assumed: `display:none` on the footer fails all five e2e assertions,
-      and removing `position: sticky` fails exactly the one that says a loaded photo must not
-      bury it.
-- [x] **Q7 — `noTerrainMessage` made honest for a stranger.** It told every visitor to run
-      `npm run fetch:tiles`, which is right for a developer and useless to the public. It now
-      leads with what is true of the deployment ("this deployment does not hold N45E006"), keeps
-      the position, the missing tile and the list of grids served, says outright that
-      photographs over shipped terrain are unaffected, and keeps the command **last and
-      explicitly scoped** to someone running a source checkout. No assertion was dropped;
-      two were added.
-- [ ] **Q8 — Switch the app to the 8 528-summit dataset.** The app compiles peaks INTO the JS
-      bundle: `src/app/main.tsx` imports `fixtures/peaks/ground-truth-peaks.json` (15 cited
-      summits) and hands `groundTruthPeakStore` to `createOverlayBuilder`. The Overture regions
-      are already staged at `/peaks/<region>/index.json` + `cells/N45E007.json` in exactly the
-      layout `TiledPeakStore` expects, and `npm run test:deploy` already proves they are served
-      correctly — so this is **one file**: build a `TiledPeakStore` over `/peaks/` in `main.tsx`
-      instead of importing the JSON. Two things move with it, in the same commit:
-      `peakDataReadByThisBuild` in `src/app/data-credits.ts` (`'bundled'` → `'regions'`, or the
-      footer keeps saying "not read by this build yet"), and `verifyPeaksAreBundled` in
-      `scripts/package-deploy.ts`, which deliberately FAILS the day the summit name leaves the
-      bundle. Expect the density findings to bite: `Breithorn` is ambiguous (four in the Valais),
-      one mountain arrives as a cluster of nodes (Matterhorn 4, Rainier 8 around it), and
-      California alone repeats 306 names.
-- [ ] **Q9 — Re-measure the DEPLOY.md size table.** "What it costs" predates the four committed
-      regions and the attribution footer. Known stale: it has **no row for `/peaks/`** at all
-      (3.2 MB staged — california 1.26, cascades 1.02, zermatt 0.67, fort-william 0.26 MB — and
-      nothing states what one *session* costs once the app fetches cells rather than bundling
-      them, which is the number a deployer actually budgets with); the bundle figure was 302 KB
-      and is now 318.40 kB / 104.34 kB gzipped; the windows-only demo row moved 1.77 → 1.78 MB.
-      The two updated numbers were measured here; the missing `/peaks/` row needs the per-cell
-      and per-session figures, which only mean something after Q8.
+After Q6 (attribution) the gates read: `check` **50 files / 1 025 tests**,
+`test:acceptance` **153**, Playwright **21**, `test:deploy` **5**.
 
-**Phase 7 (CV skyline alignment, decision D3) is built and proved, and is not switched on.**
-Synthetic and real-SRTM round trips recover an injected offset to 0.02° in heading; every
-failure mode refuses rather than guessing. What is missing is not code: the extractor has never
-been run on a photograph of a mountain, because this repository contains none. See the Phase 7
-section below and `src/cv/README.md`.
+### Review gates
 
-**Deferred by decision, not forgotten:** Phase 8 live view (v3, decision D5) — after v2.1.
+| Gate | Evidence |
+|---|---|
+| Wave 1 review | [REVIEW-FINDINGS.md](REVIEW-FINDINGS.md) — `src/core`, `src/providers`, `src/exif`, `fixtures/scenes` |
+| Wave 2 review | [REVIEW-FINDINGS-2.md](REVIEW-FINDINGS-2.md) — `src/pipeline`, `src/app`, `src/core/visibility.ts`, `tests/acceptance`, plus 12 mutations |
+| Wave 3 review | [REVIEW-FINDINGS-3.md](REVIEW-FINDINGS-3.md) — `src/providers`, plus 39 mutations |
 
+The three review documents do not map one-to-one onto the original A/D/E wave labels — the
+scopes were re-cut as the code moved. Recorded rather than renumbered.
 
-Live checklist. Check items only after their self-check has been run and passed (see PLAN.md for each check's definition).
+### Findings fixed
 
-## Phase 0 — Scaffold ✅
-- [x] P0.1 Vite 6 + React 18 + TS(strict, noUncheckedIndexedAccess) + vitest 3 + ESLint 9 + Playwright
-- [x] P0.2 `check` / `test:e2e` / `test:acceptance` / `demo` scripts wired — all five commands verified green
-- [x] `src/core/types.ts` frozen shared contract (separates `elevationM` from `altitudeDeg`)
+Full write-ups and ids in [docs/FINDINGS.md](docs/FINDINGS.md). What landed, with the figure
+that proves it:
 
-## Phase 1 — Geometry core (group A) ✅ 178 tests
-- [x] P1.1 Geodesy — 56 tests; meridian-convergence test rejects a rhumb-line impostor
-- [x] P1.2 Sightline — 29 tests; analytic cone matches closed form to 1e-12 (spec asked 0.01°)
-- [x] P1.3 Horizon profile — 35 tests; exact at samples, seam continuity across 359°→0°
-- [x] P1.4 Camera projection — 29 tests; guards the tangent-vs-angle-linear mistake
-- [x] P1.5 Visibility filter — 29 tests; occlusion by NEARER terrain only (see fix below)
+- **Q2 — Wave 1 findings.** W1-1 `sweepRay` skips `d = 0` and throws on negative/NaN · W1-2 the
+  cone fixture states the nearer-terrain occluder (7.976826°, clearance 0.502750°) instead of
+  the apex against itself · W1-3 `normaliseHorizonProfile` merges the **union** of both
+  staircases · W1-4 an out-of-range override surfaces as `needs-manual` / `'out-of-range'` and
+  is never replaced by EXIF (lat, lon, `eyeHeightM ≥ 0`, hFov/vFov in (0,180)) · W1-5 `HgtTile`
+  compares longitude mod 360, so lon +180 reads from `W180` · a peak coinciding with a terrain
+  sample is no longer its own occluder (`COINCIDENT_DISTANCE_TOLERANCE` — but see X-5 above,
+  which the same file also carried as open) · W1-6 `horizonCoverage` + `hasTerrainAtBearing`
+  (pure) refuse a bearing whose bracketing pair has a lost ray between them, and such a peak
+  reaches **no verdict**: it goes to `AnnotatedScene.unmeasured`. A bounded sweep is not a hole,
+  and the distinction is exact rather than a gap-width heuristic. All four ground-truth cases
+  lose no rays, so 148/148 verdicts were unchanged · W1-7 `HgtTile.bilinear` sums the void
+  corners' **weights** instead of setting a flag; below `NEGLIGIBLE_VOID_WEIGHT` ≈ 3.05e-8 the
+  reading is `'bilinear'` under both policies. Void semantics untouched — voids stay `null` and
+  are never averaged in.
+- **The deferred rename, no behaviour change.** `ExpectedPeakVerdict.skylineAltitudeDeg` and
+  `VisiblePeak.horizonAltitudeDeg` → **`.occludingAltitudeDeg`**, both meaning "highest angle
+  reached by terrain NEARER than the peak". The second carried the identical misnomer one layer
+  down and its doc comment had to spend a paragraph insisting it was not the skyline — a name
+  that has to be defended in prose is the exact condition that let W1-2 happen. Genuine skylines
+  keep their names (`HorizonPoint.altitudeDeg`, `.skylineSteps`, `ExpectedSkylinePoint`,
+  `interpolateHorizonAltitudeDeg`, twin-ridges' local `skylineAltitudeDeg`). `tsc` located all
+  39 call sites; every expected value is byte-identical.
+- **Q2b — Wave 2 findings**, in the review's own order, each with a test watched failing first.
+  W2-1 the crest is now the highest-angle nearer sample; the review's terrain reads
+  `colDepthM 400` and `foreground-occluded`, and **no ground-truth verdict moved** — Cow Hill is
+  still self-occluded with col 0, Ben Nevis still foreground-occluded, its col now 216.1 m below
+  a 232 m crest instead of 128.5 m below a 144 m one. One unit fixture had to be rebuilt: the
+  `colToleranceM` test put its 6 m dip *behind* the skyline-forming sample · W2-2
+  `rangeIsMeasured` keys on terrain **measured**, not on the configured range, so a ray
+  truncated by missing tiles is refused on the same footing as one truncated by `maxRangeKm`;
+  `judgeBeyondMeasuredTerrain` (default false) is how a caller with a deliberately truncated
+  sweep declares it, and the two acceptance cases whose windows are 3–5 km against 60–292 km
+  sightlines set it, while Gornergrat and Fort William leave it off — so the refusing default is
+  gated end to end by real viewpoints · W2-3 `extract.ts` reads `Orientation` (nothing in `src/`
+  did), reports **displayed** dimensions, and gives the 36 mm angle to the longer displayed
+  axis; new fixture `fixtures/photos/portrait-orientation-6.jpg`, and the test that **pinned the
+  bug** now states 30.219150 instead of 39.597753 and says in the test why it changed. The
+  long-side vs diagonal reading of `FocalLengthIn35mmFormat` is a convention — they agree
+  exactly at 3:2 and differ by ~1° at 4:3 — and `fov.ts` states the choice, the alternative and
+  the cost · W2-G1 Ben Nevis promoted `medium` → `high` · W2-G2 the first horizontal-placement
+  assertions in the suite, at Δ = ±20° off the optical axis from the rectilinear closed form.
+  Acceptance **153** (was 148; none weakened, 5 added).
+- **Wave 3 findings.** W3-3 `TiledPeakStore.coverageFor` answers from the index alone — bounds,
+  cells spanned vs held, and `coveredRadiusKm` from `R·|Δφ|` and `R·asin(sin Δλ · cos φ)`;
+  Zermatt + 200 km reports complete=false, 24 spanned / 4 held, covered to 32.2 km, which is the
+  radius at which Mont Blanc's absence stops being evidence · W3-G1 the whole-world bbox
+  fallback is pinned, verified to fail against the inverted implementation that all 293 previous
+  tests passed · W3-G2 `slice(100, 200)` must send `bytes=100-199` · W3-1 `lonWidthDeg` measures
+  from the raw bounds, and `fetch:tiles --around 89,10 --radius-km 200` went from 3 tiles on
+  W170 (not including the one underfoot) to 1080 = 3 bands × 360 · W3-2 `withinBox` and
+  `tileNamesForBounds` now share `lonWithinBounds` · W3-4 `datasetLabelForStepDeg`.
+  Suspicions closed: sidecar steps must be positive and rows/cols integers ≥ 2;
+  `resolveTerrainUrl` refuses `//host/x`; `recordsWithin` breaks distance ties on the peak id.
 
-## Phase 2 — Data providers (group B) ✅ 64 tests
-- [x] P2.1 Transport layer — injected sleep, so backoff is asserted with zero wall-clock wait
-- [x] P2.2 Elevation provider — batches of 100, request order verified, `null` no-data preserved
-- [x] P2.3 Peaks provider — nodes + way centroids, `ele`/`ele:ft` parsing
-- [~] P2.4 Fixture recorder — **self-check NOT met.** Recorder + offline `--verify` work, but the
-      live APIs are blocked by this environment's egress policy (403 at proxy), so no live
-      recording was possible. Fixtures are HAND-AUTHORED against documented schemas and
-      labelled as such. Must be re-recorded once egress is allowed. See "Blocked" below.
+### Phases
 
-## Phase 2b — Offline elevation from local SRTM tiles (D7) ✅ 108 tests
-- [x] P2.5 HGT tile reader — `.hgt`/`.hgt.gz`, grid size from file length, bilinear + nearest.
-      Voids are `null`, never a number; interpolation touching a void falls back to the
-      highest-weight VALID corner (`method: 'nearest-valid'`), or returns `'void'` when all
-      four corners are void. `voidPolicy: 'no-data'` opts into the strict rule.
-- [x] P2.6 Tile store — `floor` naming verified across all four hemispheres, the antimeridian,
-      the poles and exact integer degrees; directory loader with an LRU cache; gzip.
-- [x] P2.7 Tile fetcher — `npm run fetch:tiles` from `elevation-tiles-prod/skadi`; validates the
-      grid size before the file lands under its final name, so a truncated download cannot pass.
-- [x] P2.8 Real-data fixtures — `fixtures/tiles/matterhorn-window` (N45E007) and `zermatt-window`
-      (N46E007): real bytes + provenance sidecars, reproducible via `npm run fixtures:tiles`.
-- [x] Verified against the real 25 MB tiles: Grand Combin 4287 m, Matterhorn 4230 m,
-      N45E007 row 0 == N46E007 row 3600 on all 3601 shared-edge samples.
-- **Correction to the briefing:** this mirror is **void-filled**. Zermatt (46.0207, 7.7491) reads
-  **1608 m, not −32768**, and N45E007/N46E007/N27E086/N28E086 contain 0 voids in 51 868 804
-  samples. The void code path is real and tested, but on SYNTHETIC tiles — no honest real
-  fixture from this source can contain a void.
+- **Phase 0 — Scaffold.** Vite 6 + React 18 + TS (strict, `noUncheckedIndexedAccess`) + vitest 3
+  + ESLint 9 + Playwright; all five commands verified green. `src/core/types.ts` is the frozen
+  shared contract, separating `elevationM` from `altitudeDeg`.
+- **Phase 1 — Geometry core, 178 tests.** Geodesy (a meridian-convergence test rejects a
+  rhumb-line impostor) · sightline (the analytic cone matches closed form to 1e-12 against a
+  0.01° spec) · horizon profile (exact at samples, seam-continuous across 359°→0°) · projection
+  (guards the tangent-vs-angle-linear mistake) · visibility (occlusion by **nearer** terrain
+  only — see X-2 below).
+- **Phase 2 — Data providers, 64 tests.** Transport with injected sleep, so backoff is asserted
+  with zero wall-clock wait · elevation provider batching 100 with request order verified and
+  `null` no-data preserved · Overpass peaks with `ele`/`ele:ft` parsing. **P2.4 unmet**, above.
+- **Phase 2b — SRTM tiles (D7), 108 tests.** `.hgt`/`.hgt.gz`, grid size from file length,
+  bilinear + nearest; voids are `null`, never a number. `floor` naming verified across all four
+  hemispheres, the antimeridian, the poles and exact integer degrees. `fetch:tiles` validates
+  grid size before the file lands under its final name, so a truncated download cannot pass.
+  Real-bytes fixtures for N45E007 and N46E007, reproducible via `npm run fixtures:tiles`.
+  Verified against the real 25 MB tiles: Grand Combin 4287 m, Matterhorn 4230 m, and
+  **N45E007 row 0 == N46E007 row 3600 on all 3601 shared-edge samples**.
+- **Phase 2c — Peak store + pipeline, 62 tests.** `peak-store.ts` implements the same
+  `PeaksProvider` seam as the Overpass client, which is **kept** as the importer for when egress
+  opens; every coordinate and height is copied from the cited case files and the parser refuses
+  a dataset whose citations do not resolve. Summit heights come from there and **never** from
+  SRTM (Matterhorn 4478 m, not the tile's 4230 m, 320 m out of position). `annotateScene` and
+  `annotatePhoto` return data, never pixels, and refuse rather than guess
+  (`observer-elevation-unknown`, `no-terrain`). Case terrain windows are cut byte-for-byte from
+  real tiles, so the acceptance suite is offline and does not read `data/tiles/`.
+- **Phase 3 — Photo ingestion, 69 tests.** Real JPEGs authored byte-wise; `GPSImgDirectionRef`
+  honoured; nine pose fields each resolved or explicitly `needs-manual`.
+- **Phase 4 — Renderer, 97 tests + 2 e2e.** Pure `scene → string`. Horizon polyline sampled in
+  bearing across 1.5× hFOV and Liang–Barsky-clipped; off-frame and behind-camera peaks reported,
+  never drawn. Collision avoidance places left-to-right (ties by peak id, never input order) and
+  can *skip* levels, because poles are measured from their own summits; an overlap is **flagged,
+  not dropped**. Geometric self-check met: the flag lands at 1600·(√3−1) = 1171.281 px /
+  524.820 px, hand-derived, to better than 0.01 px against a ±0.5 % gate. PNG export composites
+  in Chromium via Playwright with **zero new dependencies**, and probes the raster — the pixel
+  at the hand-computed summit is marker-coloured, control pixels are not.
+- **Phase 4b — D8, obscured summits labelled and greyed, +24 tests.** `classifyOcclusion` splits
+  an occluded summit by **what** hides it: walk the peak's own ray from the crest to the peak's
+  range, and if no sampled ground falls below that crest there is **no col**, so the blocker is a
+  shoulder of the peak itself → `self-occluded`, labelled greyed. A col → `foreground-occluded`,
+  never drawn. Deliberately not a distance ratio (unitless, and wrong for two ridges 15 km apart
+  at 85 and 100 km) and not an angular deficit (scales with how close the observer stands).
+  `colToleranceM` defaults to **0** — a col is a col. Two refusals err the same way: a gap in the
+  record wide enough to hide a col, and a bearing whose nearest ray has no blocker at all.
+  Threaded through the pipeline, drawn with a dashed pole and hollow ring, and surfaced in the
+  app as a switch that is ON by default per the user's decision. There is deliberately **no**
+  switch for foreground-occluded peaks.
+- **Phase 5 — Web app.** Drop-zone → EXIF autofill → honest provenance panel → trim sliders →
+  real overlay: the Gornergrat fixture photo is driven through the whole chain in Chromium and
+  the Matterhorn flag lands within 12 px of the hand-derived 600.37, 315.48 px. A photo with no
+  terrain (Chamonix, needs N45E006) shows the **named absence** instead. Export asserted from
+  the PNG's own IHDR bytes at the photo's 1200×900.
+- **Phase 6 — Ground truth, 153 assertions, 0 todo.** Four analytic scenes with independently
+  derived expectations (`R_eff` derived symbolically = 7 322 998.62 m; each scene states its R
+  and k) and four real cases (Gornergrat, Mount Diablo, Kerry Park, Fort William) with
+  resolvable source ids. The harness banner states that a pass proves the **yardstick** is
+  sound, not that the pipeline is correct. A 0.35° heading error fails the overlay assertion,
+  which was checked rather than assumed. Confidence policy respected exactly: `high` gates,
+  `medium` reports, `disputed` informs.
+- **Phase 9 — Peak coverage from Overture Maps, +63 tests.** `npm run fetch:peaks -- --region
+  zermatt` imported **1 786 named summits** (61 above 4 000 m) for **42.17 MB of a 29.47 GB
+  release — 0.1431 %**; 10.77 MB with the footer cache warm. Six of thirteen columns are read,
+  because `geometry` is ~96 % of the bytes. **P9.4's open question is answered: Overture does
+  carry summit heights** — the `elevation` INT32 column is OSM's `ele` carried through unchanged,
+  checked row-by-row against the same rows' `source_tags.ele` (Matterhorn `"4478"` → 4478,
+  Weisshorn `"4505"` → 4505) — so records declare `elevationSourceKind: 'osm'` and **nothing is
+  ever sampled from the DEM**: a summit with no `ele` is dropped and counted (285 in the Zermatt
+  area). A box over the Southern Alps of New Zealand prunes all 128 groups of the European part
+  to zero. Conflicts are **reported, not resolved**: 13 of 15 cited heights agree exactly or
+  within 2 m, Mount Hamilton is −21 m, **Mount Tamalpais East Peak's two coordinates are 1 754 m
+  apart** and must be re-checked before that summit backs any assertion, and `Breithorn` is
+  ambiguous — OSM calls the cited 4 164 m summit `Breithorn Occidentale / Westgipfel` and the
+  Valais holds three others. Table in `fixtures/peaks/README.md`.
+  *Why Parquet-over-Range and not a bulk download:* every other peak source is blocked from here
+  — `download.geonames.org`, geofabrik, naturalearthdata, `planet.openstreetmap.org` and taginfo
+  all fail at the proxy, Overpass 403s — **but `s3.amazonaws.com` is reachable**, and both
+  `osm-pds` and the Overture distribution list from it. Parts are ~800 MB each, so range-reading
+  only the row groups a bounding box touches is both feasible and the correct shape: an
+  acquisition step that writes a local dataset, never a runtime dependency, exactly like
+  `fetch:tiles`.
+- **Phase 10 — Deployment, self-check `npm run test:deploy`, 5 assertions.**
+  `npm run package:deploy [-- --gzip]` stages `dist/terrain/` and `dist/peaks/<region>/` through
+  the **same index builder the dev server uses**, and refuses a grid whose byte length disagrees
+  with the geometry the index claims. The proof runs the built `dist/` behind a plain static
+  server with **no Vite in the process**: manifest byte-identical to the packaged file, no
+  `/@vite/client`, the Matterhorn within 12 px of the closed-form projection, a 25 934 402-byte
+  tile arriving as 16 345 818 bytes and still passing the store's length check, **every request
+  same-origin** (D7 enforced), and a viewpoint with no tile producing the named absence rather
+  than a blank overlay. Visible ODbL attribution is derived from each dataset's own `sources[]`
+  citation, not typed in, so a region under another licence changes the footer by itself; a bare
+  `ODbL` stays `ODbL` and the version is never invented. Mutation-checked: `display:none` on the
+  footer fails all five e2e assertions, and removing `position: sticky` fails exactly the one
+  that says a loaded photo must not bury it. `grep -o OpenStreetMap dist/assets/*.js | wc -l`
+  → **13** (was 0). See [docs/DEPLOY.md](docs/DEPLOY.md).
+- **Phase 7 — CV skyline alignment, +78 tests + 1 e2e — built and proved, NOT wired in.**
+  Injected offsets spanning ±20° recovered to **heading 0.022°, pitch 0.091°** through the full
+  round trip and **0.013° / 0.075°** over the real SRTM Gornergrat horizon, against a 0.5° spec.
+  Alignment is **not a pixel shift** — a rectilinear lens makes that wrong by 3.7° at the frame
+  edge for a 10° error. The failure variant of `SkylineAlignment` carries **no offsets at all**,
+  so a caller cannot read a confident zero out of a refusal; flat horizon, total fog, 80 % of
+  columns lost, periodic ridgeline, an offset outside the search window, an offset exactly at
+  its rim and a snow-capped skyline all refuse. P7.4 and P7.5 are open, above.
+  *Still true of the repository's own fixtures:* `fixtures/photos/*.jpg` are uniform grey frames
+  generated for the EXIF suite, and `gornergrat-matterhorn.jpg` yields **zero readable columns**
+  (asserted in `src/cv/real-photo.test.ts` — refusing is the correct answer for that file). The
+  known enemy is sunlit snow, which is brighter than a hazy sky: `align.test.ts` shows the
+  extractor locking onto the *snowline* and the aligner refusing. The two real photographs in
+  `fixtures/photos/real/` are what finally measured it.
+- **Q1 — Integration.** `src/app/overlay-builder.ts` and `src/app/composite-export.ts` wired
+  into `<App>`; the `?seam-probe=1` branch and its test are **deleted** and replaced by one that
+  drives the real pipeline over real SRTM bytes. Browser terrain is static grids on the app's
+  own origin, one code path for whole tiles and committed windows alike, the largest grid
+  covering a point winning because a window can produce a false `visible` and only the tile can
+  prove an occlusion. Synthetic test tiles are never served. Missing terrain is a **named
+  absence** in the same family as `needs-manual`, checked *before* the pipeline runs. See
+  [README.md](README.md#how-the-browser-gets-terrain) and [docs/DEPLOY.md](docs/DEPLOY.md).
+- **Q3 — The demo PNG.** `npm run demo -- gornergrat` writes `out/annotated.png` from the real
+  pipeline over the full `data/tiles/N45E007.hgt`, composited in Chromium with no second
+  rasteriser and no new dependency. Full tiles are the **default** and a missing tile stops the
+  run with instructions. The overlay is composited onto **this run's own terrain silhouette,
+  hatched and captioned "not a photograph" on the image itself**; the horizon line lying on that
+  silhouette is tautological and the report says so, while the peak markers are not, because
+  they come from the peak database and the projection with no reference to the terrain sweep.
+  **What the image shows:** the Matterhorn flag lands 1.92° above the drawn ridge — 1.92° at
+  9.58 km is ~327 m, so the picture reproduces the documented DEM error (−248 m, displaced
+  ~320 m) rather than a labelling bug. Broad summits do not show it: in the wide framing the
+  Breithorn flag sits 0.27° above its own ridge, on it.
+- **Q7 — `noTerrainMessage` made honest for a stranger.** It told every visitor to run
+  `npm run fetch:tiles`, which is right for a developer and useless to the public. It now leads
+  with what is true of the deployment, keeps the position, the missing tile and the grids
+  served, says outright that photographs over shipped terrain are unaffected, and keeps the
+  command **last and explicitly scoped** to someone running a source checkout. No assertion was
+  dropped; two were added.
+- v1 Expo attempt archived to `archive/v1-expo/` (2026-08-16).
+- Mission docs written (MISSION.md, PLAN.md, TODO.md, CLAUDE.md).
 
-## Phase 2c — Offline peak database + the pipeline (D7) ✅ 62 tests
-- [x] **P2.9 Local peak store** — `src/providers/peak-store.ts`: a committed JSON dataset
-      (`fixtures/peaks/`) queried by radius or bbox, implementing the same `PeaksProvider`
-      seam as the Overpass client, which is KEPT as the importer for when egress opens.
-      Every coordinate and height copied from the cited ground-truth case files; the parser
-      refuses a dataset whose citations do not resolve. Summit heights come from here and
-      **never** from SRTM (Matterhorn 4478 m, not the tile's 4230 m, 320 m out of position).
-- [x] **P2.10 Pipeline** — `src/pipeline/`: `annotateScene` (stated viewpoint) and
-      `annotatePhoto` (EXIF + overrides, ground height filled from the terrain). Elevation
-      source, peak source, tolerances and clock all injected; returns an `AnnotatedScene`
-      (observer, horizon profile with staircases, peak verdicts, per-peak `ImagePoint`,
-      named occluders, sweep report, warnings) — data, never pixels. Refuses rather than
-      guesses: `observer-elevation-unknown`, `no-terrain`.
-- [x] **Case terrain fixtures** — `fixtures/tiles/cases/*.i16be` + sidecars, cut byte-for-byte
-      from real SRTM1 tiles by `npm run fixtures:case-tiles`. The acceptance suite is offline
-      and does NOT read `data/tiles/`. Each window records what it can and cannot prove.
-- [x] **Demo** — `npm run demo -- <case>` runs a case end to end and prints observer, horizon
-      extent, visible peaks with bearings/altitudes/clearances, and occluded peaks with the
-      terrain that hides them. PNG output still belongs to P4.2 (clean seam, stated in-script).
+---
 
-## Phase 9 — Peak coverage from Overture Maps (Q5) ✅ +63 tests
-- [x] **P9.1 Parquet range reader** — `src/providers/overture-parquet.ts`. Reads a remote
-      Parquet footer through an INJECTED `AsyncBuffer` (the same seam as `Transport` and
-      `TileStore`, so the module itself does no I/O): 512 KiB of a 424 MB part = 0.12%.
-      `rowGroupExtents` exposes each row group's `bbox.xmin/xmax/ymin/ymax` statistics, its
-      row span, and what the six selected columns cost. Self-check met against
-      `fixtures/parquet/overture-zermatt-rowgroup/` **offline**: 128 row groups, 2 337 243
-      rows, group 21 at rows 372 344…392 973 spanning lon 7.2808…7.7877, lat 45.6124…46.1577
-      — every figure re-derived from the committed bytes and compared with the sidecar's,
-      recorded from the live file.
-- [x] **P9.2 Spatial pruning** — `planParquetRead` keeps only intersecting row groups, and the
-      importer prints the ratio that proves it: **42.17 MB fetched of 29.47 GB = 0.1431%**
-      (10.77 MB warm). A box over the Southern Alps of New Zealand prunes all 128 groups of the
-      European part to zero, tested offline. Column selection is the second half: `geometry` is
-      21.9 MB of one group's 22.7 MB and is never requested.
-- [x] **P9.3 Peak extraction** — `src/providers/overture-peaks.ts`, pure. A summit is
-      `subtype='physical'` with `class` in `peak`/`volcano` (volcano matters: Rainier, Baker,
-      Hood and Lassen are all `natural=volcano`); the name is `names.primary` under a nested
-      struct; the position is the midpoint of the float32-rounded `bbox`, which brackets the
-      true point to 0.3 m and avoids reading `geometry` at 30× the bytes.
-- [x] **P9.4 Elevation provenance — RESOLVED, elevations exist.** `elevation` (INT32, metres)
-      is OSM's `ele` carried through unchanged, verified against the rows' own `source_tags`.
-      Records declare `elevationSourceKind: 'osm'`. A summit with no height is **dropped and
-      counted**, never DEM-filled — MISSION.md's rule survives contact with real data.
-- [x] **P9.5 Scalable peak store** — `src/providers/peak-tile-store.ts`: the dataset is cut into
-      1° cells named with the SAME rule as the SRTM tiles (`tileNameFor`), and a query loads only
-      the cells its radius touches, through an injected loader (`peak-directory.ts` is the node
-      edge). `boundingBoxAround` uses the exact `asin(sin δ / cos φ)` bound, not `δ/cos φ`, which
-      under-covers by 0.0003° at 60°N and would silently lose summits in the sliver. Implements
-      `PeaksProvider` unchanged, so the pipeline is untouched; the cited
-      `ground-truth-peaks.json` still backs all 148 acceptance assertions.
-- [x] **P9.6 Conflict reporting** — the table in `fixtures/peaks/README.md`. 13 of 15 heights
-      agree exactly or within 2 m. Reported, not resolved: Mount Hamilton −21 m, Mount Tamalpais
-      East Peak 1 754 m out of position, and the `Breithorn` name ambiguity.
-- [x] **Real-bytes fixture** — `fixtures/parquet/overture-zermatt-rowgroup/` (1.36 MB = 0.32% of
-      the part) + sidecar, via `npm run fixtures:peak-parquet`. Replayed at the ORIGINAL file
-      offsets; an unrecorded byte **throws** rather than zero-filling.
-- [x] **Committed region** — `fixtures/peaks/regions/zermatt/`, 1 786 summits in 4 cells.
+## Kept for the record
 
-## Phase 10 — Deployment (PLAN.md) ✅ self-check `npm run test:deploy` — 5 assertions
-- [x] **P10.1 Static packaging** — `npm run package:deploy [-- --gzip]` stages `dist/terrain/`
-      (manifest + grids + optional `.gz` siblings) and `dist/peaks/<region>/` from whatever is
-      on disk, through the SAME index builder the dev server uses, and refuses a grid whose byte
-      length disagrees with the geometry the index claims. `scripts/static-server.ts` +
-      `npm run serve:dist` serve it with the documented rules. See docs/DEPLOY.md.
-- [x] **P10.2 Deployment proof** — `scripts/deploy-check/`, a separate Playwright project over
-      the built `dist/` behind the plain static server (the root config starts Vite, which is
-      exactly the machinery a deployment lacks). Manifest byte-identical to the packaged file,
-      no `/@vite/client`, the Gornergrat photo drawing the Matterhorn within 12 px of the
-      closed-form projection, a 25 934 402-byte tile arriving as 16 345 818 bytes and still
-      passing the store's length check, **every request same-origin** (decision D7 enforced),
-      and a viewpoint with no tile producing the named absence rather than a blank overlay.
-- [x] **P10.3 Visible attribution** — the footer above (Q6). Checked three ways: the derivation
-      in `src/app/attribution.test.ts`, legibility in `tests/e2e/attribution.spec.ts` (on screen
-      unscrolled with a photo loaded, opaque, ≥ 4.5:1 WCAG contrast in both colour schemes,
-      required-vs-courtesy stated in words, links keyboard-reachable), and the built artefact in
-      `scripts/deploy-check/deploy.spec.ts`, which also asserts the page and `ATTRIBUTION.txt`
-      credit the same thing.
-- [ ] Open, tracked above: **Q8** (switch to the 8 528-summit dataset — one file in `src/app/`)
-      and **Q9** (the DEPLOY.md cost table has no `/peaks/` row and stale bundle figures).
+Corrections and superseded findings are kept, not edited away. A project that advertises only
+its successes teaches the next reader nothing.
 
-## Phase 3 — Photo ingestion (group C) ✅ 69 tests
-- [x] P3.1 EXIF extraction — real JPEGs authored byte-wise; `GPSImgDirectionRef` honoured
-- [x] P3.2 Fallback + override merge — 9 pose fields, each resolved or explicitly needs-manual
+### X-2 — the occlusion rule was wrong, and running the code found it
 
-## Blocked on environment (not on code)
-- [ ] Re-record `fixtures/api/**` from live OpenTopoData + Overpass once egress permits
-- [ ] P6.2 real-viewpoint research needs reachable reference sources (Wikipedia also 403)
+The fix: a peak is occluded only by terrain with distance strictly `<` the peak's own.
+`HorizonPoint.skylineSteps` (additive, optional) carries the per-bearing running-maximum
+staircase, and `interpolateNearerTerrainAltitudeDeg` answers "how high does terrain reach nearer
+than this?" using the *same* bearing bracket and weight as the skyline query, seam included.
+Core tests 151 → 178, acceptance 112 → 116. **No existing test needed changing** — none had
+encoded the old rule, because every hand-built fixture peak already sat behind its occluder.
+Two judgment calls recorded: strict `<` at the boundary (a summit *is* the sample at its own
+distance, so `<=` would make every peak hide itself and leave the verdict to floating-point
+luck), and a mixed bracket returns the real occluder rather than interpolating toward an
+invented floor.
 
-## Phase 4 — Renderer (group D) ✅ 97 tests + 2 e2e
-- [x] P4.1 SVG overlay builder — pure `scene → string`. Horizon polyline sampled in bearing
-      across 1.5× hFOV and Liang–Barsky-clipped to the frame; flag pole + summit dot + two-line
-      label per visible peak; off-frame and behind-camera peaks reported, never drawn.
-      Collision avoidance: left-to-right placement (ties by peak id, never input order), first
-      free candidate from increasing pole lengths — up first, then down — `overlapped` flagged
-      rather than dropping a summit. Levels can be *skipped*: poles are measured from their own
-      summits, so a step of one label height clears a same-height neighbour but not always a
-      lower one, and the search tests the real boxes. Geometric self-check met: the flag lands
-      at 1600·(√3−1) = 1171.281 px / 524.820 px, hand-derived from the projection model, to
-      better than 0.01 px against a ±0.5 % gate.
-- [x] P4.2 PNG compositor — photo + overlay → PNG in Chromium via Playwright. **Zero new
-      dependencies**: no `node-canvas`, so the export raster comes from the same engine the app
-      renders in. Asserts the PNG signature, IHDR dimensions and size read from the bytes, and
-      probes the raster — the pixel at the hand-computed summit is marker-coloured, control
-      pixels are not. Artifacts: `out/render-composite.png`, `out/render-overlay.svg`.
+**Gate verification, independent of the fixing agent.** A throwaway suite was written against a
+hand-built two-step profile (+2° at 5 km, taller +8° at 20 km), run, and discarded. It confirmed
+all four directions, which matters because the danger in fixing over-occlusion is over-correcting
+into a filter that shows everything: near peak +4° @10 km in front of the far ridge → **visible**
+(the original bug); far peak +4° @30 km behind it → **hidden** (not permissive); peak nearer than
+all terrain → −90° nadir, nothing can occlude it; terrain at exactly the peak's range → does not
+occlude.
 
-## Phase 5 — Web app (group E) ✅
-- [x] P5.1 App shell (drop-zone, autofill, overrides, trim sliders) — and, since Q1, a REAL
-      overlay: the Gornergrat fixture photo (`fixtures/photos/gornergrat-matterhorn.jpg`, the
-      one fixture whose coordinates have terrain in this repository) is driven through the
-      whole chain in Chromium and the Matterhorn flag lands within 12 px of the hand-derived
-      600.37, 315.48 px. A photo with no terrain (Chamonix, needs N45E006) shows the named
-      absence instead.
-- [x] P5.2 Annotated PNG export — the download is produced by `src/render/composite.ts`,
-      asserted from the PNG's own IHDR bytes at the photo's 1200×900.
+<details><summary>Original bug description (kept for the record)</summary>
 
-## Phase 6 — Ground truth (group F) ✅ 112 assertions + 26 todo
-- [x] P6.1 Analytic scenes — flat plane, twin ridges (2 variants), conical peak.
-      `R_eff` derived symbolically = 7 322 998.62 m; each scene states its R and k.
-- [x] P6.2 Real cases — Gornergrat, Mount Diablo, Kerry Park, Fort William.
-      Sources read via web-search index (egress 403s wikipedia/parks.ca.gov/seattle.gov);
-      every claim carries a resolvable source id + `access` field. Coordinates must be
-      re-verified against live pages before these gate a release.
-- [x] P6.3 Acceptance harness — green, with a banner stating a pass proves the yardstick
-      is sound, NOT that the pipeline is correct. 26 pipeline assertions are `it.todo`.
-- [x] **P6.3 hooks switched on — all 26 `it.todo`s are now real assertions** against
-      the real pipeline, offline. The last one, the SVG overlay hook, waited on P4.1 and was
-      switched on in Q1: each analytic scene is laid out with the camera pointed at its own
-      summit, so the flag must land on the centre line and at the hand-derived
-      y = h·(0.5 − tanα/(2·tan(vFOV/2))), gated at 0.5 % of the frame plus the scene's own
-      angular tolerance in pixels. 148 acceptance assertions, 0 todo. A 0.35° heading error
-      fails it, which was checked rather than assumed. Confidence policy respected exactly:
-      `high` gates, `medium` reports, `disputed` informs. **One hard gate is FAILING and was
-      left failing** — see below.
+- **P1.5 over-occludes near peaks.** The rule compares a peak against the max terrain
+      angle at its bearing across *all* distances. But terrain BEHIND a peak cannot hide it.
+      A nearer, lower summit standing in front of a taller far ridge is genuinely visible,
+      and the current rule calls it hidden.
+      Correct rule: a peak is occluded only by terrain NEARER than the peak itself.
+      Fix: retain the per-bearing skyline staircase (distance → running max altitude) so the
+      test can ask "max altitude among samples closer than this peak".
+      `HorizonPoint` already carries `distanceKm`, but only for the single winning sample.
+      Group F asserts *no verdict* on this case so the simplification cannot be silently
+      blessed; promote that assertion once fixed.
 
-## Phase 4b — D8: obscured summits labelled, greyed (2026-08-16) ✅ +24 tests
-- [x] **The rule, in `src/core/visibility.ts` (pure).** `classifyOcclusion` splits an
-      occluded summit by WHAT hides it, using the topographic definition of one landform:
-      walk the peak's own ray from the FIRST crest that out-angles it to the peak's own
-      range, and if no sampled ground falls below that crest there is **no col**, so the
-      blocker is a shoulder of the peak itself → `self-occluded` (labelled, greyed). A col
-      → `foreground-occluded` (never drawn). Two refusals err the same way: a gap in the
-      sampled record wide enough to hide a col, and a bearing whose nearest ray has no
-      blocker at all, both report foreground occlusion for want of evidence.
-      Deliberately NOT a distance ratio (unitless, and wrong for two ridges 15 km apart at
-      85 and 100 km) and NOT an angular deficit (scales with how close the observer stands,
-      not with whose hill it is). `colToleranceM` defaults to **0** — a col is a col.
-- [x] **Threaded through `src/pipeline`.** `AnnotatedPeak.visibility` + `.occlusion`
-      (evidence, crest, col depth); `AnnotatedScene.selfOccluded` / `.foregroundOccluded` /
-      `.labelled`. `visible` and `clearanceDeg` are untouched — the split is of the losers.
-- [x] **Rendered in `src/render`.** `OverlayPeak.visibility`; obscured markers get a dashed
-      pole, a hollow summit ring, `· summit obscured` in the detail line and reduced opacity
-      on the BRIGHT marks only — the halo stays full strength, proven in the exported raster
-      (`tests/e2e/render.spec.ts`). Foreground-occluded peaks are refused a second time here.
-- [x] **Surfaced in `src/app`.** "Label summits hidden behind their own hill", ON by default
-      per the user's decision, its copy a tested pure function (`obscuredPeaksNote`) and its
-      state carried to the pipeline in `OverlayRequest.showObscuredPeaks`. There is
-      deliberately no switch for foreground-occluded peaks.
-- [x] **Pinned by the three real cases** in `tests/acceptance/pipeline-hooks.test.ts`:
-      Cow Hill self-occluded (col 0.0 m), Ben Nevis foreground (col 128.5 m over Glen Nevis),
-      Mount Baker foreground. Acceptance semantics updated: a high-confidence must-see peak
-      is satisfied by being LABELLED; a must-NOT-see peak must be absent from `labelled`
-      entirely — **strictly stronger** than the old "not visible", which a greyed label
-      would now satisfy.
+</details>
 
-## ⚠ Open findings from switching on the acceptance hooks (2026-08-16)
-- [x] **fort-william: HIGH-confidence must-see "Cow Hill" comes out HIDDEN.** RESOLVED
-      HONESTLY, without touching the visibility rule: the summit point is still hidden
-      (clearance −0.356°) and is now LABELLED GREYED because the DEM shows the ground
-      rising unbroken from the blocking crest (248 m at 0.84 km) to the summit — deepest
-      col 0.0 m — while the hill dominates the skyline at +17.02°. The case file records
-      the measured figures. The alternatives the finding offered (replace the coordinate,
-      restate the expectation) were NOT needed and were not taken.
+### X-3 — Fort William's Cow Hill, resolved honestly
+
+The HIGH-confidence must-see "Cow Hill" came out HIDDEN and was **not** weakened or skipped.
+Resolved without touching the visibility rule: the summit point is still hidden (clearance
+−0.356°) and is now labelled **greyed** because the DEM shows the ground rising unbroken from
+the blocking crest (248 m at 0.84 km) to the summit — deepest col 0.0 m — while the hill
+dominates the skyline at +17.02°. The case file records the measured figures. The alternatives
+the finding offered were not needed and were not taken.
 
 <details><summary>Original finding (kept for the record)</summary>
 
@@ -504,143 +333,11 @@ Live checklist. Check items only after their self-check has been run and passed 
       skyline at this bearing". Do NOT relax the visibility rule to fix it.
 
 </details>
-- [ ] **kerry-park-seattle: the Mount Baker gate is NOT insensitive to the observer height**,
-      contrary to that case file's header. SRTM reads Kerry Park at **103.8 m**; the case cites
-      an estimated 113 ± 15 m. With the DEM value Baker is correctly HIDDEN (clearance −1.67°);
-      with the cited 113 m it comes out VISIBLE (+0.31°) and the gate fails. The verdict flips
-      INSIDE the case's own stated uncertainty band. The suite therefore takes the observer's
-      ground height from the DEM (which that case file itself recommends) and reports the
-      comparison. Worth a note in the case file.
-- [ ] **Occluding-angle report is unreliable at an exact tie (both twin-ridges scenes).** A
-      summit normally IS the terrain sample at its own range; `src/core` excludes terrain at
-      exactly the peak's distance (strict `<`) so a peak cannot hide itself, but the peak's
-      range comes from a haversine and the sample's from the requested step, so the two differ
-      in the last bits and the tie-break is luck. When the sample counts, `occludingAltitudeDeg`
-      becomes the peak's own angle and `clearanceDeg` collapses to ~0 (twin-ridges near-crest:
-      4.554485° reported vs 3.590173° expected). **The verdict is unaffected** — an equal angle
-      still clears — so the gates stand, but any UI sorting or thresholding on `clearanceDeg`
-      would be misled. Suggested fix (src/core, not touched here): compare distances with an
-      explicit epsilon, or have the sighting carry the sample it coincides with.
-      All three scene peaks that sit on a sampled range show it, the corrected conical-peak
-      fixture included: apex expected 7.976826 deg (its own flank one sample in), pipeline
-      reports 8.481293 deg — the apex measured against ITSELF. The acceptance suite prints
-      every instance under "REPORT-ONLY AND INFORMATIONAL OUTPUT" rather than gating on it,
-      because the visible/hidden verdicts are unaffected.
 
-## ✅ Correctness bug found by Group F — FIXED
-- [x] **P1.5 over-occluded near peaks.** Fixed: a peak is now occluded only by terrain with
-      distance strictly `<` the peak's own. `HorizonPoint.skylineSteps` (additive, optional)
-      carries the per-bearing running-maximum staircase; `interpolateNearerTerrainAltitudeDeg`
-      answers "how high does terrain reach nearer than this?" using the *same* bearing
-      bracket and weight as the skyline query, seam included.
-      Core tests 151 → 178. Acceptance 112 → 116. No existing test needed changing — none had
-      encoded the old rule, because every hand-built fixture peak already sat behind its occluder.
-      Group F's `expect(nearVerdict).toBeUndefined()` is now
-      `expect(nearVerdict?.visible).toBe(true)`, and the test still asserts the crest sits 0.79°
-      *below* the skyline — proving the fix, not hiding the difficulty.
-      Two judgment calls recorded: strict `<` at the boundary (a summit *is* the sample at its
-      own distance, so `<=` would make every peak hide itself and leave the verdict to
-      floating-point luck); and a mixed bracket returns the real occluder rather than
-      interpolating toward an invented floor.
-- [x] **Gate verification (independent of the fixing agent).** A throwaway suite was written
-      against a hand-built two-step profile (+2° at 5 km, taller +8° at 20 km), run, and
-      discarded. It confirmed all four directions, which matters because the danger in fixing
-      over-occlusion is over-correcting into a filter that shows everything:
-      near peak +4° @10 km in front of the far ridge → **visible** (the original bug);
-      far peak +4° @30 km behind it → **hidden** (not permissive);
-      peak nearer than all terrain → −90° nadir, nothing can occlude it;
-      terrain at exactly the peak's range → does not occlude (no self-occlusion).
+### X-1 — the correction to the briefing about voids
 
-<details><summary>Original bug description (kept for the record)</summary>
-
-- **P1.5 over-occludes near peaks.** The rule compares a peak against the max terrain
-      angle at its bearing across *all* distances. But terrain BEHIND a peak cannot hide it.
-      A nearer, lower summit standing in front of a taller far ridge is genuinely visible,
-      and the current rule calls it hidden.
-      Correct rule: a peak is occluded only by terrain NEARER than the peak itself.
-      Fix: retain the per-bearing skyline staircase (distance → running max altitude) so the
-      test can ask "max altitude among samples closer than this peak".
-      `HorizonPoint` already carries `distanceKm`, but only for the single winning sample.
-      Group F asserts *no verdict* on this case so the simplification cannot be silently
-      blessed; promote that assertion once fixed.
-
-</details>
-
-## Wave 3 review — `src/providers` fixes (REVIEW-FINDINGS-3.md)
-- [x] **Finding 3 — a query wider than the dataset now says so.** `TiledPeakStore.coverageFor`
-      answers from the index alone (no cell loaded): dataset bounds, cells spanned vs held, and
-      `coveredRadiusKm` — the largest radius wholly inside the bounds, from `R·|Δφ|` and
-      `R·asin(sin Δλ · cos φ)`. Default policy REPORTS (a dataset cut for one valley is
-      legitimate); `coveragePolicy: 'throw'` refuses, mirroring `missingTilePolicy: 'throw'`.
-      An empty answer to an overflowing query names the extent instead of claiming there are no
-      peaks there. Zermatt + 200 km: complete=false, 24 cells spanned / 4 held, covered to
-      32.2 km — the radius at which Mont Blanc's absence stops being evidence.
-- [x] **Gate gap 1 — the whole-world fallback is pinned.** A synthetic `FileMetaData` with the
-      bbox statistics stripped must still select its row group. Verified to FAIL against the
-      inverted (empty-box) implementation, which every one of the previous 293 tests passed.
-- [x] **Gate gap 2 — the Range header string is asserted.** `slice(100, 200)` must send
-      `bytes=100-199`; also the open-ended and single-byte forms. Fails against `bytes=${from}-${to}`.
-- [x] **Finding 1 — a 360°-wide box no longer collapses to one meridian.** Longitude width is
-      measured from the RAW bounds by `lonWidthDeg` before any normalisation, because −180 and
-      +180 name the same meridian. `npm run fetch:tiles -- --around 89,10 --radius-km 200` went
-      from 3 tiles on W170 (not including the one underfoot) to 1080 = 3 bands × 360.
-- [x] **Finding 2 — "in this box" has one meaning.** `peak-store.withinBox` compares longitude
-      through the same `lonWithinBounds` that `tileNamesForBounds` uses, so a box near the
-      antimeridian no longer loads both cells and then discards half the peaks while reporting
-      "no named peaks in this area".
-- [x] **Finding 4 — resolution comes from the sample spacing.** `datasetLabelForStepDeg`;
-      `tile-elevation` and the manifest both use it. A 1201-column WINDOW of 1-arc-second data
-      is `srtm1`, not `srtm3`. `scripts/terrain-server.ts` still derives its own label and should
-      be pointed at this function.
-- [x] **Suspicions.** Window sidecar steps must be positive and rows/cols integers ≥ 2 (a zero
-      step divided by zero in `indexFor`); `resolveTerrainUrl` refuses `//host/x`, which starts
-      with `/` but names another origin; `LocalPeakStore.recordsWithin` breaks distance ties on
-      the peak id, as `TiledPeakStore` already did.
-
-## Gates
-- [ ] Wave 1 review (A, B, C, F diffs adversarially reviewed)
-- [ ] Wave 2 review (D)
-- [ ] Wave 3 review (E) — `npm run test:e2e` green
-- [ ] **v2.0 ship gate:** all global checks green, demo PNG produced and inspected
-
-## Phase 7 — CV skyline alignment (v2.1, decision D3) ✅ built and proved, NOT wired in — +78 tests + 1 e2e
-- [x] P7.1 Skyline extraction — `src/cv/skyline.ts`. Per-column ordered step fit (Otsu's
-      criterion with the classes forced contiguous) on a sky-affinity signal (luminance +
-      blueness). Every column carries **four independent confidence factors** — contrast, SNR,
-      local edge, neighbour agreement — and a column below the floor reports **no row at all**,
-      because a wrong skyline confidently reported is worse than a gap.
-- [x] P7.2 Alignment — `src/cv/align.ts`. Heading is an *exact* rigid translation in bearing
-      (proof in `src/cv/rays.ts`), so stage 1 is a true 1-D weighted NCC over heading; NCC is
-      mean-subtracted and therefore nearly blind to pitch, which is very nearly a constant
-      altitude offset. Stage 2 solves pitch on the geometric residual, stage 3 refines both
-      jointly on the exact rotation. **Not a pixel shift** — a rectilinear lens makes that
-      wrong by 3.7° at the frame edge for a 10° error.
-- [x] P7.3 Honest reporting — the failure variant of `SkylineAlignment` carries **no offsets at
-      all**, so a caller cannot read a confident zero out of a refusal. Six gates: coverage,
-      relief, score, margin, residual, search-edge.
-- [x] **Self-check (PLAN.md Phase 7): recover an injected offset within 0.5°.** Worst error over
-      six injected offsets spanning ±20°: **heading 0.022°, pitch 0.091°** through the full
-      render→extract→align round trip; **0.013° / 0.075°** over the real SRTM Gornergrat
-      horizon built from the committed window. Also passes in a real browser
-      (`tests/e2e/cv.spec.ts`, artifact `out/cv-skyline.png`).
-- [x] Failure states exercised: flat horizon, total fog, 80 % of columns lost, periodic
-      ridgeline, offset outside the search window, offset exactly at its rim, snow-capped
-      skyline. All refuse; none returns an offset.
-- [ ] **P7.4 Integration — deliberately NOT done.** Seam is `src/pipeline/cv-alignment.ts`
-      (new file, exported from nothing, imported by nothing). The plan is to pre-set the P5.1
-      trim sliders rather than replace them: an automatic correction the user cannot see or undo
-      is worse than a manual one. See `src/cv/README.md`.
-- [ ] **⚠ The extractor has never met a real photograph.** There is no photograph of a mountain
-      in this repository — `fixtures/photos/*.jpg` are uniform grey frames generated for the
-      EXIF suite, and `gornergrat-matterhorn.jpg` yields **zero readable columns** (asserted in
-      `src/cv/real-photo.test.ts`, and refusing is the correct answer for that file). The known
-      enemy is sunlit snow, which is brighter than a hazy sky: `align.test.ts` shows the
-      extractor locking onto the *snowline* and the aligner refusing. Getting real photographs
-      with documented viewpoints is the same gap PLAN.md P6.2 already names, and it blocks P7.4.
-
-## Later
-- [ ] Phase 8 — Live view mobile app (v3)
-
-## Done
-- [x] v1 Expo attempt archived to `archive/v1-expo/` (2026-08-16)
-- [x] Mission docs written (MISSION.md, PLAN.md, TODO.md, CLAUDE.md)
+This mirror is **void-filled**. Zermatt (46.0207, 7.7491) reads **1608 m, not −32768**, and
+N45E007 / N46E007 / N27E086 / N28E086 contain **0 voids in 51 868 804 samples**. The void code
+path is real and tested, but on **synthetic** tiles — no honest real fixture from this source
+can contain a void. The full correction, including how the wrong tile was sampled, is in
+[MISSION.md](MISSION.md).

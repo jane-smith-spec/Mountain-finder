@@ -1,0 +1,49 @@
+{
+  "name": "sunset-mountain-lookout-window",
+  "data": "sunset-mountain-lookout-window.i16be",
+  "format": "int16-be-row-major-north-first",
+  "description": "Terrain for the \"sunset-mountain-lookout\" ground-truth acceptance case: a 406x559 rectangle of real SRTM1 data cut byte-for-byte out of N43W116. Committed so the acceptance suite runs offline without data/tiles/, which is gitignored.",
+  "coverageNote": "Covers the Sunset Mountain lookout and 6 km of the Boise Mountains around it at the native 30 m posting, which is the whole of the declared sweep in every direction. WHAT IT CAN PROVE: that the viewpoint has terrain under it, and what SRTM reads there (2392.3 m, against the 2393 m OSM summit tag). WHAT IT CANNOT PROVE: any visibility claim. No named summit other than Sunset Mountain itself stands within 6 km — the nearest are Pilot Peak (7.6 km) and Freeman Peak (7.6 km), both OUTSIDE this cut. As with every window in this directory, a limited window can produce a false VISIBLE (blocking terrain outside it was never read) but never a false hidden.",
+  "sweep": {
+    "bearingStepDeg": 0.5,
+    "rangeStepM": 30,
+    "maxRangeKm": 6
+  },
+  "source": {
+    "tile": "N43W116",
+    "url": "https://s3.amazonaws.com/elevation-tiles-prod/skadi/N43/N43W116.hgt.gz",
+    "dataset": "SRTM1 (1 arc-second) via the AWS elevation-tiles-prod \"skadi\" mirror",
+    "sourceGridSize": 3601,
+    "extractedFromRow": 162,
+    "extractedFromCol": 990,
+    "extractedOn": "2026-08-17",
+    "license": "SRTM is public domain (NASA/USGS); the AWS mirror is a public dataset.",
+    "regenerateWith": "npm run fixtures:case-tiles"
+  },
+  "geometry": {
+    "northLat": 43.955,
+    "westLon": -115.725,
+    "rows": 406,
+    "cols": 559,
+    "latStepDeg": 0.0002777777777777778,
+    "lonStepDeg": 0.0002777777777777778
+  },
+  "bounds": {
+    "north": 43.955,
+    "south": 43.8425,
+    "west": -115.725,
+    "east": -115.57
+  },
+  "statistics": {
+    "voidSamples": 0,
+    "minElevationM": 1404,
+    "maxElevationM": 2471,
+    "maxAt": {
+      "row": 10,
+      "col": 63,
+      "lat": 43.95222222222222,
+      "lon": -115.7075
+    }
+  },
+  "accuracyCaveat": "Terrain horizon only. SRTM under-reads AND displaces sharp summits (Matterhorn 4230 m here against a surveyed 4478 m, ~320 m out of position), so summit heights come from the peak database in fixtures/peaks/, never from these bytes."
+}

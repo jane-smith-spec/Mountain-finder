@@ -117,7 +117,10 @@ async function writeCaseWindow(spec: CaseTerrainSpec): Promise<void> {
       sourceGridSize: size,
       extractedFromRow: cut.row0,
       extractedFromCol: cut.col0,
-      extractedOn: '2026-08-16',
+      // The day this window was cut. Read from the clock rather than hardcoded:
+      // a provenance date that silently stays at the day the script was written
+      // is worse than no date, and this is an acquisition script, not core.
+      extractedOn: new Date().toISOString().slice(0, 10),
       license: 'SRTM is public domain (NASA/USGS); the AWS mirror is a public dataset.',
       regenerateWith: 'npm run fixtures:case-tiles',
     },

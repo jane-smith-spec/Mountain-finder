@@ -1,0 +1,106 @@
+# Findings index
+
+Every confirmed finding this project has recorded, in one table, with a stable id.
+
+**This is an index, not a rewrite.** The detailed write-ups stay where they were written and
+are the authority; the one-line descriptions here are pointers. Numbering in the source
+documents restarts at 1 in each file, which is why the ids below carry the document as a
+prefix.
+
+| Prefix | Source document | Scope |
+|---|---|---|
+| `W1-` | [REVIEW-FINDINGS.md](../REVIEW-FINDINGS.md) — Wave 1 gate, 2026-08-16 | `src/core`, `src/providers` (minus `peak-store.ts`), `src/exif`, `fixtures/scenes` |
+| `W2-` | [REVIEW-FINDINGS-2.md](../REVIEW-FINDINGS-2.md) — Wave 2 gate, 2026-08-16 | `src/pipeline`, `src/app`, `src/core/visibility.ts`, `src/exif`, `tests/acceptance` |
+| `W3-` | [REVIEW-FINDINGS-3.md](../REVIEW-FINDINGS-3.md) — Wave 3 gate, 2026-08-16 | `src/providers` |
+| `CV-` | [CV-REAL-PHOTO-FINDING.md](CV-REAL-PHOTO-FINDING.md) — first contact with real photographs, 2026-08-17 | `src/cv` |
+| `X-` | recorded outside the review documents ([MISSION.md](../MISSION.md), [TODO.md](../TODO.md), [IDAHO-PHOTO-CASES.md](IDAHO-PHOTO-CASES.md)) | various |
+
+Every `W1`/`W2`/`W3` finding was **reproduced with a failing test against real code** before it
+was reported. Hypotheses that were never demonstrated are kept separately, at the bottom, and
+are not findings.
+
+## Confirmed findings
+
+| id | severity | finding | where | fixed | write-up |
+|---|---|---|---|---|---|
+| **W1-1** | HIGH | A zero-distance ray sample makes `atan2(rise, 0)` = +90°, so every peak on that bearing is occluded by the ground under the observer's own feet | `src/core/sightline.ts` | yes — `sweepRay` skips `d = 0`, throws on negative/NaN | [REVIEW-FINDINGS.md § 1](../REVIEW-FINDINGS.md) |
+| **W1-2** | MEDIUM-HIGH | The cone fixture still encoded the superseded occlusion rule — the apex measured against itself, off by 0.503°, 50× the scene's own 0.01° tolerance | `fixtures/scenes/conical-peak.ts` | yes — fixture restated to the nearer-terrain occluder (7.976826°, clearance 0.502750°) | [REVIEW-FINDINGS.md § 2](../REVIEW-FINDINGS.md) |
+| **W1-3** | MEDIUM-LOW | Merging two profile points at one bearing kept the higher and discarded the other's `skylineSteps`, losing a real occluder — a peak behind a near wall reads occluder −1° instead of +4° and gets labelled | `src/core/horizon.ts` · `normaliseHorizonProfile` | yes — merges the **union** of both staircases | [REVIEW-FINDINGS.md § 3](../REVIEW-FINDINGS.md) |
+| **W1-4** | LOW-MEDIUM | An out-of-range override fell through to EXIF, recording nothing: `475` typed for latitude yields `complete: true` at the EXIF coordinate 165 km away, badged `source: 'exif'` | `src/exif/resolve.ts` | yes — surfaces as `needs-manual` / `'out-of-range'`; range-checked for lat, lon, `eyeHeightM ≥ 0`, hFov/vFov in (0,180) | [REVIEW-FINDINGS.md § 4](../REVIEW-FINDINGS.md) |
+| **W1-5** | LOW | At longitude exactly 180 the store names the right tile, holds it, and returns no data — `tile-store` and `geodesy` fold the seam in opposite directions | `src/providers/tile-store.ts`, `hgt-tile.ts` | yes — longitude compared mod 360; re-attacked in Wave 3 over 200 000 fuzzed coordinates and confirmed closed | [REVIEW-FINDINGS.md § 5](../REVIEW-FINDINGS.md) |
+| **W1-6** | HIGH | A bearing with **no terrain data at all** got a confident verdict: in a 40°-wide hole containing zero samples the same peak came out `foreground-occluded` (−5.14°) or `visible` and labelled (+4.30°) purely according to terrain 20° away on the far side of the hole | `src/core/horizon.ts`, `src/pipeline` | yes — `horizonCoverage` + `hasTerrainAtBearing`; such a peak reaches **no verdict** and goes to `AnnotatedScene.unmeasured`. Residuals R-1, R-2 open | [REVIEW-FINDINGS.md § 6](../REVIEW-FINDINGS.md) |
+| **W1-7** | MEDIUM | A void carrying zero bilinear weight demoted the whole reading — and cost 50 m: the exact `0.5·200 + 0.5·300 = 250` was computed, then thrown away for the nearest corner's 200 | `src/providers/hgt-tile.ts` | yes — sums the void corners' **weights**; below `NEGLIGIBLE_VOID_WEIGHT` ≈ 3.05e-8 the reading is `'bilinear'` under both policies. Residual R-3 open | [REVIEW-FINDINGS.md § 7](../REVIEW-FINDINGS.md) |
+| **W2-1** | HIGH | D8 measured the col from the **first** blocker, not the skyline-forming one, so a summit across a 400 m col read `colDepthM 0` and came out `self-occluded` — a greyed label planted on a different mountain's face, 5 km short of the summit it names | `src/core/visibility.ts` | yes — the crest is now the highest-angle nearer sample; the review's terrain reads col 400 m and `foreground-occluded`. No ground-truth verdict moved | [REVIEW-FINDINGS-2.md § 1](../REVIEW-FINDINGS-2.md) |
+| **W2-2** | HIGH | Peak radius 200 km against a 30 km sweep: every summit from 30–200 km judged on ≤15 % of its sightline, with no warning. Hand-computed, a wall at 45 km hides a 60 km summit by 0.0268°; the pipeline returned `visible`, clearance 1.8494° | `src/pipeline`, `src/app` | yes — `rangeIsMeasured` keys on terrain **measured**, not on the configured range; failures go to `unmeasured` with a warning naming the peak. `judgeBeyondMeasuredTerrain` (default false) is how a caller with a deliberately truncated sweep opts out | [REVIEW-FINDINGS-2.md § 2](../REVIEW-FINDINGS-2.md) |
+| **W2-3** | MEDIUM-HIGH | The 36 mm gate angle was attributed to image *width* unconditionally — right in landscape only. `Orientation` was read nowhere in `src/`, and `extract.test.ts` **pinned the bug** with a hand-derived expectation encoding the wrong model | `src/exif/extract.ts`, `src/exif/fov.ts` | yes — `Orientation` read, displayed dimensions reported, the 36 mm angle given to the longer displayed axis; the fixture's expectation moved 39.597753° → 30.219150° and says why. New fixture `portrait-orientation-6.jpg` | [REVIEW-FINDINGS-2.md § 3](../REVIEW-FINDINGS-2.md) |
+| **W2-G1** | gate gap | D8 rested on a single assertion: mutating `classifyOcclusion` to always report self-occluded survived every high-confidence must-NOT-see gate and was caught by exactly one test | `tests/acceptance` | yes — Fort William's Ben Nevis must-NOT-see claim promoted `medium` → `high`; the mutation now fails a HIGH gate | [REVIEW-FINDINGS-2.md § mutation testing](../REVIEW-FINDINGS-2.md) |
+| **W2-G2** | gate gap | Zero horizontal-placement coverage: breaking the x projection entirely (angle-linear in x) passed all 148 acceptance assertions, because the only pixel assertion pointed the camera **at** the peak (Δ = 0) and was invariant to hFOV | `tests/acceptance` | yes — each analytic scene now predicts its flag at Δ = ±20° off-axis from the rectilinear closed form; the mutation fails 3 assertions. Acceptance 148 → 153 | [REVIEW-FINDINGS-2.md § mutation testing](../REVIEW-FINDINGS-2.md) |
+| **W2-G3** | gate gap | Two more surviving mutations, measured and recorded: no-data coerced to 0 m fails 4 unit tests and **0** acceptance assertions; the app rules (M9/M10/M11 — switch, precedence, trim) fail 1–7 unit and **0** acceptance | `tests/acceptance` | no — recorded, no gate added | [REVIEW-FINDINGS-2.md § mutation testing](../REVIEW-FINDINGS-2.md) |
+| **W3-1** | MEDIUM-HIGH | A box spanning exactly 360° normalises to `east === west`, so `lonCount` becomes 1. `fetch:tiles --around 89,10 --radius-km 200` downloaded three tiles on a meridian 180° away, **not** the one underfoot, reported "3 downloaded" and exited 0 | `src/providers/tile-store.ts`, `scripts/fetch-tiles.ts` | yes — `lonWidthDeg` measures from the **raw** bounds; the same command now fetches 1080 = 3 bands × 360 | [REVIEW-FINDINGS-3.md § 1](../REVIEW-FINDINGS-3.md) |
+| **W3-2** | MEDIUM | `cellsForBox` normalises longitude, `withinBox` compares raw: near the antimeridian both cells load and half the peaks are discarded, then `fetchPeaks({bbox})` raises *"the local peak dataset holds no named peaks in this area"* about cells it is holding in memory | `src/providers/peak-store.ts` | yes — both go through the same `lonWithinBounds` | [REVIEW-FINDINGS-3.md § 2](../REVIEW-FINDINGS-3.md) |
+| **W3-3** | MEDIUM | `PeakCellIndex.bounds` is populated, documented, and never consulted by any query: a 200 km query over a 4-cell dataset returned 1786 peaks and no note, with Mont Blanc — 4808 m, 73 km, unmissable from the Gornergrat — simply absent | `src/providers/peak-tile-store.ts` | yes — `coverageFor` answers from the index alone: bounds, cells spanned vs held, `coveredRadiusKm`. Zermatt + 200 km → 24 spanned / 4 held, covered to 32.2 km. Default policy reports; `coveragePolicy: 'throw'` refuses | [REVIEW-FINDINGS-3.md § 3](../REVIEW-FINDINGS-3.md) |
+| **W3-4** | LOW | Resolution label read off the column count instead of the sample spacing: a 1201-column *window* of 1-arc-second data is labelled `srtm3` — a claim of 90 m posting over 30 m data | `src/providers/tile-elevation.ts` | yes — `datasetLabelForStepDeg`. Residual R-4 open | [REVIEW-FINDINGS-3.md § 4](../REVIEW-FINDINGS-3.md) |
+| **W3-G1** | gate gap | A row group with incomplete bbox statistics is given the **whole world** and fetched rather than skipped. Inverting that to an empty box — every group pruned, an import silently returning **zero peaks** — passed all 293 tests | `src/providers/overture-parquet.ts` | yes — pinned by a synthetic `FileMetaData` with statistics stripped; verified to fail against the inverted implementation | [REVIEW-FINDINGS-3.md § mutation testing](../REVIEW-FINDINGS-3.md) |
+| **W3-G2** | gate gap | The Range header string was never asserted. HTTP ranges are inclusive, Parquet's are half-open; the length check that would catch an off-by-one sits three lines from the header and only one of the two was gated | `src/providers/overture-parquet.ts` | yes — `slice(100, 200)` must send `bytes=100-199`; open-ended and single-byte forms too | [REVIEW-FINDINGS-3.md § mutation testing](../REVIEW-FINDINGS-3.md) |
+| **CV-1** | *retracted* | **"The extractor scores 0 of 512 columns" was my own probe bug** — it filtered on `column.confidence` and `column.row`; the fields are `confidence01` and `rowNorm`, and `undefined > 0` is `false`, so every column was discarded and the extractor was blamed for it. Published, then corrected. The second time in this project a confident conclusion came from a broken read | the probe, not `src/cv` | yes — corrected, and the retraction kept at the head of the document rather than quietly edited away | [CV-REAL-PHOTO-FINDING.md § correction](CV-REAL-PHOTO-FINDING.md) |
+| **CV-2** | *high* | The extractor measured on real photographs for the first time: **98.8 %** coverage on the tundra photo (506 of 512 columns, mean confidence 0.575), **1.4 %** on the snow-and-haze lookout. It is fit for favourable photographs and fails on hard ones — and reports which is which: `coverage01 = 0.014` is a correct refusal, and `alignSkyline` then declines with `insufficient-skyline` | `src/cv/skyline.ts` | no — open. Snow-dominant scenes need a texture or gradient cue and a non-monotonic segmentation; the failing photograph is now a real test case | [CV-REAL-PHOTO-FINDING.md § the real result](CV-REAL-PHOTO-FINDING.md) |
+| **CV-3** | *high* | First real end-to-end run (Railroad Ridge, position cross-checked against SRTM to the foot): 720/720 rays returned terrain, the photo read at 98.2 % coverage, and the aligner **REFUSED in all 12 heading windows** — 7 no-correlation, 4 residual-too-large, 1 ambiguous. Focal length was swept as well: 13/18/22/26/30/35/50 mm equivalent all score 0.0000 | `src/cv/align.ts` | no — open. The refusal machinery did exactly what it was built to do; the honest headline is that the system does not yet work end to end on a real photograph | [CV-REAL-PHOTO-FINDING.md § the aligner REFUSES](CV-REAL-PHOTO-FINDING.md) |
+| **CV-4** | *high* | **The extracted skyline spans 17.56° of altitude where the greatest relief any 69° frame from that viewpoint can contain is 8.63°**, and the entire 360° horizon spans 10.97°. It cannot be one distant horizon: `fitStep` chooses the best sky-above-terrain split per column independently and stitches a near tundra ridge to the far White Clouds skyline. Decisive because **span is invariant to the two unknowns** — an unmodelled pitch shifts the range without changing its span, a wrong focal length scales it near-uniformly — and neither turns 8.63° into 17.56° | `src/cv/skyline.ts` · `fitStep` | no — open. The fix is a continuity or segmentation constraint across columns, not a better per-column step fit; `agreement01` already measures neighbour agreement and is reported, but does not constrain the choice | [CV-REAL-PHOTO-FINDING.md § the actual defect](CV-REAL-PHOTO-FINDING.md) |
+
+*The CV document does not grade its findings by severity. The italic grades on `CV-2`…`CV-4`
+are this index's own, assigned so the table sorts; the write-up is the authority on what they
+mean.*
+
+## Findings recorded outside the review documents
+
+Corrections and ground-truth findings that never went through a review gate. They are indexed
+here because they teach the same lesson, and a reader looking for "what did running things
+overturn" should find them in one place.
+
+| id | finding | where | fixed | write-up |
+|---|---|---|---|---|
+| **X-1** | **A "discovery" that this SRTM source is full of voids was an out-of-bounds tile read.** Zermatt sits at 46.0207°N and was sampled in `N45E007`, which stops at 46°N; the negative row index read out of bounds and returned the sentinel. Read from `N46E007` it is **1608 m — its true elevation**, and there are **0 voids in 25 934 402 samples** across both tiles, 0 in 51 868 804 across four. The void code path is real and tested, but on synthetic tiles only, and says so | [MISSION.md](../MISSION.md) § What the real SRTM data taught us | yes — corrected in place, the retraction kept | [MISSION.md](../MISSION.md) |
+| **X-2** | **The plan's own occlusion rule was wrong.** It compared a peak against the maximum terrain angle at its bearing across *all* distances — but terrain **behind** a peak cannot hide it. Found by the group whose only job was independent ground truth | `src/core` P1.5 | yes — occlusion by strictly nearer terrain, through the per-bearing `skylineSteps` staircase. Core 151 → 178 tests, acceptance 112 → 116; no existing test needed changing, because none had encoded the old rule | [TODO.md](../TODO.md) § Correctness bug found by Group F |
+| **X-3** | Fort William's HIGH-confidence must-see "Cow Hill" came out HIDDEN. Resolved **without touching the visibility rule**: the summit point is genuinely hidden (clearance −0.356°) and is labelled greyed because the DEM shows the ground rising unbroken from the blocking crest (248 m at 0.84 km) to the summit — deepest col 0.0 m — while the hill dominates the skyline at +17.02° | `tests/acceptance` | yes — resolved under D8. The alternatives the finding offered (replace the coordinate, restate the expectation) were not needed and were not taken | [TODO.md](../TODO.md) § Open findings from switching on the acceptance hooks |
+| **X-4** | The Kerry Park Mount Baker gate is **not** insensitive to observer height, contrary to that case file's header. SRTM reads Kerry Park at 103.8 m → Baker correctly HIDDEN (−1.67°); at the cited 113 ± 15 m → VISIBLE (+0.31°) and the gate fails. **The verdict flips inside the case's own stated uncertainty band** | `tests/acceptance/cases/kerry-park-seattle.ts` | no — open. The suite takes the observer's ground height from the DEM and reports the comparison; the case file still wants the note | [TODO.md](../TODO.md) § Open findings from switching on the acceptance hooks |
+| **X-5** | The occluding-angle *report* is unreliable at an exact tie: a summit normally **is** the terrain sample at its own range, and the peak's range comes from a haversine while the sample's comes from the requested step, so the two differ in the last bits and the tie-break is luck (twin-ridges near-crest 4.554485° reported vs 3.590173° expected; the conical apex 8.481293° vs 7.976826°). **The verdicts are unaffected** — an equal angle still clears — but UI sorting or thresholding on `clearanceDeg` would be misled | `src/core` | **the record disagrees with itself.** TODO.md Q2 lists this fixed via `COINCIDENT_DISTANCE_TOLERANCE` (present at `src/core/horizon.ts:369`); the open-findings list below it still carries the item unchecked. Left as found | [TODO.md](../TODO.md) § Open findings from switching on the acceptance hooks |
+| **X-6** | The two supplied photographs arrived with EXIF stripped by the upload path — `Orientation` and dimensions only, no GPS, no `GPSImgDirection`, no focal length. `src/exif`'s `needs-manual` model handles that correctly, but each photo needs its coordinates, view bearing and a few summit names supplied separately before it can be an acceptance case rather than a demonstration | `fixtures/photos/real/` | no — environment blocker. Both photos now have positions established and cross-checked against SRTM (Sunset Mountain to 0.7 m; Railroad Ridge to the foot); neither has a measured heading | [IDAHO-PHOTO-CASES.md](IDAHO-PHOTO-CASES.md) |
+
+## Residuals left open by the reviews
+
+Deliberately not fixed at the time, and named by the finding that exposed them.
+
+| id | from | residual |
+|---|---|---|
+| **R-1** | W1-6 | A peak **outside** a bounded sweep still gets a verdict interpolated across the un-swept complement — a different fabrication with a different answer. Sweep it, refuse it, or rely on it being off-frame |
+| **R-2** | W1-6 | `src/cv/rays.ts:profileCoverage` grew its own coverage notion — a largest-gap-vs-median heuristic over the profile alone, which cannot see a hole and a sector edge at the same time. The two notions should be reconciled onto the exact one |
+| **R-3** | W1-7 | `'nearest-valid'` is discontinuous at a grid line — 250 m **on** the line, 200 m a hair off it — because it returns a corner rather than re-normalising the valid weights. That is the documented policy and is flagged to the caller; changing it would mean inventing a value for the void, so it is a policy decision, not a bug fix |
+| **R-4** | W3-4 | `scripts/terrain-server.ts` still derives its own resolution label and should be pointed at `datasetLabelForStepDeg`, so the manifest and the provider cannot disagree again |
+
+## Unverified suspicions — hypotheses, not findings
+
+Listed so nobody re-derives them, and labelled so nobody cites them as results.
+
+**Wave 1's three are all closed.** Gap bridging was confirmed and became W1-6; `nearest-valid`
+over-reporting was confirmed and became W1-7, where it turned out to be a value error as well
+as a reporting one; a negative `eyeHeightM` was real and is covered by W1-4's range checks.
+
+| from | suspicion | status |
+|---|---|---|
+| Wave 2 | `groundElevationM` is not finiteness-checked; NaN would give a silently empty overlay rather than a crash. No caller found that can produce it | open — latent, not live |
+| Wave 2 | `buildNotes` counts foreground-occluded over *all* peaks including those behind the camera | open — wrong prose, not a wrong label |
+| Wave 2 | Export can race the pose: clicking Export while a rebuild is in flight writes a PNG whose labels belong to the previous pose. Millisecond-wide | open — not demonstrated |
+| Wave 3 | Window sidecar steps not checked positive | closed — steps must be positive, rows/cols integers ≥ 2 (a zero step divided by zero in `indexFor`) |
+| Wave 3 | `resolveTerrainUrl` passes protocol-relative URLs (`//host`) | closed — refused; it starts with `/` but names another origin |
+| Wave 3 | `recordsWithin` ties are order-unstable | closed — ties broken on the peak id, as `TiledPeakStore` already did |
+| Wave 3 | `missingTilesFor` asks for SRTM names an `HttpTerrainStore` serving windows can never satisfy | open — not addressed |
+
+## Clean bills of health
+
+"We looked hard and it holds" is real information, and each review recorded it. It is not
+indexed line by line here — read the **Clean bills of health** section of each review
+document. The strongest single result is Wave 3's: bilinear interpolation checked against a
+**second reader written from the SRTM spec rather than from this code**, over the real 25 MB
+`N45E007` — 400 000 random interior points, worst |Δ| = 5.3e-11 m, edges and corners exact —
+and a row-flipped variant of that reference diverging by thousands of metres, which is what
+proves the reference is genuinely independent.

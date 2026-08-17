@@ -2,6 +2,32 @@
 
 Every product below lists its **self-check**: the exact command an agent runs to prove the product works, and what passing means. A product without a passing self-check is not done. Global gates are at the bottom.
 
+## Phase status
+
+Phases are listed below in the order they were executed, not in numerical order — 9 and 10
+were pulled forward ahead of 7 and 8 because peak coverage, not code, was what limited the
+product after v2.0 shipped.
+
+| Phase | Status | Where it stands |
+|---|---|---|
+| 0 — Scaffold | ✅ **done** | `check` / `test:e2e` / `test:acceptance` / `demo` all wired and green |
+| 1 — Geometry core | ✅ **done** | 178 tests; the analytic cone matches closed form to 1e-12 against a 0.01° spec |
+| 2 — Data providers | ⚠️ **done but for P2.4** | P2.4's self-check is **unmet** — live egress 403s OpenTopoData and Overpass, so no live recording was ever made. Marked `[~]`, never ticked |
+| 2b — SRTM tiles (D7) | ✅ **done** | Real 25 MB tiles verified; shared tile edge matches on all 3601 columns |
+| 2c — Peak store + pipeline | ✅ **done** | `annotateScene` / `annotatePhoto`; refuses rather than guesses |
+| 3 — Photo ingestion | ✅ **done** | Includes the portrait/`Orientation` fix, [W2-3](docs/FINDINGS.md) |
+| 4 — Renderer | ✅ **done** | Flag lands within 0.01 px of the hand-derived position against a ±0.5 % gate |
+| 4b — D8 obscured summits | ✅ **done** | Split by *what* hides the summit; crest fix [W2-1](docs/FINDINGS.md) |
+| 5 — Web app | ✅ **done** | Real overlay in Chromium; Matterhorn within 12 px of hand-derived pixels |
+| 6 — Ground truth | ✅ **done** | 153 acceptance assertions, 0 todo. Open case-file notes: [X-4](docs/FINDINGS.md) |
+| 9 — Peak coverage | ✅ **done** | 8 528 Overture summits in 4 regions; P9.4's open question answered — elevations exist |
+| 10 — Deployment | ✅ **done** | `npm run test:deploy`, 5 assertions, every request same-origin |
+| **7 — CV alignment (v2.1)** | 🔨 **in progress** | P7.1–P7.3 built and proved on synthetic and real-SRTM profiles. **P7.4 not done.** The extractor has now met real photographs and the measurement is [CV-2, CV-3, CV-4](docs/FINDINGS.md) |
+| **8 — Live view (v3)** | ⛔ **not started** | No code exists. Deferred by decision D5, after v2.1 |
+
+Open work is tracked in [TODO.md](TODO.md); every confirmed finding is indexed in
+[docs/FINDINGS.md](docs/FINDINGS.md).
+
 ## Repository layout (target)
 
 ```
@@ -20,14 +46,14 @@ Every product below lists its **self-check**: the exact command an agent runs to
 
 ## Phases and products
 
-### Phase 0 — Scaffold *(agent group S)*
+### Phase 0 — Scaffold ✅ *(agent group S)*
 
 | Product | Description | Self-check |
 |---|---|---|
 | P0.1 Toolchain | Vite + React + TypeScript (strict) + vitest + ESLint + Playwright, single npm package | `npm run check` (typecheck + lint + unit tests) exits 0; `npm run build` exits 0 |
 | P0.2 CI-shaped scripts | `check`, `test:e2e`, `test:acceptance`, `demo` npm scripts exist (later phases fill them) | `npm run` lists all four; each runs (even if trivially) without error |
 
-### Phase 1 — Geometry core *(agent group A — parallel with B, C, F)*
+### Phase 1 — Geometry core ✅ *(agent group A — parallel with B, C, F)*
 
 | Product | Description | Self-check |
 |---|---|---|
@@ -37,7 +63,7 @@ Every product below lists its **self-check**: the exact command an agent runs to
 | P1.4 Camera projection | (bearing, altitude angle) → normalized image x/y given heading, pitch, roll, hFOV/vFOV; FOV from focal length (35mm-equiv) | Identity tests: peak dead-ahead → x=0.5; peak at heading+hFOV/2 → x=1.0; focal 24mm/50mm → known FOV values |
 | P1.5 Visibility filter | Peak visible iff its angle clears interpolated horizon at its bearing (tolerance param) | Synthetic scene with one exposed and one ridge-hidden peak → exactly the right one survives |
 
-### Phase 2 — Data providers *(agent group B)*
+### Phase 2 — Data providers ⚠️ *(agent group B — P2.4's self-check is unmet)*
 
 **Revised per decision D7 (offline-first).** Local SRTM tiles are the primary elevation
 source; the HTTP clients below demote from a runtime dependency to an acquisition path.
@@ -53,28 +79,28 @@ source; the HTTP clients below demote from a runtime dependency to an acquisitio
 | **P2.7 Tile fetcher** | `npm run fetch:tiles` pulls from AWS Open Data (`elevation-tiles-prod/skadi/…`), gunzips, skips existing | Acquisition tool; may hit network. Tiles land in gitignored `data/tiles/` |
 | **P2.8 Real-data fixture** | A small window of genuine Zermatt SRTM committed as raw bytes + provenance sidecar, reproducible via a generator script | Tests parse **real bytes in the real format**, not hand-authored JSON — strictly stronger than P2.2's fixtures |
 
-### Phase 3 — Photo ingestion *(agent group C)*
+### Phase 3 — Photo ingestion ✅ *(agent group C)*
 
 | Product | Description | Self-check |
 |---|---|---|
 | P3.1 EXIF extraction | exifr-based: GPS lat/lng/alt, GPSImgDirection (+true/magnetic ref), focal length + 35mm-equiv → hFOV | Fixture JPEGs with authored EXIF → exact expected values |
 | P3.2 Fallback model | Missing-field detection → `needs-manual` states; merged pose = EXIF ⊕ user overrides | EXIF-stripped fixture → all fields flagged; override merge precedence tested |
 
-### Phase 4 — Renderer *(agent group D — needs A's types)*
+### Phase 4 — Renderer ✅ *(agent group D — needs A's types)*
 
 | Product | Description | Self-check |
 |---|---|---|
 | P4.1 Overlay builder | Pure: scene → SVG string (horizon polyline, flag poles, name labels, leader lines, label collision avoidance) | SVG snapshot tests on synthetic scenes; geometric assertion: flag x/y within ±0.5% of hand-computed position |
 | P4.2 PNG compositor | Photo + SVG overlay → exported PNG (canvas) | Playwright: render fixture scene, export, assert PNG dimensions + non-empty; screenshot saved as reviewable artifact |
 
-### Phase 5 — Web app *(agent group E — needs A–D)*
+### Phase 5 — Web app ✅ *(agent group E — needs A–D)*
 
 | Product | Description | Self-check |
 |---|---|---|
 | P5.1 App shell | Drop-zone → EXIF autofill → override panel → overlay view; heading/pitch/FOV trim sliders; fixture-transport test mode | Playwright e2e: load fixture photo offline → expected labels render; slider changes move labels the mathematically expected number of pixels |
 | P5.2 Export | Annotated PNG download | Playwright: click export → file received with expected dimensions |
 
-### Phase 6 — Ground truth *(agent group F — starts in parallel with Phase 1)*
+### Phase 6 — Ground truth ✅ *(agent group F — starts in parallel with Phase 1)*
 
 | Product | Description | Self-check |
 |---|---|---|
@@ -82,7 +108,7 @@ source; the HTTP clients below demote from a runtime dependency to an acquisitio
 | P6.2 Real photo set | 3–5 openly licensed mountain photos with documented shooting coordinates + expected visible peak names | Each case file lists source URL, license, coordinates, and must-see peaks — reviewed for correctness |
 | P6.3 Acceptance suite | `npm run test:acceptance` — full pipeline per case | Every must-see peak labeled; no peak labeled that the horizon proves hidden; where pixel positions are annotated, error within tolerance |
 
-### Phase 9 — Peak coverage *(Q5 — the binding constraint after v2.0)*
+### Phase 9 — Peak coverage ✅ *(Q5 — the binding constraint after v2.0)*
 
 v2.0 ships working. It works at four viewpoints, because the peak database holds three
 summits. Everything downstream of that database is finished and tested; the database is the
@@ -98,7 +124,7 @@ Overture Maps is both listable and range-readable.
 | P9.5 Scalable peak store | Serve "peaks within radius of a point" without loading a region into memory per query; keep the `PeaksProvider` seam unchanged | Pipeline is untouched; the cited `ground-truth-peaks.json` summits still resolve and all 148 acceptance assertions still pass |
 | P9.6 Conflict reporting | Where Overture disagrees with a cited ground-truth height or position | Disagreement is **reported, not silently resolved**; the cited value wins by default because it is the one with a source |
 
-### Phase 10 — Deployment *(what turns a passing build into a published site)*
+### Phase 10 — Deployment ✅ *(what turns a passing build into a published site)*
 
 `npm run build` alone is not deployable: it ships no terrain (which square degrees a
 deployment carries is not the bundler's decision) and, until this phase, it displayed no
@@ -116,13 +142,32 @@ Everything here is documented in [docs/DEPLOY.md](docs/DEPLOY.md).
 app; a file nobody links to is not attribution. That distinction is why the self-check is a
 browser assertion on a visible element and not a `grep` of the deployment directory.
 
-### Phase 7 — CV silhouette alignment *(v2.1 — after base ships)*
+### Phase 7 — CV silhouette alignment 🔨 *(v2.1 — in progress)*
 
-Skyline extraction from the photo (per-column luminance gradient), 1-D cross-correlation against the computed profile solving heading/pitch offset, auto-trim replacing manual sliders. Self-check: synthetic rendered silhouettes with known injected offset → recovered within 0.5°; acceptance-suite label error strictly improves vs. manual baseline.
+Skyline extraction from the photo, 1-D cross-correlation against the computed profile solving
+heading/pitch offset, auto-trim replacing manual sliders. **P7.1–P7.3 are built and their
+self-checks pass. P7.4 is not done, and P7.5 is the work the real photographs exposed.**
 
-### Phase 8 — Live view *(v3 — after v2.1)*
+| Product | Description | Self-check |
+|---|---|---|
+| P7.1 Skyline extraction | `src/cv/skyline.ts`. Per-column ordered step fit (Otsu with the classes forced contiguous) on a sky-affinity signal; four independent confidence factors per column; a column below the floor reports **no row at all** | `npx vitest run src/cv` — a wrong skyline confidently reported must be impossible: a low-confidence column yields no row |
+| P7.2 Alignment | `src/cv/align.ts`. Stage 1 a weighted 1-D NCC over heading (heading is an *exact* rigid translation in bearing, proved in `src/cv/rays.ts`), stage 2 pitch on the geometric residual, stage 3 joint refinement on the exact rotation | **PLAN's original check, met:** an injected offset spanning ±20° is recovered within 0.5° — worst **heading 0.022°, pitch 0.091°** through the full render→extract→align round trip, and **0.013° / 0.075°** over the real SRTM Gornergrat horizon. Also `npx playwright test tests/e2e/cv.spec.ts` (artifact `out/cv-skyline.png`) |
+| P7.3 Honest reporting | The failure variant of `SkylineAlignment` carries **no offsets at all**, so a caller cannot read a confident zero out of a refusal. Six gates: coverage, relief, score, margin, residual, search-edge | `npx vitest run src/cv/align.test.ts` — flat horizon, total fog, 80 % of columns lost, periodic ridgeline, offset outside the search window, offset exactly at its rim, snow-capped skyline: **all refuse, none returns an offset** |
+| **P7.4 Integration** *(not done)* | Seam is `src/pipeline/cv-alignment.ts` — a new file exported from nothing and imported by nothing. The plan is to **pre-set** the P5.1 trim sliders, not replace them: an automatic correction the user cannot see or undo is worse than a manual one | `npm run test:acceptance` — the plan's original bar stands: label error **strictly improves** versus the manual baseline, and no ground-truth verdict moves |
+| **P7.5 Extraction on real photographs** *(open — the current work)* | `fitStep` chooses per column independently, with no notion that the boundary should be continuous with its neighbours, so it stitches a near foreground ridge to the distant skyline ([CV-4](docs/FINDINGS.md)). Needs a continuity or segmentation constraint across columns, plus a cue that works on snow-dominant scenes ([CV-2](docs/FINDINGS.md)) | **The measurement that failed is the check:** the extracted skyline's altitude span must not exceed the greatest relief the frame could contain from that viewpoint — 17.56° against a ceiling of 8.63° today. Span is invariant to pitch and focal length, so it holds without knowing either. Then: the Railroad Ridge photograph aligns instead of refusing in all 12 windows ([CV-3](docs/FINDINGS.md)) |
 
-Expo app reusing `/src/core` unchanged; camera feed + sensor fusion; the archived v1 serves as UI reference. Self-testing limited to core reuse + unit level, by design — everything risky was proven in v2.
+### Phase 8 — Live view ⛔ *(v3 — not started, no code exists)*
+
+Expo app reusing `/src/core` unchanged; camera feed + sensor fusion; the archived v1 serves as
+UI reference. Deferred by decision D5 until v2.1. Self-testing is limited to core reuse and
+unit level **by design** — everything risky was proven in v2, on still photos, where the output
+is a file an agent can assert against.
+
+| Product | Description | Self-check |
+|---|---|---|
+| P8.1 Core reuse | `/src/core` imported by the Expo app **unchanged** — no fork, no shim | The core's own suite runs green under the mobile toolchain; a diff of `/src/core` against the web app's copy is empty |
+| P8.2 Sensor fusion | Camera pose from compass + accelerometer + GPS, feeding the same `CameraPose` the still pipeline takes | Unit tests over recorded sensor traces (replayed, not live) → expected pose; magnetic is never treated as true, the same rule the EXIF path enforces |
+| P8.3 Live overlay loop | Continuous projection of an already-computed horizon profile as the pose changes | Unit: N poses through the projection produce the labels the still pipeline produces for the same poses. Anything needing a phone in the loop is **not** a self-check and is not counted as one |
 
 ## Agent orchestration
 

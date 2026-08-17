@@ -19,6 +19,10 @@ export default tseslint.config(
       // for everyone else. Lint was still walking into it and failing on 30
       // `any`s in throwaway files.
       'tests/scratch/**',
+      // Same reason, top-level: .gitignore calls scratch/ "Agent scratch space —
+      // never committed". It was excluded from tsconfig but not from lint, so a
+      // half-written probe still red-lined `npm run check` for everyone.
+      'scratch/**',
     ],
   },
   js.configs.recommended,

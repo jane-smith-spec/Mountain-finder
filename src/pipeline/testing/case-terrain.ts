@@ -26,6 +26,17 @@
  *                       Every must-see peak is 60–292 km away, so again the
  *                       occlusion test is local only.
  *
+ * The last two belong to the PHOTO cases (tests/acceptance/cases/photo-cases),
+ * which have no measured view bearing and therefore assert NO visibility at
+ * all. Their windows exist to put real terrain under a real photograph's
+ * position, not to decide what is in the frame:
+ *
+ *   sunset-mountain-     6 km: covers the lookout and its own ridge. No named
+ *   lookout              summit stands within it — the nearest is 7.6 km out.
+ *   railroad-ridge     7.5 km: covers the camera and fifteen of the thirty-two
+ *                       named White Cloud summits within 25 km. Castle Peak
+ *                       (11.1 km) is deliberately outside it.
+ *
  * A limited window can produce a FALSE VISIBLE (terrain that would block is
  * outside it) but never a false hidden, so the must-NOT-see gates — the ones
  * the occlusion rule exists for — are exactly the ones the windows cover in
@@ -143,6 +154,52 @@ export const CASE_TERRAIN: readonly CaseTerrainSpec[] = [
       'here means "nothing within 3 km hides it".',
     // Rainier (97 km) and Baker (134 km) both stand far outside the window.
     judgeBeyondWindow: true,
+  },
+  {
+    caseId: 'sunset-mountain-lookout',
+    sourceTile: 'N43W116',
+    // The lookout stands at 43.89851 N, 115.64677 W. A 6 km sweep reaches
+    // 0.05394 deg of latitude and 0.07486 deg of longitude from there, so the
+    // box below clears the ray ends by 170 m to the south and 270 m to the
+    // west — the whole sweep is inside the window at every bearing.
+    bounds: { north: 43.955, south: 43.8425, west: -115.725, east: -115.57 },
+    sweep: { bearingStepDeg: 0.5, rangeStepM: 30, maxRangeKm: 6 },
+    coverageNote:
+      'Covers the Sunset Mountain lookout and 6 km of the Boise Mountains ' +
+      'around it at the native 30 m posting, which is the whole of the ' +
+      'declared sweep in every direction. WHAT IT CAN PROVE: that the ' +
+      'viewpoint has terrain under it, and what SRTM reads there (2392.3 m, ' +
+      'against the 2393 m OSM summit tag). WHAT IT CANNOT PROVE: any ' +
+      'visibility claim. No named summit other than Sunset Mountain itself ' +
+      'stands within 6 km — the nearest are Pilot Peak (7.6 km) and Freeman ' +
+      'Peak (7.6 km), both OUTSIDE this cut. As with every window in this ' +
+      'directory, a limited window can produce a false VISIBLE (blocking ' +
+      'terrain outside it was never read) but never a false hidden.',
+    judgeBeyondWindow: false,
+  },
+  {
+    caseId: 'railroad-ridge',
+    sourceTile: 'N44W115',
+    // Camera at 44.139 N, 114.59569 W. A 7.5 km sweep reaches 0.06745 deg of
+    // latitude and 0.09396 deg of longitude, so the ray ends clear the box by
+    // 138 m at the tightest (east) and 172 m to the south.
+    bounds: { north: 44.21, south: 44.07, west: -114.695, east: -114.5 },
+    sweep: { bearingStepDeg: 0.5, rangeStepM: 30, maxRangeKm: 7.5 },
+    coverageNote:
+      'Covers the Railroad Ridge Road camera position and 7.5 km of the ' +
+      'White Cloud Mountains at the native 30 m posting — the whole declared ' +
+      'sweep in every direction, and with it seventeen of the thirty-two named ' +
+      'summits within 25 km (WCP-1 to WCP-10, Calkens Peak, Lee Peak, White ' +
+      'Cloud Peaks, Mount Andrus, White Cloud Pyramid, Lonesome Lake Peak, ' +
+      'Watson Peak). WHAT IT CAN PROVE: that the viewpoint has terrain under ' +
+      'it, and what SRTM reads there (3166 m, against a published Railroad ' +
+      'Ridge crest of 10,433 ft = 3180 m). WHAT IT CANNOT PROVE: any ' +
+      'visibility claim — this case has NO view bearing, so no summit is ' +
+      'asserted to be in the frame at all. Mount Frank (9.0 km), Merriam Peak ' +
+      '(9.7 km), Blackmon Peak (10.1 km), Patterson Peak (10.2 km) and Castle ' +
+      'Peak (11.1 km) stand outside the cut. A limited window can produce a ' +
+      'false VISIBLE but never a false hidden.',
+    judgeBeyondWindow: false,
   },
   {
     caseId: 'fort-william',
