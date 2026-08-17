@@ -45,7 +45,7 @@ import { basename, join, resolve } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import type { TileWindowMeta } from '../src/providers/tile-directory.js';
-import { datasetLabelForGridSize } from '../src/providers/tile-elevation.js';
+import { datasetLabelForStepDeg } from '../src/providers/tile-elevation.js';
 import {
   parseTerrainManifest,
   terrainGridForTileFile,
@@ -96,11 +96,16 @@ export async function buildTerrainManifest(root: string): Promise<TerrainManifes
     const meta = JSON.parse(
       await readFile(join(root, WINDOW_DIR, file), 'utf8'),
     ) as TileWindowMeta;
-    const gridSize = Math.round(1 / meta.geometry.latStepDeg) + 1;
     grids.push({
       name: meta.name,
       url: `windows/${meta.data}`,
-      dataset: datasetLabelForGridSize(gridSize),
+      // Labelled from the spacing by the SAME function the manifest parser and
+      // the provider use (R-4): a window cut from an SRTM1 tile reports srtm1
+      // because its samples are 1/3600° apart, not because a locally rebuilt
+      // grid-size arithmetic happened to agree. A spacing that divides no
+      // degree evenly now reports arc-seconds here too, instead of a wrong
+      // hgt-N from the rounding.
+      dataset: datasetLabelForStepDeg(meta.geometry.latStepDeg),
       geometry: meta.geometry,
       source: `real bytes cut from ${meta.source.tile} — ${WINDOW_DIR}/${meta.data}`,
     });

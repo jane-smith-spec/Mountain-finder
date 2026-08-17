@@ -13,15 +13,13 @@ write-ups are in the three `REVIEW-FINDINGS*.md` files and are not repeated here
 
 | # | Item | What it needs |
 |---|---|---|
-| **Q8b** | The density findings, now user-visible | Q8 shipped (below), and the frame that drew 1 marker now draws 26 at Gornergrat. What was a prediction is now on screen: `Breithorn` is ambiguous (four in the Valais), one mountain arrives as a cluster (Matterhorn 4 nodes, Rainier 8), California repeats 306 names. Nothing yet merges a summit cluster into one label or disambiguates repeated names by range/prominence — the collision layout stacks them honestly instead. Decide a policy (nearest-of-cluster? prominence threshold? name+distance disambiguation?) before dense viewpoints ship to anyone |
 | **Q9** | Re-measure the DEPLOY.md size table | "What it costs" predates the four committed regions and the attribution footer. It has **no row for `/peaks/`** at all (3.2 MB staged — california 1.26, cascades 1.02, zermatt 0.67, fort-william 0.26 MB), and nothing states what one *session* costs once the app fetches cells rather than bundling them — which is the number a deployer budgets with. The bundle figure was 302 KB and is now 318.40 kB / 104.34 kB gzipped; the windows-only demo row moved 1.77 → 1.78 MB. Those two were measured; the `/peaks/` row only means something after Q8 |
 | **P7.4** | CV integration — deliberately not done | Seam is `src/pipeline/cv-alignment.ts`, exported from nothing and imported by nothing. Pre-set the P5.1 trim sliders rather than replace them: an automatic correction the user cannot see or undo is worse than a manual one. Blocked behind P7.5 — there is no point wiring in an extractor that stitches two edges together. See `src/cv/README.md` |
 | **P7.5** | The extractor on real photographs | **Narrowed from "it stitches edges together" to one measurable bias.** The continuity constraint fixed the span (15.96° → 8.44°, ceiling 8.80°). What is left is that ~40 columns near x ≈ 0.35–0.42 sit on the snow/rock boundary *below* the crest, and that bias is now shown to land almost entirely in **pitch**: against a photogrammetrically solved pose the aligner recovers heading to 0.207° and pitch to only 1.97°, in the direction a downward-pulled skyline predicts ([CV-6](docs/FINDINGS.md), [docs/REAL-PHOTO-POSE.md](docs/REAL-PHOTO-POSE.md)). Roll was tested and is not the missing term (±10° of roll buys 1.133° → 1.037°). Snow-dominant hazy scenes still need a texture or gradient cue ([CV-2](docs/FINDINGS.md)) |
 | **P7.7** | Pitch is unrecorded and always wrong at zero | EXIF carries no pitch, `--pitch` defaults to 0, and in all three annotated photographs the drawn horizon sits low because of it — measured at Railroad Ridge as **−3.52°**, the largest single error in that render. Options, none chosen: recover it from the aligner — whose pitch is bad for a reason now understood and NOT a CV defect, see [CV-9](docs/FINDINGS.md) and P1.6, and which improves 16× once the near-field phantom is removed; expose it as a trim slider the user nudges (P5.1 already has the machinery); or estimate it from the fraction of the frame below the computed horizon. The first is the right answer if P7.5 lands |
 | **P7.6** | ~~The two wide frames refuse~~ — **tested, refuted, folded into P7.5** | The hypothesis was near-field foreground the sweep never sampled. Measured, the error is largest at frame CENTRE and smallest at the edges, and the extractor puts its boundary at `rowNorm` **0.999** — the bottom row of the picture. It is tracking foreground tundra, not sky. No near-field term is needed: this is CV-2 again, a sky/land cue that a snowfield or sunlit tundra edge can also satisfy. One fix, two symptoms — see [docs/REAL-PHOTO-POSE.md](docs/REAL-PHOTO-POSE.md) |
 | **X-4** | Kerry Park: the Mount Baker gate is not observer-height-insensitive | The verdict flips inside the case file's own stated uncertainty band — DEM 103.8 m → hidden (−1.67°), cited 113 ± 15 m → visible (+0.31°). The suite takes the ground height from the DEM and reports the comparison; the case file still wants the note |
-| **X-5** | Occluding-angle report at an exact tie | **The record disagrees with itself**: Q2 below lists this fixed via `COINCIDENT_DISTANCE_TOLERANCE` (present at `src/core/horizon.ts:369`), and it was also carried as an open finding. Verdicts are unaffected either way — an equal angle still clears — but UI sorting or thresholding on `clearanceDeg` would be misled. Resolve which record is right before anything depends on `clearanceDeg` |
-| **R-1…R-4** | Residuals the reviews left open by decision | Peaks outside a bounded sweep still judged against the bridged complement; `src/cv/rays.ts:profileCoverage` duplicates the coverage notion with a largest-gap heuristic; `'nearest-valid'` is discontinuous at a grid line (a policy decision, not a bug); `scripts/terrain-server.ts` should use `datasetLabelForStepDeg`. Detail in [docs/FINDINGS.md](docs/FINDINGS.md#residuals-left-open-by-the-reviews) |
+| **R-1…R-3** | Residuals the reviews left open by decision | Peaks outside a bounded sweep still judged against the bridged complement; `src/cv/rays.ts:profileCoverage` duplicates the coverage notion with a largest-gap heuristic; `'nearest-valid'` is discontinuous at a grid line (a policy decision, not a bug). **R-4 fixed 2026-08-17**: `scripts/terrain-server.ts` windows now label through `datasetLabelForStepDeg`, the same function the manifest parser and provider use. Detail in [docs/FINDINGS.md](docs/FINDINGS.md#residuals-left-open-by-the-reviews) |
 | **Phase 8** | Live view (v3) | Not started, by decision D5 — after v2.1. Products and self-checks are in [PLAN.md](PLAN.md) |
 
 ## Blocked on the environment, not on code
@@ -35,6 +33,44 @@ write-ups are in the three `REVIEW-FINDINGS*.md` files and are not repeated here
 ---
 
 ## Done
+
+### Q8b — the density policy, decided by measurement, 2026-08-17
+
+Q8 put 26 markers in the frame that used to hold one, so the filed question — merge summit
+clusters? disambiguate repeated names? — was answered by measuring the imported data rather
+than by choosing among the filed options:
+
+- **Same-name node splits are rare and shallow:** 11 same-name pairs within 300 m across all
+  9 237 summits (e.g. `Pointe Gorret` twice, 201 m apart, equal heights). Not worth a merge
+  pass; the collision layout stacks them honestly.
+- **The famous "clusters" are real, differently-named summits.** Matterhorn's 4 points within
+  447 m are Matterhorn, Épaule de Furggen, Picco Muzio and Pic Tyndall — each a genuinely
+  named feature, Pic Tyndall a recognised subsidiary summit. Rainier's pair is Mount
+  Rainier + Columbia Crest, and Columbia Crest is the TRUE summit name. **A merge would
+  delete real names to fix a layout problem the renderer already solves.** In the Alps this
+  is the norm, not the exception: 275 of Zermatt's 1 786 summits have a different-named
+  neighbour within 300 m.
+- **The policy therefore IS the existing crowding system** (`src/render/layout.ts` rules 1–7,
+  `src/render/crowding.ts`): deterministic apparent-height priority — the dominant summit
+  wins the space — dots for everything, withheld names counted on the image and named in the
+  notes. No data is touched, no name invented, no summit dropped.
+- Repeated names across a region (California's 305) need no code: every label already carries
+  its distance, and D9 makes a label a direction, not an identification.
+
+Decision recorded here rather than in a new mechanism, because the mechanism already existed
+and the measurements say it is the right one.
+
+### X-5 — the exact-tie contradiction, resolved by reading the gates, 2026-08-17
+
+The trigger for resolving it now: **P1.6 made `clearanceDeg` load-bearing** (marginality
+thresholds on it), which is exactly the dependency X-5 said to settle first. Settled by
+evidence, not by picking a record: `tests/acceptance/analytic-scenes.test.ts` asserts today
+that the cone apex's occluding angle is its own FLANK (7.976826°, clearance **0.50275°**) and
+the near crest's is the terrain in front of it (3.590565°) — the mis-reported tie values the
+finding quoted (8.481293°, 4.554485°) appear in the suite only as the *skyline* figures they
+really are. So **Q2's record was right**: `COINCIDENT_DISTANCE_TOLERANCE` fixed it, the
+open-findings carry-over was stale, and 178 acceptance assertions gate the fixed behaviour.
+FINDINGS.md X-5 updated to say so.
 
 ### Q8 — the app reads the 9 237-summit Overture regions, 2026-08-17
 

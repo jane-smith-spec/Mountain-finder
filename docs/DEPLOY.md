@@ -67,8 +67,14 @@ int16 = 25 934 402 bytes per 1° tile). "Wire" is gzip level 6.
 |---|---|---|---|
 | Case windows only (`--no-tiles`) | 4 windows | 1.45 MB | 0.79 MB |
 | The four ground-truth viewpoints as whole tiles | N45E007, N37W122, N47W123, N56W006 | 103.74 MB | 43.29 MB |
-| This repository's five tiles + the windows | 9 grids | 131.13 MB | 60.16 MB |
+| This repository's sixteen tiles + the windows | 20 grids | 417.57 MB | 189.24 MB |
 | The Alps, N43–N48 × E004–E016 | 78 tiles | 2 022.88 MB | ≈ 1 275 MB |
+| `/peaks/` — all five regions (Q8) | 63 cell files + 5 indexes | 3.48 MB | (served as-is) |
+
+The `/peaks/` directory breaks down by region — california 1.26 MB (3 341
+summits), cascades 1.02 MB (2 717), zermatt 0.67 MB (1 786), idaho-central
+0.27 MB (709), fort-william 0.26 MB (684). Measured 2026-08-17, after Q8 made
+the app read them.
 
 Per-tile, the numbers vary with how mountainous the tile is — flat and sea
 compress well:
@@ -87,9 +93,10 @@ alpine tiles. A real Alpine deployment would drop the lowland corners and land
 nearer 1.3 GB on disk. The unit to budget with is **25.93 MB / 16.35 MB per
 mountainous degree square**.
 
-**The windows-only row is a demo, not a deployment.** `--no-tiles --no-peaks`
-produces a complete working app in 1.78 MB — checked: served statically, the
-Gornergrat photo still renders `1 peak labelled: Matterhorn`. But those windows
+**The windows-only row is a demo, not a deployment.** `--no-tiles` produces a
+working app in ~5.3 MB (windows + peaks + bundle). `--no-peaks` is no longer a
+valid trim: since Q8 the app READS `/peaks/`, and `verifyPeaksAreServed` fails
+the packaging rather than ship an app that fetches 404s. But those windows
 were cut to the terrain each *acceptance case* turns on, not to the app's 30 km
 sweep: the Gornergrat window is 361 × 1009 samples, about 11 km × 22 km. Rays
 run off the edge of it, and a ridge outside the cut cannot occlude anything, so
@@ -97,11 +104,15 @@ this configuration can report a summit **visible** that a whole tile would show
 as hidden. Ship it to demo the pipeline; ship tiles to be right.
 
 **What one visitor downloads is not that total.** `selectTerrainGrid` picks the
-single largest grid covering the viewpoint, so a session costs *one grid*: 16.35
-MB gzipped for an alpine tile, 0.47 MB if the deployment ships only the tuned
-case window. Nothing else is fetched — the peak database is already inside the
-JS bundle (318.40 kB, 104.34 kB gzipped, measured 2026-08-16 with the
-attribution footer in it).
+single largest grid covering the viewpoint, so terrain costs *one grid* per
+session: 16.35 MB gzipped for an alpine tile, 0.47 MB if the deployment ships
+only the tuned case window. Peaks cost the CELLS the query's bounding box
+touches, fetched from `/peaks/` on demand (Q8) — at the default 200 km radius
+that is at most a region's whole directory, so **≤ 1.26 MB today** (california,
+the largest) and typically a few hundred KB; regions the viewpoint is nowhere
+near are pruned by their bundled indexes before any request leaves. The JS
+bundle itself is 340.21 kB, 110.63 kB gzipped (measured 2026-08-17, region
+indexes and attribution footer included; it was 318.40/104.34 kB before Q8).
 
 ## Serving it
 

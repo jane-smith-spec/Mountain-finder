@@ -69,6 +69,20 @@ export const APP_SWEEP: Pick<SweepConfig, 'bearingStepDeg' | 'rangeStepM' | 'max
 };
 
 /**
+ * The near-field radius the app's verdicts carry their uncertainty over
+ * (P1.6, decision D10, docs/NEAR-FIELD.md).
+ *
+ * 150 m — the same figure `npm run annotate` uses: a few SRTM postings
+ * (~30 m each) widened by a typical phone GPS fix error. Inside it, the DEM's
+ * own cells disagree about the ground the camera stands on, so a summit whose
+ * verdict flips within that disagreement is labelled "may be hidden" instead
+ * of being decided by the sampling grid. The web app is the surface D10 was
+ * decided FOR; leaving the test off here while the developer script ran it
+ * would be shipping the dishonest half.
+ */
+export const APP_NEAR_FIELD_RADIUS_M = 150;
+
+/**
  * How far out summits are looked for.
  *
  * Larger than `APP_SWEEP.maxRangeKm` on purpose, and no longer a silent
@@ -185,6 +199,7 @@ function buildNotes(
   scene: {
     readonly peaks: readonly { readonly name: string }[];
     readonly foregroundOccluded: readonly { readonly name: string }[];
+    readonly marginal: readonly { readonly name: string }[];
     readonly unmeasured: readonly { readonly name: string }[];
     readonly sweep: { readonly raysRequested: number; readonly raysWithTerrain: number };
     readonly config: { readonly peakRadiusKm: number; readonly sweep: { readonly maxRangeKm: number } };
@@ -213,6 +228,18 @@ function buildNotes(
       `${scene.foregroundOccluded.length} summit${scene.foregroundOccluded.length === 1 ? ' is' : 's are'} ` +
         `hidden behind nearer, different hills and ${scene.foregroundOccluded.length === 1 ? 'is' : 'are'} ` +
         `never labelled: ${nameList(scene.foregroundOccluded.map((peak) => peak.name))}.`,
+    );
+  }
+  if (scene.marginal.length > 0) {
+    // P1.6 / D10: the ground within ~150 m of the camera decides these
+    // verdicts and the DEM cannot resolve it, so neither "visible" nor
+    // "hidden" is claimed. The label itself already says "may be hidden";
+    // this note says WHY, once, instead of per label.
+    notes.push(
+      `${scene.marginal.length} summit${scene.marginal.length === 1 ? '' : 's'} may or may not ` +
+        `clear the ground right in front of the camera — terrain data cannot resolve ground ` +
+        `that close, so ${scene.marginal.length === 1 ? 'it is' : 'they are'} labelled ` +
+        `"may be hidden" rather than decided: ${nameList(scene.marginal.map((peak) => peak.name))}.`,
     );
   }
   if (scene.unmeasured.length > 0) {
@@ -249,6 +276,7 @@ export function createOverlayBuilder(deps: OverlayBuilderDeps): OverlayBuilder {
 
     const config: PipelineConfig = {
       peakRadiusKm: APP_PEAK_RADIUS_KM,
+      nearFieldRadiusM: APP_NEAR_FIELD_RADIUS_M,
       ...deps.config,
       sweep: { ...APP_SWEEP, ...sweepForPose(pose), ...deps.config?.sweep },
     };
