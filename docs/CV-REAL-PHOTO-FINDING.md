@@ -68,3 +68,57 @@ EXIF did not survive the upload path — `Orientation` and dimensions only, no G
 `GPSImgDirection`, no focal length. `src/exif`'s `needs-manual` model handles that correctly,
 but it means each photo needs its **coordinates, view bearing, and a few summit names** supplied
 separately before it can be an acceptance case rather than a demonstration.
+
+---
+
+# The first real end-to-end test: the aligner REFUSES
+
+**2026-08-17.** With the Railroad Ridge position supplied and cross-checked (SRTM 3166.0 m =
+10,387 ft, matching the road's known elevation), the full chain was run on a real photograph for
+the first time.
+
+```
+terrain profile      720 bearings, 720/720 rays returned terrain
+photo skyline        98.2% coverage, mean confidence 0.572
+alignment            REFUSED in all 12 heading windows
+                       no-correlation        7/12
+                       residual-too-large    4/12
+                       ambiguous-correlation 1/12
+```
+
+Focal length was not recoverable from EXIF, so it was swept as well — **13, 18, 22, 26, 30, 35
+and 50 mm equivalent all produce a best score of 0.0000.** The refusal is not an optics guess
+going wrong.
+
+## What this does and does not show
+
+**It is not a silent failure.** The aligner returned no offset, in every window, at every focal
+length. Its refusal machinery — the part designed to stop a confident wrong heading from
+labelling the wrong mountains — did exactly what it was built to do on the hardest input it has
+ever seen. That is worth as much as a success would have been.
+
+**But the system does not yet work end to end on a real photograph**, and that is the honest
+headline. Proven to 0.013° against synthetic terrain, it cannot align a real one whose skyline
+it reads at 98.2%.
+
+## Candidate causes, none yet demonstrated
+
+Listed as hypotheses, deliberately not as conclusions:
+
+1. **The extracted boundary may not be the distant skyline.** The extractor places it 29–36%
+   down the frame. That is where the peaks are — but a broad tundra foreground with a bright
+   snow-patched surface may be producing a strong *nearer* edge that wins the step fit in many
+   columns, so the shape being correlated is not the shape the terrain profile describes.
+2. **Pitch.** A hand-held shot across a downhill foreground can carry several degrees of
+   downward pitch; the search covered ±20°, but pitch interacts with the FOV assumption.
+3. **Crop.** If the image was cropped, the optical centre moved and no focal length describes it.
+4. **Profile range.** The sweep ran to 30 km. Ridges beyond that contribute skyline in this
+   view and would be absent from the computed profile.
+
+## What would settle it
+
+Rendering the computed terrain profile at a plausible heading *over* the photograph, and looking
+at the two curves side by side. If they are obviously different shapes, cause 1 or 4; if they
+are the same shape at a different scale, cause 2 or 3. That is a small piece of work and it is
+the correct next step — considerably better than continuing to sweep parameters, which is how
+one ends up tuning until something agrees.
