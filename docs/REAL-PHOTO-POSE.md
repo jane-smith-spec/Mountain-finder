@@ -244,3 +244,43 @@ Neither new viewpoint is an acceptance case. They have one position source each 
 independent cross-check beyond the DEM, no summit has been identified by anyone who knows the
 ground, and building a case on that would repeat the circularity the Railroad Ridge case was
 carefully built to avoid. They are demonstrations, and this document is where they are recorded.
+
+
+## P7.6 tested and refuted — the wide frames fail in the MIDDLE, not at the edges
+
+The recorded hypothesis was that a wide frame's sky boundary near its edges is foreground tens
+of metres away, which a sweep starting at 90 m never samples. Measured, that is not what
+happens. Residual by distance from frame centre, in disjoint rings:
+
+```
+                          |x-0.5| ring:  0-0.1   0.1-0.2  0.2-0.3  0.3-0.4  0.4-0.5
+48 mm  mean photo-minus-terrain, deg     -0.94    -2.14    -0.30    -0.55    -1.68
+24 mm                                   -32.31    -9.93   -11.29   -13.48    +2.15
+14 mm                                    +3.78    -6.03   -10.85    +5.87    +3.81
+```
+
+The error is **largest at the centre and smallest at the edges** — the opposite of an edge
+effect. And the pose-independent measurement says plainly what is going on. Where does the
+extractor put the boundary in the frame?
+
+```
+                     boundary rowNorm range      mean at frame centre
+48 mm-eq             0.269 .. 0.446              0.360
+24 mm-eq             0.260 .. 0.999              0.951
+14 mm-eq             0.354 .. 0.991              0.553
+```
+
+`rowNorm` 0.999 is **the bottom row of the photograph**. In the wide frames the extractor is
+tracking an edge in the foreground tundra, not the sky. The continuity constraint from P7.5 is
+doing its job — the path is smooth and self-consistent — it is simply following the wrong
+boundary, and a wide frame offers far more foreground for it to follow.
+
+So **P7.6 is not a separate problem and there is no near-field term to add.** It is CV‑2 again:
+the extractor separates sky from land on a luminance step, and a snowfield or a sunlit tundra
+edge is also a luminance step. What is needed is a cue that distinguishes sky from bright ground
+— colour, saturation, texture, gradient — which is exactly what the snow-dominant lookout
+photograph already demanded. One fix, two symptoms.
+
+That also explains why coverage tracks field of view (97.9 % at 48 mm, 62.5 % at 24 mm, 70.3 %
+at 14 mm) while confidence barely moves: the extractor is not less sure in wide frames, it is
+confidently wrong over more of them.
