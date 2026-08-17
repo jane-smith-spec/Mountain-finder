@@ -24,6 +24,8 @@ import { OverridePanel } from './components/OverridePanel';
 import { PhotoView } from './components/PhotoView';
 import { PoseReadout } from './components/PoseReadout';
 import { TrimSliders } from './components/TrimSliders';
+import { UncertaintyBanner } from './components/UncertaintyBanner';
+import { dragToTrimDeg, poseUncertainty } from './uncertainty';
 import { readPhotoFile } from './photo';
 import { annotatedFileName, type OverlayBuilder, type OverlayResult, type PngExporter } from './seam';
 import { deriveSession, exportDisabledReason, INITIAL_STATE, reducer } from './state';
@@ -185,7 +187,43 @@ export function App({ overlayBuilder, pngExporter }: AppProps = {}): JSX.Element
                 errorMessage={overlayError}
                 builderWired={overlayBuilder !== undefined}
                 missingFieldCount={session.missing.length}
+                onAlignDrag={
+                  session.effectivePose === undefined
+                    ? undefined
+                    : (fromPx, toPx) => {
+                        // D9: dragging is the primary correction. It writes the
+                        // SAME trim state the sliders do, so the two can never
+                        // disagree about where the overlay is.
+                        const step = dragToTrimDeg(
+                          fromPx,
+                          toPx,
+                          session.effectivePose!,
+                          session.photo.widthPx,
+                          session.photo.heightPx,
+                        );
+                        dispatch({
+                          type: 'trim-changed',
+                          axis: 'headingDeg',
+                          valueDeg: state.trim.headingDeg + step.headingDeg,
+                        });
+                        dispatch({
+                          type: 'trim-changed',
+                          axis: 'pitchDeg',
+                          valueDeg: state.trim.pitchDeg + step.pitchDeg,
+                        });
+                      }
+                }
               />
+              {session.effectivePose === undefined ? null : (
+                <UncertaintyBanner
+                  uncertainty={poseUncertainty(
+                    session.resolution.fields,
+                    session.effectivePose,
+                    session.photo.widthPx,
+                    session.photo.heightPx,
+                  )}
+                />
+              )}
               <TrimSliders
                 trim={state.trim}
                 onTrimChange={(axis, valueDeg) => {
