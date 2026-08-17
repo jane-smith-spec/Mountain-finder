@@ -19,10 +19,31 @@
 import exifr from 'exifr';
 
 import { fovDegFromFocalLength35mm } from './fov';
+import { findHeifExif, isHeif } from './heif';
 import type { DirectionRef, PhotoExif } from './types';
 
 /** Anything exifr can read. `string` is a filesystem path (Node) or URL (browser). */
 export type ExifInput = ArrayBuffer | Uint8Array | DataView | Blob | string;
+
+/**
+ * The input as bytes, when it is something we already hold.
+ *
+ * A `string` is a path or URL and reading it would put filesystem or network
+ * I/O into a module that runs in both, so it is left to exifr. Everything the
+ * app and the scripts actually pass — a `File` from an input element, a
+ * `Uint8Array` from `readFile` — is covered. See {@link extractPhotoExif}.
+ */
+async function bytesOf(input: ExifInput): Promise<Uint8Array | undefined> {
+  if (input instanceof Uint8Array) return input;
+  if (input instanceof ArrayBuffer) return new Uint8Array(input);
+  if (typeof DataView !== 'undefined' && input instanceof DataView) {
+    return new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+  }
+  if (typeof Blob !== 'undefined' && input instanceof Blob) {
+    return new Uint8Array(await input.arrayBuffer());
+  }
+  return undefined;
+}
 
 /**
  * exifr options. Blocks we do not use are switched off so a corrupt XMP or ICC
@@ -131,6 +152,29 @@ export function orientationTransposes(orientation: number | undefined): boolean 
  * A photo with no EXIF at all yields `{}`.
  */
 export async function extractPhotoExif(input: ExifInput): Promise<PhotoExif> {
+  const bytes = await bytesOf(input);
+
+  // HEIF goes through our own container reader rather than exifr's. Not a
+  // preference: exifr refuses any HEIF file whose `ftyp` box exceeds 50 bytes,
+  // which is every iPhone photograph carrying an HDR gain map — three of the
+  // seven supplied to this project — and it refuses them by reporting no
+  // metadata at all. heif.ts explains the measurement. Once the TIFF block is
+  // located, exifr parses it: the tag decoding was never the problem.
+  if (bytes !== undefined && isHeif(bytes)) {
+    const located = findHeifExif(bytes);
+    if (located.tiff === undefined) {
+      return {
+        unreadable: {
+          container: 'heif',
+          cause: located.failure ?? 'unknown',
+          detail: `brands [${located.brands.join(' ')}], ${bytes.length} bytes`,
+        },
+      };
+    }
+    const parsedTiff: unknown = await exifr.parse(located.tiff, EXIFR_OPTIONS);
+    return photoExifFromTags(isRecord(parsedTiff) ? parsedTiff : {});
+  }
+
   const parsed: unknown = await exifr.parse(input, EXIFR_OPTIONS);
   return photoExifFromTags(isRecord(parsed) ? parsed : {});
 }

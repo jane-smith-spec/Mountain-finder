@@ -26,10 +26,18 @@ export {
   vFovDegFromHFov,
   type FieldOfViewDeg,
 } from './fov';
+export {
+  findHeifExif,
+  heifBrands,
+  isHeif,
+  type HeifExifFailure,
+  type HeifExifResult,
+} from './heif';
 export { resolvePose, STANDARD_DEFAULTS, type PoseResolution } from './resolve';
 export {
   POSE_FIELDS,
   type DirectionRef,
+  type ExifUnreadableReason,
   type FieldSource,
   type MissingReason,
   type PhotoExif,

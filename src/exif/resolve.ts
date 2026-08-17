@@ -342,6 +342,19 @@ export function resolvePose(
     vFovDeg,
   };
 
+  // A container we could not read makes "absent from EXIF" an unsupported
+  // claim: nothing was read, so nothing can be said to be missing from it.
+  // Only that reason is rewritten — a field the user supplied, or one blocked
+  // for a reason of its own such as a magnetic heading, is untouched.
+  if (exif.unreadable !== undefined) {
+    for (const name of POSE_FIELDS) {
+      const field = fields[name];
+      if (field.status === 'needs-manual' && field.reason === 'absent-from-exif') {
+        fields[name] = { status: 'needs-manual', reason: 'container-unreadable' };
+      }
+    }
+  }
+
   const missing = POSE_FIELDS.filter((name) => fields[name].status === 'needs-manual');
 
   const resolution: {

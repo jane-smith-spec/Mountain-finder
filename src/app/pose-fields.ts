@@ -119,6 +119,11 @@ export const SOURCE_DESCRIPTION: Readonly<Record<FieldSource, string>> = {
 /** What each missing reason means, in words the panel can act on. */
 export const REASON_TEXT: Readonly<Record<MissingReason, string>> = {
   'absent-from-exif': 'This photo does not record it. Type a value.',
+  // NOT a rewording of 'absent-from-exif' — the opposite claim. The metadata
+  // was never read, so the app must not tell someone their photo has no
+  // location when the file may be holding one. See src/exif/heif.ts.
+  'container-unreadable':
+    'This photo\u2019s metadata could not be read \u2014 the file format is one this app recognises but could not follow. It may well record a value. Type one to continue, and please report the file.',
   'magnetic-declination-required':
     'The photo records a MAGNETIC bearing. Supply the magnetic declination below, or type a true-north heading — a magnetic bearing is never treated as true north.',
   'direction-reference-unknown':

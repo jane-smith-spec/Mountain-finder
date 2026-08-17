@@ -65,6 +65,32 @@ export interface PhotoExif {
   hFovDeg?: number;
   /** The other half of the same derivation; present exactly when `hFovDeg` is. */
   vFovDeg?: number;
+  /**
+   * Set when the file is a container we RECOGNISE but could not read metadata
+   * out of — never when the file simply carries none.
+   *
+   * This exists because those two cases were indistinguishable, and the
+   * difference is the whole product. A photograph whose GPS a share sheet
+   * stripped and a photograph whose GPS is sitting in the file unread both
+   * arrive here as `{}`, and the app then asks the user to type in a position
+   * it is holding in memory. See heif.ts for the specific library limit that
+   * made this a live failure on ordinary iPhone HDR photographs rather than a
+   * theoretical one.
+   *
+   * A caller that wants to say "this photo has no location" must check this is
+   * absent first. `resolvePose` reports it in the field's `note`.
+   */
+  unreadable?: ExifUnreadableReason;
+}
+
+/** Why a recognised container yielded no metadata. Never "it carries none". */
+export interface ExifUnreadableReason {
+  /** Container family, e.g. `'heif'`. */
+  readonly container: string;
+  /** Machine-readable cause, from the container reader. */
+  readonly cause: string;
+  /** What was seen — brands, sizes — so a bug report needs no second run. */
+  readonly detail: string;
 }
 
 /** The fields that must all be known before a photo can be projected. */
@@ -107,7 +133,16 @@ export type MissingReason =
    * hand back a confident pose nobody asked for. See resolve.ts for the
    * domains and for why heading, roll, pitch and elevation have none.
    */
-  | 'out-of-range';
+  | 'out-of-range'
+  /**
+   * The file's metadata was never READ — a container this app recognises whose
+   * contents it could not follow (see `PhotoExif.unreadable`). Kept separate
+   * from 'absent-from-exif' because the two demand opposite things of a UI: a
+   * stripped photo genuinely needs the user to type a position in, while this
+   * one is a defect, and telling someone their photo has no location when it
+   * has one is the failure this distinction exists to prevent.
+   */
+  | 'container-unreadable';
 
 /** A single pose field: either resolved (with provenance) or explicitly unknown. */
 export type ResolvedField =
