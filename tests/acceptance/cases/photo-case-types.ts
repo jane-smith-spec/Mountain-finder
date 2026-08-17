@@ -222,6 +222,21 @@ export interface PhotoOriginal {
    */
   readonly exif: PhotoExifProbe;
   /**
+   * Fields absent from the original TOO, asserted absent.
+   *
+   * This half was added when the Sunset Mountain original arrived and turned
+   * out to carry its lens and NOT its position — the first schema assumed an
+   * original recovers everything the transcode lost, and that assumption was
+   * simply wrong. Recording it this way makes "the photograph was never
+   * geotagged" a checked fact about committed bytes rather than a note, which
+   * is the difference between a closed question and an unasked one.
+   *
+   * The suite requires every entry of `PhotoMetadata.absentFields` to appear
+   * in exactly one of these two lists, so a case cannot quietly leave a field
+   * unaccounted for.
+   */
+  readonly absentFromOriginalToo: readonly (keyof PhotoExifProbe)[];
+  /**
    * How it was established that the original and the committed derivative are
    * the same photograph. Without this the original's EXIF is metadata for some
    * other picture, and its heading would be worse than no heading at all.

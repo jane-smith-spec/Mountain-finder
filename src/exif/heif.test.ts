@@ -43,6 +43,9 @@ describe('the committed HEIC originals', () => {
     { file: 'railroad-ridge-14mm.heic', ftypSize: 44, heading: 203.61083984375, focal35: 14 },
     { file: 'hdr-gainmap-7270.heic', ftypSize: 52, heading: 280.33596801190254, focal35: 24 },
     { file: 'hdr-gainmap-6594.heic', ftypSize: 52, heading: 253.04632587859425, focal35: 24 },
+    { file: 'idaho-6812-14mm.heic', ftypSize: 52, heading: 298.2954559354168, focal35: 14 },
+    { file: 'idaho-6815-24mm.heic', ftypSize: 52, heading: 76.80279542566709, focal35: 24 },
+    { file: 'idaho-6750-480mm.heic', ftypSize: 52, heading: 17.166229248046875, focal35: 480 },
   ] as const;
 
   it.each(cases)('reads $file, whose ftyp box is $ftypSize bytes', async (testCase) => {
@@ -110,6 +113,28 @@ describe('the committed HEIC originals', () => {
       expect(ours.lat).toBeDefined();
       expect(ours.imgDirectionDeg).toBeDefined();
     }
+  });
+
+  it('reads the lookout original, a 52-byte ftyp that carries a lens and NO GPS', async () => {
+    // The case that shows why "exifr refused it" and "the file has nothing"
+    // had to be told apart. This file is refused by exifr for its ftyp size,
+    // exactly like the two above — and when it IS read, it turns out to carry
+    // a lens and genuinely no position. Had the refusal stood, the absence
+    // would have looked identical and been believed for the wrong reason.
+    const bytes = bytesOf('lookout-snow-haze.heic');
+    const declared =
+      ((bytes[0] ?? 0) << 24) | ((bytes[1] ?? 0) << 16) | ((bytes[2] ?? 0) << 8) | (bytes[3] ?? 0);
+    expect(declared).toBe(52);
+
+    const exif = await extractPhotoExif(bytes);
+    expect(exif.unreadable).toBeUndefined();
+    expect(exif.focalLength35mmMm).toBe(24);
+    expect(exif.imageWidthPx).toBe(5712);
+    // Never geotagged — not stripped in transit. Asserted, because it is the
+    // fact that closes the question rather than leaving it open.
+    expect(exif.lat).toBeUndefined();
+    expect(exif.lon).toBeUndefined();
+    expect(exif.imgDirectionDeg).toBeUndefined();
   });
 
   it('reports the HDR files’ gain-map brands, which is what trips exifr up', () => {

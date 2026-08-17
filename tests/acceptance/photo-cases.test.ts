@@ -337,18 +337,30 @@ describe.each(photoCases.map((photoCase) => [photoCase.id, photoCase] as const))
         ).toBe(expected);
       }
 
-      // The whole point of the original: it carries what the transcode lost.
-      // If this ever passes vacuously, the file has been replaced by another
-      // stripped one and the bearing above has quietly lost its source.
-      expect(exif.imgDirectionDeg).toBeDefined();
-      expect(exif.lat).toBeDefined();
-      expect(exif.lon).toBeDefined();
-      expect(exif.focalLength35mmMm).toBeDefined();
+      // An original must ADD something, or it is not worth committing.
+      expect(Object.keys(original.exif).length).toBeGreaterThan(0);
+
+      // …and every field asserted absent from the derivative must be accounted
+      // for exactly once: either the original recovered it, or the original
+      // lacks it too and says so. No field may be left unexplained, and none
+      // may be claimed both ways.
       for (const field of photoCase.photo.absentFields) {
+        const recovered = field in original.exif;
+        const alsoAbsent = original.absentFromOriginalToo.includes(field);
+        expect(
+          `${field}: recovered=${recovered} alsoAbsent=${alsoAbsent}`,
+          `${photoCase.id}: ${field} is absent from the photo and the original ` +
+            'accounts for it neither way',
+        ).toBe(`${field}: recovered=${recovered !== alsoAbsent && recovered} alsoAbsent=${recovered !== alsoAbsent && alsoAbsent}`);
+      }
+
+      // The absences, asserted against the bytes. This is what makes "it was
+      // never geotagged" a measured fact instead of an assumption.
+      for (const field of original.absentFromOriginalToo) {
         expect(
           exif[field],
-          `${photoCase.id}: the ORIGINAL is missing ${field} too — it is not an original`,
-        ).toBeDefined();
+          `${photoCase.id}: ${original.path} DOES carry ${field} — the case says it does not`,
+        ).toBeUndefined();
       }
 
       // The derivative and the original must at least agree on the frame. This

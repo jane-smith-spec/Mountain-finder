@@ -151,6 +151,9 @@ export const railroadRidgeCase: PhotoCase = {
         hFovDeg: 41.11209043916693,
         vFovDeg: 31.417275658031485,
       },
+      // Nothing: this original recovered every field the transcode lost. The
+      // Sunset Mountain one did not, which is why the list exists.
+      absentFromOriginalToo: [],
       sameImageEvidence:
         'Both decode to 4032 x 3024, and a pixel-for-pixel comparison of the ' +
         'two gives mean |dRGB| = 1.03/255 with a maximum of 18 across all ' +

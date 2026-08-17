@@ -78,9 +78,55 @@ export const sunsetMountainLookoutCase: PhotoCase = {
       'vFovDeg',
     ],
     note:
-      'EXIF did not survive the upload path: orientation and dimensions only. ' +
-      'The absent fields are asserted absent, which is what makes the missing ' +
-      'view bearing a measured fact rather than an assumption.',
+      'EXIF did not survive the upload path that produced THIS file: ' +
+      'orientation and dimensions only. The absent fields are asserted absent, ' +
+      'which is what makes the missing view bearing a measured fact rather ' +
+      'than an assumption. The camera original below settles WHY they are ' +
+      'missing, and the answer differs field by field.',
+    original: {
+      path: 'fixtures/photos/real/lookout-snow-haze.heic',
+      // What the original recovered: the lens, and only the lens. Exact
+      // equality — a transcription is right or wrong, not close.
+      exif: {
+        focalLengthMm: 6.764999866370901,
+        focalLength35mmMm: 24,
+        hFovDeg: 73.73979529168804,
+        vFovDeg: 58.71550708558255,
+      },
+      // AND WHAT IT DID NOT. This is the load-bearing half of this block and
+      // the reason the field exists at all. The Railroad Ridge original
+      // recovered everything its transcode had lost, and the schema was
+      // written assuming that is what an original does. This one recovered the
+      // lens and nothing else: the GPS IFD is absent from the CAMERA FILE.
+      //
+      // So the photograph was never geotagged — not stripped in transit, never
+      // recorded. That converts "we have not got the heading yet" into "there
+      // is no heading to get from this file", which is a different and final
+      // answer, and it is asserted here against the committed bytes rather
+      // than written in a comment.
+      absentFromOriginalToo: [
+        'lat',
+        'lon',
+        'gpsAltitudeM',
+        'imgDirectionDeg',
+        'imgDirectionRef',
+      ],
+      sameImageEvidence:
+        'Both decode to 5712 x 4284 with Orientation 1, both are iPhone 17 Pro, ' +
+        'and the original\'s DateTimeOriginal is 2026-02-21 11:45:51 -07:00. ' +
+        'NOT a pixel comparison — unlike the Railroad Ridge pair, this one has ' +
+        'not been checked channel by channel, and the frame match plus the ' +
+        'device and timestamp is what is claimed. Weaker evidence, stated as ' +
+        'weaker; nothing in this case depends on which of the two files the ' +
+        'pixels came from, because the original supplies no position and no ' +
+        'heading for anything to depend on.',
+      note:
+        'iPhone 17 Pro, 2026-02-21 11:45:51 -07:00, 24 mm-equivalent. Supplied ' +
+        '2026-08-17 in answer to a direct request for it. The request expected ' +
+        'a position and got a definitive absence instead, which is a better ' +
+        'outcome than an open question: see the companion-photo source below ' +
+        'for where a position for this viewpoint does now come from.',
+    },
   },
 
   terrainWindowCaseId: 'sunset-mountain-lookout',
@@ -257,6 +303,30 @@ export const sunsetMountainLookoutCase: PhotoCase = {
         'cannot prove; regenerate with `npm run fixtures:case-tiles`.',
     },
     {
+      id: 'companion-photo-6812',
+      title:
+        'A GEOLOCATED PHOTOGRAPH FROM THE SAME VISIT, 79 seconds later: ' +
+        'idaho-6812-14mm.heic, 2026-02-21 11:47:10 -07:00, iPhone 17 Pro Max, ' +
+        'GPS 43.898708 N 115.646797 W, GPSImgDirection 298.295 deg T',
+      locator: 'fixtures/photos/real/idaho-6812-14mm.heic',
+      retrieved: '2026-08-17',
+      access: 'supplied-by-photographer',
+      note:
+        'THE ONLY INSTRUMENT-MEASURED POSITION THIS VIEWPOINT HAS. The lookout ' +
+        'photograph itself was never geotagged, so until this arrived the ' +
+        'observer coordinate was an INFERENCE: the photographer named the place ' +
+        'and the case took the summit node\'s coordinate. This is a GPS fix ' +
+        'from a different phone standing at the same spot 79 seconds later, and ' +
+        'it lands 22 m from that inferred position — inside SRTM1\'s 30 m ' +
+        'posting, so no computed quantity here can tell the two apart. ' +
+        'WHAT IT IS NOT: it is not this photograph\'s position, and its own ' +
+        'heading of 298.295 deg is NOT transferable — the two frames were shot ' +
+        'over a minute apart on different devices and nothing says they faced ' +
+        'the same way. The heading stays unmeasured. A companion of the SAME ' +
+        'visit bounds the motion: idaho-6815-24mm.heic, 2 min 41 s after this ' +
+        'one, is 42.5 m away, which is the order of walking-about to allow for.',
+    },
+    {
       id: 'nhlr-sunset-mountain',
       title:
         'Sunset Mountain Lookout — National Historic Lookout Register ' +
@@ -297,6 +367,14 @@ export const sunsetMountainLookoutCase: PhotoCase = {
   ],
 
   caveats: [
+    'The observer coordinate is the Overture/OSM SUMMIT NODE, not a fix from ' +
+      'this photograph, which was never geotagged — its camera original is ' +
+      'committed and the absence is asserted against those bytes. Since ' +
+      '2026-08-17 the inference is corroborated by an independent instrument: ' +
+      'a companion photograph from the same visit, 79 s later on a different ' +
+      'phone, whose GPS fix is 22 m away. That is real corroboration and it is ' +
+      'still not a fix for THIS frame; a photographer at a lookout moves tens ' +
+      'of metres, and the same visit\'s next frame is 42.5 m from the first.',
     'The observer coordinate is the OSM SUMMIT NODE, not a GPS fix from the ' +
       'camera. It is used because the lookout stands on the summit, but the ' +
       'two are not the same claim: a photograph taken from the road a hundred ' +
