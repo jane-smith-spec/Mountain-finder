@@ -49,3 +49,33 @@ the aligner searches heading, so only the coordinate must be right. Terrain is a
 Once that lands, the full loop can run for the first time on a real photograph: extract the
 skyline → align against SRTM-derived terrain → recover the heading → label the summits → and
 check the names against what is actually in the picture.
+
+## Update: the map screenshot narrows photo 2, but does not pin it
+
+A supplied map screenshot shows the photo pinned with three named features around it:
+**Crater Lake** (west), **The Gunsight** (south-west), **Tin Cup Lake** (far south-west).
+
+Searched against the imported Idaho data:
+
+- **"Gunsight Peak" exists at 43.69767, −115.07147, 2893 m — but that is ~45 km south-west of
+  the White Clouds.** It is a *different feature* from the "The Gunsight" on the map, which is
+  unlabelled in the peak data (likely a named gap or notch rather than a summit). Recorded as a
+  negative so nobody later matches on the name and lands 45 km away. This is the same hazard the
+  Overture import already flagged: *"Cow Hill" is 287 m in Lochaber and 989 m in Santa Clara;
+  only ids are safe.*
+- The White Clouds summit set around the pin **is** confirmed in real data, and it is the range
+  in the photograph:
+
+```
+Castle Peak          44.03980, −114.58698   3603 m
+Lee Peak             44.10281, −114.62862   3458 m
+Lonesome Lake Peak   44.07531, −114.61207   3445 m
+Mount Andrus         44.09107, −114.60921   3438 m
+White Cloud Peaks    44.09734, −114.62788   3438 m
+Patterson Peak       44.04868, −114.61867   3317 m
+Merriam Peak         44.05244, −114.58086   3334 m
+```
+
+**Still not established: the camera position.** A screenshot places the pin relative to lakes,
+but reading a coordinate off it by eye would be exactly the kind of invented number this project
+refuses elsewhere. The mapping app showing that pin can give the number directly.
