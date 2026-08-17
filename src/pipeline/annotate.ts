@@ -264,6 +264,25 @@ export async function annotateScene(request: AnnotateSceneRequest): Promise<Anno
     config.sightline,
   );
 
+  // The aligner's profile: same samples, near field dropped (CV-10). Built
+  // here rather than by callers so no second sweep is ever paid for it and no
+  // caller can build it with different sightline options by accident.
+  const alignmentHorizon: HorizonProfile | undefined =
+    config.nearFieldRadiusM > 0
+      ? buildHorizonProfile(
+          eyeElevationM(observer),
+          rays
+            .map((ray) => ({
+              ...ray,
+              samples: ray.samples.filter(
+                (raySample) => raySample.distanceM >= config.nearFieldRadiusM,
+              ),
+            }))
+            .filter((ray) => ray.samples.length > 0),
+          config.sightline,
+        )
+      : undefined;
+
   throwIfAborted(request.signal);
   const found = await request.peaks.peaksWithin(
     { lat: observer.lat, lon: observer.lon },
@@ -434,6 +453,7 @@ export async function annotateScene(request: AnnotateSceneRequest): Promise<Anno
     observerResolution,
     camera: request.camera,
     horizon,
+    ...(alignmentHorizon === undefined ? {} : { alignmentHorizon }),
     sweep: report,
     peaks,
     visible: peaks.filter((peak) => peak.visibility === 'visible'),

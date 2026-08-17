@@ -1032,3 +1032,29 @@ describe('nearFieldElevationBandM', () => {
     expect(nearFieldElevationBandM(10, [ray(0, [[50, 999]])], 0)).toBe(0);
   });
 });
+
+describe('annotateScene — the alignment horizon (CV-10)', () => {
+  it('drops the phantom wall from the alignment profile and keeps it for verdicts', async () => {
+    const scene = await annotateScene(nearFieldRequest(150));
+    expect(scene.alignmentHorizon).toBeDefined();
+    // Verdicts still see the wall: the due-east skyline is the 90 m sample.
+    const dueEast = scene.horizon.find((point) => point.bearingDeg === 90);
+    expect(dueEast?.distanceKm).toBeCloseTo(0.09, 9);
+    // The aligner does not: its due-east skyline rests on far ground, and no
+    // point anywhere in the alignment profile is nearer than the radius.
+    const alignedEast = scene.alignmentHorizon?.find((point) => point.bearingDeg === 90);
+    expect(alignedEast).toBeDefined();
+    expect((alignedEast?.distanceKm ?? 0) * 1000).toBeGreaterThanOrEqual(150);
+    for (const point of scene.alignmentHorizon ?? []) {
+      expect(point.distanceKm * 1000).toBeGreaterThanOrEqual(150);
+    }
+    // Flat ground at 11+ km sits BELOW the eye: the wall's +0.636° becomes a
+    // negative altitude, which is what "the phantom is gone" looks like.
+    expect(alignedEast?.altitudeDeg ?? 0).toBeLessThan(0);
+  });
+
+  it('builds no alignment horizon when the near-field radius is unset', async () => {
+    const scene = await annotateScene(nearFieldRequest(0));
+    expect(scene.alignmentHorizon).toBeUndefined();
+  });
+});

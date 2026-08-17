@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
 import { AttributionFooter } from './components/AttributionFooter';
+import { AutoTrimPanel } from './components/AutoTrimPanel';
 import { DropZone } from './components/DropZone';
 import { ExifSummary } from './components/ExifSummary';
 import { ExportControl } from './components/ExportControl';
@@ -27,7 +28,14 @@ import { TrimSliders } from './components/TrimSliders';
 import { UncertaintyBanner } from './components/UncertaintyBanner';
 import { dragToTrimDeg, poseUncertainty } from './uncertainty';
 import { readPhotoFile } from './photo';
-import { annotatedFileName, type OverlayBuilder, type OverlayResult, type PngExporter } from './seam';
+import {
+  annotatedFileName,
+  type OverlayBuilder,
+  type OverlayResult,
+  type PngExporter,
+  type TrimSuggester,
+  type TrimSuggestionView,
+} from './seam';
 import { deriveSession, exportDisabledReason, INITIAL_STATE, reducer } from './state';
 
 export interface AppProps {
@@ -39,13 +47,17 @@ export interface AppProps {
   overlayBuilder?: OverlayBuilder;
   /** The PNG compositor (P4.2), likewise wired in main.tsx. */
   pngExporter?: PngExporter;
+  /** The CV auto-trim call (P7.4), likewise wired in main.tsx. */
+  trimSuggester?: TrimSuggester;
 }
 
-export function App({ overlayBuilder, pngExporter }: AppProps = {}): JSX.Element {
+export function App({ overlayBuilder, pngExporter, trimSuggester }: AppProps = {}): JSX.Element {
   const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
   const [overlay, setOverlay] = useState<OverlayResult | undefined>(undefined);
   const [overlayError, setOverlayError] = useState<string | undefined>(undefined);
   const [overlayBusy, setOverlayBusy] = useState(false);
+  const [trimSuggestion, setTrimSuggestion] = useState<TrimSuggestionView | undefined>(undefined);
+  const [trimSuggestionBusy, setTrimSuggestionBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | undefined>(undefined);
 
@@ -112,6 +124,44 @@ export function App({ overlayBuilder, pngExporter }: AppProps = {}): JSX.Element
     // is its value, and depending on the object itself would re-run the
     // pipeline on every single render.
   }, [overlayBuilder, requestKey]);
+
+  // Auto-trim (P7.4): once an overlay exists and carries an alignment basis,
+  // ask the suggester what the skyline match would nudge. Purely advisory —
+  // its ONLY output is the panel, whose Apply button writes the same trim
+  // state the sliders do. Keyed off the overlay object: a new overlay (new
+  // pose, new photo) restarts the suggestion; anything else leaves it alone.
+  const photoUrlForTrim = session?.photo.url;
+  useEffect(() => {
+    setTrimSuggestion(undefined);
+    if (trimSuggester === undefined || overlay?.alignment === undefined || photoUrlForTrim === undefined) {
+      setTrimSuggestionBusy(false);
+      return;
+    }
+    let live = true;
+    setTrimSuggestionBusy(true);
+    void trimSuggester({
+      photoUrl: photoUrlForTrim,
+      camera: overlay.alignment.camera,
+      horizon: overlay.alignment.horizon,
+    })
+      .then((view) => {
+        if (live) setTrimSuggestion(view);
+      })
+      .catch((error: unknown) => {
+        if (live) {
+          setTrimSuggestion({
+            status: 'declined',
+            message: `Auto-align could not run: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
+      })
+      .finally(() => {
+        if (live) setTrimSuggestionBusy(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [trimSuggester, overlay, photoUrlForTrim]);
 
   const downloadName = annotatedFileName(session?.photo.fileName ?? 'photo.jpg');
 
@@ -224,6 +274,27 @@ export function App({ overlayBuilder, pngExporter }: AppProps = {}): JSX.Element
                   )}
                 />
               )}
+              <AutoTrimPanel
+                view={trimSuggestion}
+                busy={trimSuggestionBusy}
+                onApply={(headingTrimDeg, pitchTrimDeg) => {
+                  // The suggestion is relative to the pose the overlay ran
+                  // with — base + current trim — so applying ADDS to the trim,
+                  // exactly as a drag does. The overlay then re-runs at the
+                  // corrected pose and a fresh suggestion (near zero) replaces
+                  // this one.
+                  dispatch({
+                    type: 'trim-changed',
+                    axis: 'headingDeg',
+                    valueDeg: state.trim.headingDeg + headingTrimDeg,
+                  });
+                  dispatch({
+                    type: 'trim-changed',
+                    axis: 'pitchDeg',
+                    valueDeg: state.trim.pitchDeg + pitchTrimDeg,
+                  });
+                }}
+              />
               <TrimSliders
                 trim={state.trim}
                 onTrimChange={(axis, valueDeg) => {

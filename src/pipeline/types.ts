@@ -284,6 +284,21 @@ export interface AnnotatedScene {
   readonly camera: CameraPose;
   /** The skyline, for the renderer to draw and the filter to judge against. */
   readonly horizon: HorizonProfile;
+  /**
+   * The same sweep's skyline with terrain inside `nearFieldRadiusM` excluded —
+   * what the CV aligner must match against (CV-10 in docs/FINDINGS.md: the
+   * phantom wall in the default profile cost +1.13° of recovered pitch, and
+   * `suggestPoseTrim` refuses a profile that rests on near-field ground).
+   * Built from the SAME ray samples as `horizon`, so it costs no second
+   * terrain sweep and cannot disagree with it about the far terrain. Absent
+   * when `nearFieldRadiusM` is 0 — no radius, no filtered variant to build.
+   *
+   * Deliberately NOT what verdicts run on: excluding the near field makes
+   * `rangeIsMeasured` correctly refuse every peak (docs/NEAR-FIELD.md), so
+   * verdicts keep the near field and carry its uncertainty (P1.6) while
+   * alignment — which matches SHAPE, not occlusion — gets the clean profile.
+   */
+  readonly alignmentHorizon?: HorizonProfile;
   readonly sweep: SweepReport;
   /**
    * Every peak the run reached a verdict on, nearest first. Peaks whose own

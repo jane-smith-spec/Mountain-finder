@@ -42,7 +42,7 @@
  * nothing to see here".
  */
 
-import type { CameraPose, Observer } from '../core/types';
+import type { CameraPose, HorizonProfile, Observer } from '../core/types';
 
 /** The photograph's pixel size. Field names match `OverlayScene`. */
 export interface PhotoFrame {
@@ -93,10 +93,60 @@ export interface OverlayResult {
    * let the second be read as the first.
    */
   readonly notes?: readonly string[];
+  /**
+   * What the CV trim suggester needs, when the run produced it: the pose the
+   * scene actually ran with (trim included) and the near-field-free profile
+   * the aligner is allowed to match against (`AnnotatedScene.alignmentHorizon`
+   * — see CV-10 in docs/FINDINGS.md for why it must be this profile and not
+   * the drawn one). Absent when the pipeline ran with no near-field radius.
+   */
+  readonly alignment?: {
+    readonly camera: CameraPose;
+    readonly horizon: HorizonProfile;
+  };
 }
 
 /** The pipeline call. Rejects rather than returning a partial overlay. */
 export type OverlayBuilder = (request: OverlayRequest) => Promise<OverlayResult>;
+
+/* ── The auto-trim seam (P7.4) ─────────────────────────────────────────────── */
+
+/** One auto-trim run: the photo as loaded, and the overlay's alignment basis. */
+export interface TrimSuggestionRequest {
+  /** Object URL of the photo as loaded into the page — same one the export uses. */
+  readonly photoUrl: string;
+  readonly camera: CameraPose;
+  readonly horizon: HorizonProfile;
+}
+
+/**
+ * What the app shows for an auto-trim attempt. A projection of
+ * `PoseTrimSuggestion` (src/pipeline/cv-alignment.ts) with the UI's decisions
+ * already made, so the component renders text and never re-derives policy.
+ */
+export type TrimSuggestionView =
+  | {
+      readonly status: 'suggested';
+      /** Add to the CURRENT trim — the offsets are relative to `camera`. */
+      readonly headingTrimDeg: number;
+      readonly pitchTrimDeg: number;
+      /** True for `'low-confidence'`: offer, don't celebrate. */
+      readonly tentative: boolean;
+      /** Named gates the alignment missed, empty when confident. */
+      readonly concerns: readonly string[];
+    }
+  | {
+      readonly status: 'declined';
+      /** A complete sentence fit to show: the reason, not a code. */
+      readonly message: string;
+    };
+
+/**
+ * The auto-trim call, wired in main.tsx (decode the photo to RGBA, run
+ * `suggestPoseTrim`). Optional like the other seams: with none supplied the
+ * panel simply does not render, and nothing pretends alignment was attempted.
+ */
+export type TrimSuggester = (request: TrimSuggestionRequest) => Promise<TrimSuggestionView>;
 
 /** What the PNG compositor (P4.2) needs to flatten photo + overlay. */
 export interface ExportRequest {

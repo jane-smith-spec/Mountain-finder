@@ -14,7 +14,6 @@ write-ups are in the three `REVIEW-FINDINGS*.md` files and are not repeated here
 | # | Item | What it needs |
 |---|---|---|
 | **Q9** | Re-measure the DEPLOY.md size table | "What it costs" predates the four committed regions and the attribution footer. It has **no row for `/peaks/`** at all (3.2 MB staged — california 1.26, cascades 1.02, zermatt 0.67, fort-william 0.26 MB), and nothing states what one *session* costs once the app fetches cells rather than bundling them — which is the number a deployer budgets with. The bundle figure was 302 KB and is now 318.40 kB / 104.34 kB gzipped; the windows-only demo row moved 1.77 → 1.78 MB. Those two were measured; the `/peaks/` row only means something after Q8 |
-| **P7.4** | CV integration — decision layer DONE, app wiring open | `suggestPoseTrim` (src/pipeline/cv-alignment.ts, 2026-08-17) turns an alignment into a slider pre-set or a typed refusal, enforcing the two CV-10 policies: the profile must be near-field-free (checked from its own distances) and the heading search is clamped to a compass budget (default ±6°). Proven on the real Railroad frame: default profile declined `near-field-in-profile`; clean profile suggested trims with heading err −0.208° (better than the phone's compass) and pitch err +0.817° (4× better than assumed zero), concerns named. **What remains:** `src/app` calls it after a photo drops — decode to RGBA (already in a canvas), sweep a second min-range-150 profile for the aligner, pre-set the visible sliders on `'suggested'`, show the decline reason otherwise. Nothing hidden, per D9 |
 | **P7.5** | The extractor on real photographs | **Re-framed by CV-10: the extractor is exonerated at this depth.** The diagnostic overlay shows the extracted curve riding the true crest; the ~40-column snow-band lock is not the pitch limiter (masking it changes pitch by 0.28° and makes the heading IMPOSTOR stronger), and the pitch target of the old check is met by the profile policy (near-field out → −3.45…−3.73 vs −3.52 solved). What remains here is CV-2/CV-8 unchanged: the 24 mm and 14 mm frames still lose the sky entirely to snowfield/tundra, and need a texture or gradient cue before wide frames align at all. The snow-band lock is a cosmetic defect of the 48 mm extraction, worth fixing with the same cue, no longer load-bearing ([docs/CV-REAL-PHOTO-FINDING.md](docs/CV-REAL-PHOTO-FINDING.md) § CV-10) |
 | **P7.7** | Pitch is unrecorded and always wrong at zero | EXIF carries no pitch, `--pitch` defaults to 0, and in all four annotated photographs the drawn horizon sits wrong because of it — Railroad Ridge −3.52°, and the Bogus Basin 480 mm frame needed a hand-supplied +4.3° before any marker landed on-image at all. **The recovery path now exists**: `suggestPoseTrim` gets pitch to within 0.82° on the one frame with solved truth (CV-10), so the remaining work is P7.4's app wiring plus the annotate script calling it (`--auto-trim`?). On iOS this term largely solves itself — the phone knows its pitch at capture time — worth remembering before over-investing in photo-only recovery |
 | **P7.6** | ~~The two wide frames refuse~~ — **tested, refuted, folded into P7.5** | The hypothesis was near-field foreground the sweep never sampled. Measured, the error is largest at frame CENTRE and smallest at the edges, and the extractor puts its boundary at `rowNorm` **0.999** — the bottom row of the picture. It is tracking foreground tundra, not sky. No near-field term is needed: this is CV-2 again, a sky/land cue that a snowfield or sunlit tundra edge can also satisfy. One fix, two symptoms — see [docs/REAL-PHOTO-POSE.md](docs/REAL-PHOTO-POSE.md) |
@@ -33,6 +32,23 @@ write-ups are in the three `REVIEW-FINDINGS*.md` files and are not repeated here
 ---
 
 ## Done
+
+### P7.4 — CV integration, wired end to end, 2026-08-17
+
+Both halves shipped the same day the CV-10 measurements redesigned them. The decision layer:
+`suggestPoseTrim` (src/pipeline/cv-alignment.ts) — near-field-free profile REQUIRED and
+checked from the profile's own distances, heading search clamped to a compass budget
+(default ±6°; the ±25° window returned a confident impostor 10.4° off on real terrain),
+suggestion-not-correction per D9. The app wiring: `AnnotatedScene.alignmentHorizon` (same
+sweep, near samples dropped — no second terrain pass), `OverlayResult.alignment` carries it
+with the pose across the seam, `createTrimSuggester` (src/app/auto-trim.ts) reads RGBA off a
+≤1600 px canvas copy and projects the result into sentences, and `AutoTrimPanel` shows the
+proposal with an Apply button that writes THE SAME trim state the sliders and the drag
+write — nothing is ever corrected behind the controls, and a refusal renders as a visible
+sentence, never an empty region. Proven: on the real Railroad frame the suggested trims beat
+the phone's compass on heading (−0.208° vs 0.596°) and assumed-zero pitch by 4× (+0.817° vs
+3.52°); in Chromium the grey Gornergrat fixture is declined out loud with no Apply button
+(new e2e). Gates: check 1 147, acceptance 178, playwright 22, deploy 5.
 
 ### Q8b — the density policy, decided by measurement, 2026-08-17
 

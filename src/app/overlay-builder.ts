@@ -315,6 +315,11 @@ export function createOverlayBuilder(deps: OverlayBuilderDeps): OverlayBuilder {
       // scene: a peak the renderer dropped must not be announced as labelled.
       peakNames: layout.markers.map((marker) => marker.peak.name),
       ...(notes.length === 0 ? {} : { notes }),
+      // P7.4: the basis for an auto-trim suggestion — the pose this scene ran
+      // with and the near-field-free profile the aligner may match (CV-10).
+      ...(scene.alignmentHorizon === undefined
+        ? {}
+        : { alignment: { camera: pose, horizon: scene.alignmentHorizon } }),
     };
   };
 }

@@ -442,3 +442,23 @@ test('the obscured-summit switch is on by default and says what each position me
   await expect(page.getByTestId('obscured-note')).toHaveAttribute('data-showing', 'false');
   await expect(page.getByTestId('obscured-note')).toContainText('never labelled either way');
 });
+
+test('auto-align proposes nothing it cannot defend: the grey fixture is declined out loud', async ({
+  page,
+}) => {
+  // P7.4: the suggester runs after every overlay. The Gornergrat fixture is a
+  // uniform grey frame (real EXIF, no picture — see src/cv/real-photo.test.ts),
+  // so the honest outcome is a visible refusal, not a silent absence and NOT a
+  // confident trim read off nothing.
+  await pickPhoto(page, GORNERGRAT);
+  await page.getByTestId('input-assumptions').check();
+  await expect(page.getByTestId('overlay-state')).toHaveAttribute('data-overlay', 'live', {
+    timeout: 120_000,
+  });
+
+  const state = page.getByTestId('auto-trim-state');
+  await expect(state).toHaveAttribute('data-auto-trim', 'declined', { timeout: 60_000 });
+  await expect(state).toContainText(/auto-align/i);
+  // No Apply button on a decline: there is nothing defensible to apply.
+  await expect(page.getByTestId('auto-trim-apply')).toHaveCount(0);
+});

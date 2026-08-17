@@ -33,6 +33,7 @@ import { HttpTerrainStore } from '../providers/http-terrain-store';
 import { DEFAULT_TERRAIN_MANIFEST_URL } from '../providers/terrain-manifest';
 import { TileElevationProvider } from '../providers/tile-elevation';
 import { App, type AppProps } from './App';
+import { createTrimSuggester } from './auto-trim';
 import { compositePng } from './composite-export';
 import { bundledRegionIndexes } from './data-credits';
 import { createOverlayBuilder, type TerrainSource } from './overlay-builder';
@@ -49,6 +50,9 @@ const peaks = createRegionPeakSource(bundledRegionIndexes(), '/peaks', (url) => 
 const props: AppProps = {
   overlayBuilder: createOverlayBuilder({ terrain, peaks }),
   pngExporter: compositePng,
+  // P7.4: the auto-align suggestion. Advisory by design — it proposes trims
+  // for the visible sliders and never applies anything itself.
+  trimSuggester: createTrimSuggester(),
 };
 
 const root = document.getElementById('root');
