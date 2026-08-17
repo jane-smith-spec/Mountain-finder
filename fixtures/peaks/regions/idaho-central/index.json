@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "description": "Named summits imported from Overture Maps for \"idaho-central\".  Heights are OpenStreetMap `ele` tags carried through Overture, never DEM samples.",
+  "release": "2026-06-17.0",
+  "generatedBy": "npm run fetch:peaks -- --bbox 43.4,-116.6,45.2,-113.8 --name idaho-central --classes peak,volcano,ridge",
+  "bounds": {
+    "south": 43.4,
+    "west": -116.6,
+    "north": 45.2,
+    "east": -113.8
+  },
+  "sources": [
+    {
+      "id": "overture-2026-06-17.0-base-land",
+      "title": "Overture Maps Foundation, base theme, type=land, release 2026-06-17.0 — summit features (subtype=physical, class=peak|volcano), © OpenStreetMap contributors, ODbL-1.0",
+      "url": "https://overturemaps-us-west-2.s3.amazonaws.com/release/2026-06-17.0/theme=base/type=land/",
+      "retrieved": "2026-08-17",
+      "access": "fetched",
+      "note": "Position is the midpoint of Overture's float32-rounded `bbox` (sub-metre for a point feature); height is the `elevation` column, which carries the OpenStreetMap `ele` tag unchanged — verified row-by-row against the same rows' `source_tags.ele`. Heights are therefore tagged/surveyed values, NEVER DEM samples (MISSION.md: SRTM under-reads sharp summits by 250–350 m). Area imported: 43.4,-116.6 … 45.2,-113.8."
+    }
+  ],
+  "cells": [
+    {
+      "name": "N43W114",
+      "peaks": 28,
+      "file": "cells/N43W114.json"
+    },
+    {
+      "name": "N43W115",
+      "peaks": 121,
+      "file": "cells/N43W115.json"
+    },
+    {
+      "name": "N43W116",
+      "peaks": 82,
+      "file": "cells/N43W116.json"
+    },
+    {
+      "name": "N43W117",
+      "peaks": 36,
+      "file": "cells/N43W117.json"
+    },
+    {
+      "name": "N44W114",
+      "peaks": 15,
+      "file": "cells/N44W114.json"
+    },
+    {
+      "name": "N44W115",
+      "peaks": 126,
+      "file": "cells/N44W115.json"
+    },
+    {
+      "name": "N44W116",
+      "peaks": 172,
+      "file": "cells/N44W116.json"
+    },
+    {
+      "name": "N44W117",
+      "peaks": 47,
+      "file": "cells/N44W117.json"
+    },
+    {
+      "name": "N45W114",
+      "peaks": 2,
+      "file": "cells/N45W114.json"
+    },
+    {
+      "name": "N45W115",
+      "peaks": 23,
+      "file": "cells/N45W115.json"
+    },
+    {
+      "name": "N45W116",
+      "peaks": 39,
+      "file": "cells/N45W116.json"
+    },
+    {
+      "name": "N45W117",
+      "peaks": 18,
+      "file": "cells/N45W117.json"
+    }
+  ],
+  "peakCount": 709
+}

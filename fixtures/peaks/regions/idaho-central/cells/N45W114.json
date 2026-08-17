@@ -1,0 +1,27 @@
+{
+  "cell": "N45W114",
+  "peaks": [
+    {
+      "id": "overture/48926973-47a9-368e-8265-05bcfd3981d7",
+      "name": "Morning Glory Peak",
+      "lat": 45.189640045166016,
+      "lon": -113.96063232421875,
+      "elevationM": 1925,
+      "positionSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceKind": "osm",
+      "usedBy": []
+    },
+    {
+      "id": "overture/949e2f43-17ad-33e7-9817-a9865ff09001",
+      "name": "Sal Mountain",
+      "lat": 45.0146484375,
+      "lon": -113.84339141845703,
+      "elevationM": 2915,
+      "positionSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceId": "overture-2026-06-17.0-base-land",
+      "elevationSourceKind": "osm",
+      "usedBy": []
+    }
+  ]
+}
