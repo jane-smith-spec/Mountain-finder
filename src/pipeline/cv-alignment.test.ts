@@ -16,7 +16,12 @@ import type { CameraPose } from '../core/types.js';
 import { signatureProfile } from '../cv/testing/profiles.js';
 import { renderFog, renderSkylinePhoto } from '../cv/testing/raster.js';
 import { annotateScene } from './annotate.js';
-import { alignSceneToPhoto, describeAlignment } from './cv-alignment.js';
+import {
+  alignSceneToPhoto,
+  describeAlignment,
+  suggestPoseTrim,
+  DEFAULT_COMPASS_BUDGET_DEG,
+} from './cv-alignment.js';
 import { loadCaseTerrain } from './testing/case-terrain.js';
 
 const WIDTH_PX = 900;
@@ -266,5 +271,94 @@ describe('over the real Gornergrat SRTM horizon', () => {
     });
     expect(result.alignment.status).toBe('failed');
     expect(result.correctedCamera).toBeUndefined();
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * P7.4 decision layer — suggestPoseTrim and the CV-10 policies
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+describe('suggestPoseTrim', () => {
+  const SMALL_HEADING_DEG = 2;
+  const SMALL_PITCH_DEG = 1;
+  const nearlyRight: CameraPose = {
+    ...TRUE_POSE,
+    headingDeg: TRUE_POSE.headingDeg - SMALL_HEADING_DEG,
+    pitchDeg: TRUE_POSE.pitchDeg - SMALL_PITCH_DEG,
+  };
+
+  it('suggests the trims when the compass error is inside the budget', () => {
+    const suggestion = suggestPoseTrim({
+      image: PHOTO,
+      scene: { camera: nearlyRight, horizon: PROFILE },
+    });
+    expect(suggestion.status).toBe('suggested');
+    if (suggestion.status !== 'suggested') return;
+    expect(Math.abs(suggestion.headingTrimDeg - SMALL_HEADING_DEG)).toBeLessThan(0.5);
+    expect(Math.abs(suggestion.pitchTrimDeg - SMALL_PITCH_DEG)).toBeLessThan(0.5);
+    expect(suggestion.compassBudgetDeg).toBe(DEFAULT_COMPASS_BUDGET_DEG);
+    expect(suggestion.alignment.status).toBe('aligned');
+  });
+
+  it('declines a compass worse than the budget — even though a wider search would "succeed"', () => {
+    // The same 9.5° error the un-clamped seam recovers above. The decision
+    // layer refuses it on purpose (CV-10): a search wide enough to absorb a
+    // bad compass has been MEASURED to return a confident impostor heading on
+    // real terrain, and a wrong pre-set is strictly worse than no pre-set.
+    const wide = alignSceneToPhoto({
+      image: PHOTO,
+      scene: { camera: NOMINAL_POSE, horizon: PROFILE },
+    });
+    expect(wide.alignment.status).toBe('aligned');
+
+    const suggestion = suggestPoseTrim({
+      image: PHOTO,
+      scene: { camera: NOMINAL_POSE, horizon: PROFILE },
+    });
+    expect(suggestion.status).toBe('declined');
+    if (suggestion.status !== 'declined') return;
+    expect(suggestion.reason).toBe('no-alignment');
+    // The refusal names the search rim, which is what "compass outside the
+    // budget" looks like from inside the aligner.
+    expect(suggestion.detail).toMatch(/search|edge|rim|range/i);
+  });
+
+  it('declines a profile whose searched span rests on near-field ground', () => {
+    const withPhantom = PROFILE.map((point) =>
+      Math.abs(point.bearingDeg - 265) < 0.2 ? { ...point, distanceKm: 0.09 } : point,
+    );
+    const suggestion = suggestPoseTrim({
+      image: PHOTO,
+      scene: { camera: nearlyRight, horizon: withPhantom },
+    });
+    expect(suggestion.status).toBe('declined');
+    if (suggestion.status !== 'declined') return;
+    expect(suggestion.reason).toBe('near-field-in-profile');
+    expect(suggestion.detail).toContain('150');
+    // Declined before any pixel was read: no skyline to report.
+    expect(suggestion.skyline).toBeUndefined();
+  });
+
+  it('ignores near-field ground OUTSIDE the searched span', () => {
+    // Same phantom, planted where no clamped search can bring it into frame:
+    // span is heading ± (hFov/2 + budget) ≈ 263.4 ± 38.7°, so 320° is outside.
+    const outside = PROFILE.map((point) =>
+      Math.abs(point.bearingDeg - 320) < 0.2 ? { ...point, distanceKm: 0.09 } : point,
+    );
+    const suggestion = suggestPoseTrim({
+      image: PHOTO,
+      scene: { camera: nearlyRight, horizon: outside },
+    });
+    expect(suggestion.status).toBe('suggested');
+  });
+
+  it('refuses a non-positive compass budget', () => {
+    expect(() =>
+      suggestPoseTrim({
+        image: PHOTO,
+        scene: { camera: nearlyRight, horizon: PROFILE },
+        compassBudgetDeg: 0,
+      }),
+    ).toThrow(RangeError);
   });
 });

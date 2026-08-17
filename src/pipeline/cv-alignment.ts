@@ -45,7 +45,12 @@
 import type { CameraPose, HorizonProfile } from '../core/types.js';
 import { alignSkyline, type AlignOptions } from '../cv/align.js';
 import { extractSkyline, type SkylineOptions } from '../cv/skyline.js';
-import type { RgbaImage, Skyline, SkylineAlignment } from '../cv/types.js';
+import type {
+  RgbaImage,
+  Skyline,
+  SkylineAlignment,
+  SkylineAlignmentSolution,
+} from '../cv/types.js';
 
 /** What the aligner needs from a scene. Structurally satisfied by `AnnotatedScene`. */
 export interface AlignableScene {
@@ -117,4 +122,174 @@ export function describeAlignment(alignment: SkylineAlignment): string {
     );
   }
   return `heading ${heading}°, pitch ${pitch}° (confidence ${confidence} %)`;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * P7.4 — the decision layer: from "an alignment" to "a trim worth suggesting"
+ * ══════════════════════════════════════════════════════════════════════════
+ *
+ * `alignSceneToPhoto` answers "what offset best matches this profile to this
+ * photograph". Whether that offset should ever reach the trim sliders is a
+ * separate question, and the Railroad Ridge measurements (CV-10 in
+ * docs/FINDINGS.md) settled two policies this function enforces:
+ *
+ * 1. **The profile must not contain the near field.** With the 90 m phantom
+ *    wall in the profile the recovered pitch was wrong by +1.13°; with terrain
+ *    inside 150 m excluded it was wrong by 0.07–0.82° in every configuration
+ *    measured. The near field is unresolvable ground (docs/NEAR-FIELD.md) and
+ *    aligning a photograph to it is aligning to the sampling grid. This is
+ *    checkable from the profile itself — every point carries the range of the
+ *    terrain that set it — so it is CHECKED, not trusted to a comment.
+ *
+ * 2. **The heading search is clamped to the compass's error budget.** Given
+ *    the full ±25° window on the phantom-free profile, the aligner picked a
+ *    heading 10.4° west of the photogrammetric truth — with the best score
+ *    (0.861) and margin (0.392) of any run measured, i.e. a confident
+ *    impostor no internal gate can catch. SRTM smooths and laterally
+ *    displaces the crests whose shape is being matched, and on a serrated
+ *    ridge system the smoothed shape can genuinely resemble itself elsewhere.
+ *    The only anchor that separates the true peak from the impostor is the
+ *    compass: inside a ±6° window the same skyline, profile and gates
+ *    recovered the heading to 0.21°. So the search range here IS the claim
+ *    "the compass is not wrong by more than this", the default is small, and
+ *    a compass worse than the budget produces an honest refusal (the search
+ *    hits its rim and the aligner declines) rather than a confident wrong
+ *    answer from a wider hunt.
+ */
+
+/**
+ * How far the compass is allowed to be wrong, degrees — the heading search
+ * half-range.
+ *
+ * 6° is ten times the one measured compass error in this repository (0.596°,
+ * docs/REAL-PHOTO-POSE.md) and small enough to exclude the measured impostor
+ * at 10.4°. It is NOT large enough to cover the folklore 5–15° worst case —
+ * deliberately: a compass that wrong makes the sliders-stay-manual outcome the
+ * correct one, because a wider search has been measured to return confident
+ * wrong answers, and a wrong pre-set is strictly worse than no pre-set.
+ */
+export const DEFAULT_COMPASS_BUDGET_DEG = 6;
+
+/** Ground nearer than this is unresolvable by the DEM — see docs/NEAR-FIELD.md. */
+export const DEFAULT_NEAR_FIELD_RADIUS_M = 150;
+
+export interface PoseTrimRequest {
+  readonly image: RgbaImage;
+  readonly scene: AlignableScene;
+  /** Heading search half-range. Default {@link DEFAULT_COMPASS_BUDGET_DEG}. */
+  readonly compassBudgetDeg?: number;
+  /** Near-field radius for the profile precondition. Default 150 m. */
+  readonly nearFieldRadiusM?: number;
+  readonly skyline?: SkylineOptions;
+  readonly align?: Omit<AlignOptions, 'headingRangeDeg'>;
+}
+
+/** Why no trim was suggested. Every value is a distinct, actionable diagnosis. */
+export type PoseTrimDeclineReason =
+  /**
+   * The scene's profile rests on unresolvable near ground somewhere in the
+   * searched span. Re-sweep with `minRangeM` at the near-field radius; the
+   * pipeline's own verdicts keep the near field (P1.6 carries its uncertainty
+   * instead), so this is a second sweep, not a changed scene.
+   */
+  | 'near-field-in-profile'
+  /** The aligner refused — fog, flat terrain, search rim, ambiguity, … */
+  | 'no-alignment';
+
+export type PoseTrimSuggestion =
+  | {
+      readonly status: 'suggested';
+      /** Add to the pose's heading — the same sign the trim sliders use. */
+      readonly headingTrimDeg: number;
+      readonly pitchTrimDeg: number;
+      /** The aligner's own quality verdict, gates and diagnostics included. */
+      readonly alignment: SkylineAlignmentSolution;
+      readonly skyline: Skyline;
+      readonly compassBudgetDeg: number;
+    }
+  | {
+      readonly status: 'declined';
+      readonly reason: PoseTrimDeclineReason;
+      readonly detail: string;
+      /** Present unless the decline happened before the photograph was read. */
+      readonly skyline?: Skyline;
+    };
+
+/**
+ * The searched bearing span: the frame plus the compass budget on both sides —
+ * every bearing whose terrain the clamped search can bring into the frame.
+ */
+function searchedSpan(camera: CameraPose, budgetDeg: number): { fromDeg: number; toDeg: number } {
+  const half = camera.hFovDeg / 2 + budgetDeg;
+  return { fromDeg: camera.headingDeg - half, toDeg: camera.headingDeg + half };
+}
+
+/** Absolute angular separation of two bearings, wrap-safe, 0–180. */
+function bearingSeparationDeg(aDeg: number, bDeg: number): number {
+  return Math.abs(((aDeg - bDeg + 540) % 360) - 180);
+}
+
+/**
+ * Extract, align within the compass budget, and decide whether the result is a
+ * trim worth pre-setting the sliders with (P7.4). Pure and synchronous.
+ *
+ * A `'suggested'` result is exactly that — decision D9 stands: the caller
+ * PRE-SETS the visible trim controls and says so; it never applies a hidden
+ * correction. A `'declined'` result leaves the sliders where they are, with a
+ * reason fit to show.
+ */
+export function suggestPoseTrim(request: PoseTrimRequest): PoseTrimSuggestion {
+  const compassBudgetDeg = request.compassBudgetDeg ?? DEFAULT_COMPASS_BUDGET_DEG;
+  if (!(compassBudgetDeg > 0)) {
+    throw new RangeError(`compassBudgetDeg must be > 0, received ${compassBudgetDeg}`);
+  }
+  const nearFieldRadiusM = request.nearFieldRadiusM ?? DEFAULT_NEAR_FIELD_RADIUS_M;
+
+  // Precondition first, before any pixel is read: a profile whose skyline
+  // rests on near-field ground anywhere the search can look would hand the
+  // aligner the phantom wall as shape to match (CV-9, CV-10).
+  const span = searchedSpan(request.scene.camera, compassBudgetDeg);
+  const centre = (span.fromDeg + span.toDeg) / 2;
+  const halfSpan = (span.toDeg - span.fromDeg) / 2;
+  const nearFieldPoints = request.scene.horizon.filter(
+    (point) =>
+      bearingSeparationDeg(point.bearingDeg, centre) <= halfSpan &&
+      point.distanceKm * 1000 < nearFieldRadiusM,
+  );
+  if (nearFieldPoints.length > 0) {
+    return {
+      status: 'declined',
+      reason: 'near-field-in-profile',
+      detail:
+        `${nearFieldPoints.length} profile point(s) in the searched span rest on terrain ` +
+        `within ${nearFieldRadiusM} m of the camera — unresolvable ground the aligner must ` +
+        'not match against (docs/NEAR-FIELD.md). Sweep the alignment profile with ' +
+        `minRangeM: ${nearFieldRadiusM} and try again.`,
+    };
+  }
+
+  const { skyline, alignment } = alignSceneToPhoto({
+    image: request.image,
+    scene: request.scene,
+    ...(request.skyline === undefined ? {} : { skyline: request.skyline }),
+    align: { ...request.align, headingRangeDeg: compassBudgetDeg },
+  });
+
+  if (alignment.status === 'failed') {
+    return {
+      status: 'declined',
+      reason: 'no-alignment',
+      detail: `${alignment.reason}: ${alignment.detail}`,
+      skyline,
+    };
+  }
+
+  return {
+    status: 'suggested',
+    headingTrimDeg: alignment.headingOffsetDeg,
+    pitchTrimDeg: alignment.pitchOffsetDeg,
+    alignment,
+    skyline,
+    compassBudgetDeg,
+  };
 }

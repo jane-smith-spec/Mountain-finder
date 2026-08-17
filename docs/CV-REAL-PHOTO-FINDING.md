@@ -330,3 +330,49 @@ The next measurement worth making is the one this document already recommended a
 finally worth doing: render the computed profile at 168° over the photograph and look at where
 the two curves part company. With the extracted curve no longer self-contradictory, that
 comparison can finally mean something.
+
+## CV-10 — the confident impostor, and the compass as the only anchor (2026-08-17)
+
+Measured on the 48 mm Railroad Ridge frame against the photogrammetrically solved pose
+(heading 174.686°, pitch −3.520°), EXIF pose as the aligner's input:
+
+| profile | heading search | heading err | pitch err | score | margin |
+|---|---|---|---|---|---|
+| default (phantom in) | ±25° | −0.545° | **+1.133°** | 0.555 | 0.031 |
+| default | ±6° | −0.545° | +1.133° | 0.555 | 0.540 |
+| min-range 150 m | ±25° | **−10.447°** | +0.070° | 0.729 | 0.145 |
+| min-range 150 m | ±6° | **−0.208°** | +0.817° | 0.587 | 0.068 |
+| min-range, defect columns masked | ±25° | −11.196° | −0.213° | **0.861** | **0.392** |
+| min-range, defect columns masked | ±6° | refuses (search rim) | | | |
+
+Four facts, each of which changed what P7.4/P7.5 should do:
+
+1. **The phantom wall costs a degree of pitch.** Same skyline, same search: pitch error
+   +1.13° with the near field in the profile, ≤0.82° in every run without it. The aligner
+   must be fed a profile swept with `minRangeM` at the near-field radius — and that is
+   checkable from the profile itself, so `suggestPoseTrim` checks it.
+2. **The wide search's winner is an impostor with the best diagnostics of any run.** SRTM
+   smooths a serrated crest by −1.5° (converged under step refinement) and displaces sharp
+   crests laterally by ~300 m (≈1.7° at 10 km); on a cirque rim the smoothed shape resembles
+   itself elsewhere, and the 10.4°-west match beats the true one on score AND margin. No
+   internal gate can see this — margin certifies "a clear winner", not "the right one".
+3. **The extractor was not the problem.** The diagnostic overlay shows the extracted curve
+   riding the true crest across the frame; its one defect (≈40 columns locked to a snow-band
+   edge near x 0.33–0.42) is not the pitch limiter, and masking those columns makes the
+   impostor STRONGER — they were accidentally anchoring the true heading. P7.5's "recovered
+   pitch must reach −3.520" check is met by the profile policy, not by an extractor change.
+4. **The compass, not the shape, separates truth from impostor.** Inside ±6° — ten times the
+   one measured compass error (0.596°) — heading recovers to 0.21°. A compass worse than the
+   budget drives the search to its rim, which the aligner already refuses: an honest
+   no-answer instead of a confident wrong one.
+
+What ships: `suggestPoseTrim` in `src/pipeline/cv-alignment.ts` — near-field precondition,
+compass-budget clamp (default ±6°), suggestion-not-correction per D9. On the real frame it
+declines the default profile with `near-field-in-profile` and suggests `+0.389° / −2.703°`
+from the clean one: heading better than the phone's own compass, pitch four times better
+than the assumed zero, and every concern named on the result.
+
+Remaining and refiled: CV-2/CV-8 (the sky/snow cue for wide frames) still block the 24 mm
+and 14 mm frames entirely; the snow-band lock is now a cosmetic defect of this frame's
+extraction rather than the accused; and the DEM shape floor (~0.9–1.35° RMS here) bounds
+what any aligner can recover at this viewpoint.
