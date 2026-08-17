@@ -122,3 +122,98 @@ coverage).
 ### What remains
 - the heading, to be **recovered** rather than supplied
 - which specific summits appear in the frame, to become the must-see assertion
+
+---
+
+## Both photographs are acceptance cases now (2026-08-17)
+
+Everything above is committed as executable ground truth. It is **not** a
+`GroundTruthCase`: those require `view.bearingDeg: number` and a non-empty
+must-see list, and neither photograph has either. So they are a second type,
+`PhotoCase` (`tests/acceptance/cases/photo-case-types.ts`), asserting everything
+*except the frame*:
+
+| | |
+|---|---|
+| Cases | `tests/acceptance/cases/sunset-mountain-lookout.ts`, `railroad-ridge.ts` |
+| Suite | `tests/acceptance/photo-cases.test.ts` — 20 new tests, `npm run test:acceptance` 153 → 173 |
+| Terrain | `fixtures/tiles/cases/sunset-mountain-lookout-window.*` (406 × 559, 443 KiB), `railroad-ridge-window.*` (505 × 703, 693 KiB) |
+| Peaks | `fixtures/peaks/regions/idaho-central/` — wired by `loadPeakCellIndex`, coverage checked by `TiledPeakStore.coverageFor` |
+
+### What is ASSERTED (a failure fails the build)
+
+* **The photographs carry no bearing.** `extractPhotoExif` over the committed
+  bytes must report the stated dimensions and orientation and `undefined` for
+  GPS latitude, longitude, altitude, `GPSImgDirection`, its ref, and both focal
+  lengths. This is the load-bearing one: *“the view bearing is unmeasured”* is
+  now a measured property of the files, not a sentence in a comment.
+  `view.bearingDeg` is typed `null` — not `number | null` — so filling it in
+  requires changing the type, which a reviewer sees.
+* **Position and elevation.** The committed window reads
+  **2392.296 m** at the lookout against the OSM tag's 2393 m (± 5 m), and
+  **3166.122 m** at the Railroad Ridge camera against the documented 3166 m
+  (± 2 m). Each case's cross-checks are asserted separately, with their own
+  tolerances and an explicit statement of which are independent:
+
+  | case | figure | source | independent? | Δ from DEM |
+  |---|---|---|---|---|
+  | sunset | 2393 m | OSM `ele`, via Overture | yes | −0.70 m |
+  | sunset | 2392.296 m | SRTM, as recorded above | **no** — same data, fixture integrity | 0.000 m |
+  | sunset | 7 869 ft = 2398.5 m | National Historic Lookout Register | yes | −6.20 m |
+  | railroad | 3166 m | SRTM, as recorded above | **no** — same data, fixture integrity | +0.12 m |
+  | railroad | 10 433 ft = 3180 m | published Railroad Ridge crest | yes | −13.88 m |
+
+* **The windows cover their sweeps.** Not just the viewpoint: 72 bearings at
+  the sweep's outer radius (6 km and 7.5 km) must each read real terrain, so a
+  square cut around a circular sweep is checked at its corners.
+* **The committed bytes match the registered window.** Geometry read back from
+  the sidecar must reproduce `CASE_TERRAIN`'s bounds — a window regenerated
+  after the bounds moved but never re-committed reads real elevations from the
+  wrong place, and that is a failure with no symptoms.
+* **The peak region covers the query.** `coverageFor` reports the lookout
+  covered to 55.4 km and Railroad Ridge to 63.5 km against a 25 km query, all
+  cells held, 15 and 32 named summits inside the radius.
+* **The named summits are in the dataset**, by id, within 2 m of the recorded
+  coordinate, at exactly the tagged height, and with recorded bearing/range
+  reproduced by the fixtures' own geometry kit.
+
+### What is RECORDED, and asserted in NEITHER direction
+
+Which summits are in either frame. Eight are recorded for Railroad Ridge and
+four for Sunset Mountain, each with the reason it is unresolved; the suite
+prints them and gates only on the reason existing. This is the treatment
+`disputed` gets in `case-types.ts` — the difference being that `disputed`
+records a conflict *between* sources and this records the absence of any.
+
+Deriving a must-see list from the geometry would make the pipeline its own
+ground truth, which CLAUDE.md rule 4 forbids. Two independent reasons apply to
+the most tempting candidate, Castle Peak: no bearing, **and** it stands 11.1 km
+out, outside a 7.5 km window that can therefore produce a false *visible* and
+never a false *hidden*.
+
+### Two DEM readings worth carrying forward
+
+* The Sunset window's highest sample is **2471 m at 43.95222 N, 115.7075 W** —
+  78 m *above* the lookout, to the north-west. The viewpoint is not a local
+  maximum in every direction.
+* The Railroad window's highest sample is **3503 m at 44.11833 N,
+  114.62083 W**, 268 m east of the Calkens Peak node tagged at 3509 m. SRTM
+  under-reads that summit by 6 m *and* displaces its maximum by a quarter of a
+  kilometre — the behaviour MISSION.md documents, on this range, in this data.
+
+### One disagreement left open
+
+Railroad Ridge is published as **3 180 m** (dangerousroads) and **2 941 m**
+(PeakVisor). Neither page could be fetched from this sandbox; both were read
+through the web-search index. The DEM sides with the former (3166 m at a point
+on the road). Recorded in the case file as a disagreeing source rather than
+resolved, so nobody later finds the second number and thinks it was missed.
+
+### What still remains
+
+Unchanged by all of this: **the heading**, and **which summits are in the
+frame**. When the aligner recovers a bearing from `tundra-blue-sky.jpeg` and the
+summits in it are identified, that case graduates from `PhotoCase` to a
+`GroundTruthCase` with must-see and must-not-see lists — and its terrain window
+has to grow first, because a claim about Castle Peak needs the terrain out to
+Castle Peak.

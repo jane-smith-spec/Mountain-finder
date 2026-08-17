@@ -89,12 +89,40 @@ Highest: Ben Nevis 1 345 m, Aonach Beag 1 234 m, Aonach Mòr 1 221 m, Càrn Mòr
 Dearg 1 220 m — the Ben Nevis massif in the right order, which is the cheapest
 possible check that the box landed where it was aimed.
 
+## `idaho-central/`
+
+| | |
+|---|---|
+| Area | 43.4…45.2 N, −116.6…−113.8 W — Boise Mountains to the White Clouds and the Salmon River Mountains |
+| Summits | 709 across 12 cells |
+| Cost | 2.09 MB fetched of the 29.47 GB release = **0.0071 %** (6 row groups of 5 056) |
+| Regenerate | `npm run fetch:peaks -- --bbox 43.4,-116.6,45.2,-113.8 --name idaho-central --classes peak,volcano,ridge` |
+
+Cut for the two supplied photographs — the **photo cases** in
+`tests/acceptance/cases/` — and it covers both of them with room to spare:
+`TiledPeakStore.coverageFor` reports the Sunset Mountain lookout covered to
+**55.4 km** and the Railroad Ridge camera to **63.5 km**, against the 25 km
+radius each case queries. Both numbers are asserted in
+`tests/acceptance/photo-cases.test.ts`, from the index alone, before a cell is
+read.
+
+Within 25 km it holds 15 named summits around the lookout and 32 around the
+Railroad Ridge camera, including the authentic numbered White Cloud summits
+(`WCP-1` … `WCP-10`) and Castle Peak 3 603 m, the range high point.
+
+`--classes` carries `ridge` here and it changed nothing that matters: **Railroad
+Ridge itself is not in this dataset**, because ridges carry no `ele` tag and the
+importer drops elevation-less records rather than invent a height (290 dropped
+in this box). That is the correct behaviour and it is why the `railroad-ridge`
+photo case takes its ground elevation from SRTM and cross-checks it against a
+published figure, instead of citing a summit record that does not exist.
+
 ## Total committed size
 
-`fixtures/peaks/` is **3.3 MB** for all four regions (8 428 summits in 51
-cells): california 1.3 MB, cascades 1.1 MB, zermatt 672 kB, fort-william 268 kB.
-Four regions, not a continent — and every one of them cost less than a tenth of
-a percent of the release to fetch.
+`fixtures/peaks/` is **3.6 MB** for all five regions (9 137 summits in 63
+cells): california 1.3 MB, cascades 1.1 MB, zermatt 672 kB, idaho-central
+300 kB, fort-william 268 kB. Five regions, not a continent — and every one of
+them cost less than a tenth of a percent of the release to fetch.
 
 ## Where the numbers come from
 
