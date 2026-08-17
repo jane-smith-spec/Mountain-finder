@@ -122,3 +122,54 @@ at the two curves side by side. If they are obviously different shapes, cause 1 
 are the same shape at a different scale, cause 2 or 3. That is a small piece of work and it is
 the correct next step — considerably better than continuing to sweep parameters, which is how
 one ends up tuning until something agrees.
+
+## The comparison, and it settles it: cause 1
+
+Rather than eyeballing two curves, both were converted to the same units — altitude angle —
+where the answer is unambiguous.
+
+```
+PHOTO skyline (490 confident columns)
+  altitude range   −4.98° … 12.58°     SPAN 17.56°
+
+TERRAIN profile (720 bearings, the whole 360°)
+  altitude range   −1.94° …  9.04°     SPAN 10.97°
+
+Terrain relief inside a 69° frame, by heading — the most any real view could show:
+  000°  8.63°     150°  7.38°     240°  5.38°
+  030°  4.08°     180°  7.40°     270°  5.28°
+  060°  5.09°     210°  5.38°     300°  1.66°
+```
+
+**The extracted boundary spans 17.56° of altitude. The greatest relief any 69° frame could
+contain from this viewpoint is 8.63°, and the entire 360° horizon spans only 10.97°.**
+
+The photo's "skyline" therefore covers roughly **twice the vertical extent that a real skyline
+can**, from anywhere on that ridge, in any direction. It cannot be one distant horizon.
+
+This is decisive because **span is invariant to the two things we do not know**: an unmodelled
+pitch shifts the whole range without changing its span, and a wrong focal length scales it
+roughly uniformly. Neither can turn 8.63° into 17.56°.
+
+So the extracted curve is **two different edges stitched together** — the distant White Clouds
+skyline across part of the frame, and the near tundra ridge crossing the foreground in the rest.
+Correlating that against a genuine horizon profile cannot succeed, which is exactly why every
+window returned `no-correlation` rather than a plausible wrong heading.
+
+**Hypothesis 1 confirmed; 2, 3 and 4 are not needed to explain the failure** (though pitch and
+crop may still be present, they are not the cause).
+
+## The actual defect
+
+`fitStep` finds the best single sky-above-terrain split per column, independently. It has no
+notion that the boundary it returns should be *continuous with its neighbours*, or that a
+foreground ridge and a distant skyline are different surfaces. In a frame where a near ridge
+rises across the lower half — the ordinary composition for a photograph taken while standing on
+a broad ridge — some columns lock onto the far skyline and others onto the near edge, and the
+per-column confidence stays high for both because each is individually a good step.
+
+The fix is a continuity or segmentation constraint across columns, not a better per-column step
+fit. `agreement01` already measures neighbour agreement and is *reported*, but it does not
+constrain the choice.
+
+That is a real piece of work, and it now has a real photograph to be measured against.
