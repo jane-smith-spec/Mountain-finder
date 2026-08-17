@@ -79,3 +79,46 @@ Merriam Peak         44.05244, −114.58086   3334 m
 **Still not established: the camera position.** A screenshot places the pin relative to lakes,
 but reading a coordinate off it by eye would be exactly the kind of invented number this project
 refuses elsewhere. The mapping app showing that pin can give the number directly.
+
+## Photo 2 — position established, 2026-08-17
+
+Supplied by the photographer: **44°08'20.4"N 114°35'44.5"W** → **44.13900, −114.59569**.
+
+```
+SRTM N44W115 at that coordinate:  3166.0 m  =  10,387 ft
+```
+
+Railroad Ridge Road is known to run at roughly 10,400 ft, so the DEM and the stated location
+agree independently — the same kind of cross-check that validated Sunset Mountain to 0.7 m.
+
+**32 named summits within 25 km.** The nearest, by bearing from the camera:
+
+```
+WCP-10                205°    2.6 km   3378 m
+Calkens Peak          225°    3.2 km   3509 m
+WCP-9                 219°    3.9 km   3433 m
+Lee Peak              213°    4.8 km   3458 m
+White Cloud Peaks     209°    5.3 km   3438 m
+Mount Andrus          191°    5.4 km   3438 m
+Lonesome Lake Peak    190°    7.2 km   3445 m
+Castle Peak           176°   11.1 km   3603 m
+```
+
+The "WCP-*n*" names are the White Cloud Peaks' authentic numbered summits, which is a good sign
+the Overture/OSM data for this range is real rather than approximate.
+
+The photograph looks across a broad tundra foreground at a jagged skyline, consistent with the
+southward arc (roughly 170–230°) where Castle Peak, Lee Peak, Mount Andrus and the WCP summits
+all sit. **The heading is still unmeasured** — and recovering it from terrain alone is precisely
+what `src/cv`'s aligner exists to do, on the one photograph the extractor reads well (98.8%
+coverage).
+
+### What is now established for this case
+- position — from the photographer, cross-checked against SRTM to the foot
+- terrain — `N44W115`, `N44W116` fetched, 0 voids
+- summits — 32 within 25 km, from Overture/OSM with tagged elevations
+- readable skyline — 506 of 512 columns, mean confidence 0.575
+
+### What remains
+- the heading, to be **recovered** rather than supplied
+- which specific summits appear in the frame, to become the must-see assertion
