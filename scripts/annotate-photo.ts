@@ -42,6 +42,8 @@ import { dirname } from 'node:path';
 
 import { decode as decodeJpeg } from 'jpeg-js';
 
+import { isHeif } from '../src/exif/heif.js';
+
 import { interpolateHorizonAltitudeDeg } from '../src/core/horizon.js';
 import { cameraPoseFromFocalLength } from '../src/core/projection.js';
 import type { CameraPose } from '../src/core/types.js';
@@ -213,11 +215,61 @@ async function peakSourceFor(region: string, radiusKm: number): Promise<PeakSour
   }
 }
 
+/** Decoded pixels, from a JPEG or straight from a HEIC. */
+interface DecodedPhoto {
+  readonly width: number;
+  readonly height: number;
+  readonly data: Uint8Array | Uint8ClampedArray;
+  /** True when the bytes had to be re-encoded to reach the compositor. */
+  readonly wasHeif: boolean;
+}
+
+/**
+ * Decode the photograph.
+ *
+ * HEIC is decoded through `heic-decode` (libheif compiled to wasm), imported
+ * lazily so the absence of a decoder is a sentence rather than a stack trace,
+ * and so nothing pays for it on the JPEG path. It is a devDependency and a
+ * SCRIPT-ONLY one: nothing under src/ imports it, and reading a HEIC's METADATA
+ * needs no decoder at all — src/exif/heif.ts does that from the bytes.
+ */
+async function decodePhoto(bytes: Buffer, path: string): Promise<DecodedPhoto> {
+  if (!isHeif(new Uint8Array(bytes))) {
+    const decoded = decodeJpeg(bytes, { useTArray: true });
+    return { width: decoded.width, height: decoded.height, data: decoded.data, wasHeif: false };
+  }
+  try {
+    const { default: decodeHeic } = await import('heic-decode');
+    const image = await decodeHeic({ buffer: bytes as unknown as ArrayBufferView & Uint8Array });
+    return { width: image.width, height: image.height, data: image.data, wasHeif: true };
+  } catch (cause) {
+    throw new Error(
+      `${path} is a HEIF file and could not be decoded: ` +
+        `${cause instanceof Error ? cause.message : String(cause)}\n` +
+        '  Install the decoder with:  npm install --save-dev heic-decode\n' +
+        '  or convert the photograph to JPEG first. Note that its METADATA is\n' +
+        '  readable either way — only the pixels need this.',
+    );
+  }
+}
+
 /** The photograph itself as the backdrop — its own bytes, as a data URL. */
-async function photoDataUrl(path: string): Promise<string> {
-  const bytes = await readFile(path);
-  const mime = path.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
-  return `data:${mime};base64,${bytes.toString('base64')}`;
+async function photoDataUrl(path: string, decoded: DecodedPhoto): Promise<string> {
+  if (!decoded.wasHeif) {
+    const bytes = await readFile(path);
+    const mime = path.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+    return `data:${mime};base64,${bytes.toString('base64')}`;
+  }
+  // A browser cannot display HEIC, so the decoded pixels are re-encoded as a
+  // JPEG for the backdrop. This is the ONLY lossy step in the run and it
+  // touches the picture alone — every number came from the metadata and the
+  // terrain, and none of them passes through here.
+  const { encode: encodeJpeg } = await import('jpeg-js');
+  const encoded = encodeJpeg(
+    { data: Buffer.from(decoded.data), width: decoded.width, height: decoded.height },
+    92,
+  );
+  return `data:image/jpeg;base64,${Buffer.from(encoded.data).toString('base64')}`;
 }
 
 function reportScene(scene: AnnotatedScene, limit = 40): void {
@@ -252,7 +304,7 @@ async function main(): Promise<void> {
 
   // Pixels from the photo, metadata from wherever it survived.
   const photoBytes = await readFile(options.photoPath);
-  const decoded = decodeJpeg(photoBytes, { useTArray: true });
+  const decoded = await decodePhoto(photoBytes, options.photoPath);
   const exifPath = options.exifPath ?? options.photoPath;
   const exif = await extractPhotoExif(new Uint8Array(await readFile(exifPath)));
 
@@ -335,7 +387,7 @@ async function main(): Promise<void> {
   };
   const layout = layoutOverlay(overlayScene);
   const overlaySvg = buildOverlaySvgFromLayout(layout);
-  const backdropDataUrl = await photoDataUrl(options.photoPath);
+  const backdropDataUrl = await photoDataUrl(options.photoPath, decoded);
 
   line();
   line('IMAGE');

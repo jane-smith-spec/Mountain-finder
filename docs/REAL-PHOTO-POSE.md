@@ -151,3 +151,96 @@ until now was a small synthetic silhouette; the first real photograph blew the c
 4 MB. `composite.ts` had always done it with a loop, and the page carried a second copy that
 did not. Fixed by deleting the copy, and the compositor now takes a photograph directly rather
 than wrapping it in an SVG and base64-encoding it twice.
+
+
+---
+
+# Part 2 — two more viewpoints, and the library bug that was hiding them
+
+**2026-08-17, later.** Five more camera originals arrived. Three of them reported **no metadata at
+all**, and that turned out to be a defect in this repository's reading of them rather than
+anything about the files.
+
+## The bug: an arbitrary 50-byte limit
+
+`exifr`'s HEIF detection is two lines:
+
+```js
+let size = file.getUint16(2);   // low half of the ftyp box size
+if (size > 50) return false;
+```
+
+Every iPhone photograph carrying an HDR **gain map** — compatible brands `mif1 MiHB MiHA heix …`
+— has a 52-byte `ftyp` box. Across the seven HEICs supplied to this project:
+
+```
+ftyp 44 bytes    IMG_3761 / 3762 / 3763     read correctly
+ftyp 32 bytes    IMG_5603                   read correctly
+ftyp 52 bytes    IMG_7270 / 6559 / 6594     REFUSED — "Unknown file format"
+```
+
+Nothing about the refused three is unusual. They are ordinary photographs from a recent iPhone
+with HDR on, which is the default setting.
+
+**This is the worst shape of bug this project recognises**, and it is worth being precise about
+why. A photograph whose GPS a share sheet stripped and a photograph whose GPS is sitting in the
+file unread were *indistinguishable*: both arrived as `{}`. The app would have told someone to
+type in a position it was holding in memory, with exactly the same confidence either way. It is
+the same failure as CV‑1 and X‑1 — a confident answer from a read that did not happen.
+
+`src/exif/heif.ts` now walks the container itself (ftyp → meta → iinf/infe → iloc), finds the
+item whose type is `Exif`, and hands the TIFF block to exifr. **The tag decoding was never the
+problem.** Every point where the container says something the reader does not understand yields
+a named failure, and `PhotoExif.unreadable` carries it up to a distinct `container-unreadable`
+prompt — never conflated with "this photo records no location".
+
+Also worth recording: `IMG_1371.HEIC` is a **JPEG with a `.HEIC` extension**. The reader says
+`not-heif`, correctly — the extension is not evidence, the `ftyp` box is. Its GPS IFD survives
+carrying only `GPSVersionID`, `GPSAltitudeRef` and `GPSHPositioningError`: a third distinct
+stripping mode, alongside "everything gone" and "everything intact".
+
+## Two new viewpoints — and the chain works cold
+
+Both refused files carry a full pose, both sit on SRTM tiles already in `data/tiles/`, and both
+are inside the committed `idaho-central` peak region. Neither had ever been seen by any part of
+this system.
+
+| | IMG_7270 | IMG_6594 |
+|---|---|---|
+| position | 43.77148 N, 116.08862 W | 44.08528 N, 115.90669 W |
+| heading | **280.336° T** | **253.046° T** |
+| lens | 24 mm-eq, hFOV 73.74° | 24 mm-eq, hFOV 73.74° |
+| frame | 8064 × 6048 | 8064 × 6048 |
+| GPS altitude vs SRTM | 2313.1 m vs 2308.3 m (**+4.8 m**) | 1444.1 m vs 1453.1 m (**−9.0 m**) |
+| summits within 30 km | 41 | 28 |
+| labelled in frame | **7** | **1** |
+
+The GPS-altitude agreement is the useful number: a phone's altitude is the weakest thing it
+records, and landing within 5 and 9 m of what the DEM reads at the phone's own stated coordinate
+means the position is right to well inside a DEM posting. Neither figure was tuned; both are the
+first run.
+
+**IMG_7270** (Bogus Basin, looking WNW over the Boise front) is the strongest single image this
+project has produced. Seven labelled summits across a 74° frame, the horizon line tracking the
+distant hazy skyline rather than the near foreground ridge, and **Prospect Peak drawn greyed and
+captioned `summit obscured`** — decision D8's self-occlusion rule firing on a real photograph for
+the first time, on a summit that genuinely stands behind its own shoulder.
+
+**IMG_6594** looks WSW across a valley. One summit in frame, Charters Mountain at 10.2 km, and
+the horizon line follows the crest along the whole ridge and then drops correctly into the
+saddle where the valley fog sits.
+
+## What three viewpoints agree about
+
+In all three photographs the drawn horizon sits **slightly below** the true skyline. Only
+Railroad Ridge has been measured (−3.52°, Part 1); the other two are eyeball readings and are
+recorded as such. But the direction is the same every time, and the reason is structural rather
+than a bug: **EXIF carries no pitch**, `--pitch` defaults to zero, and a hand-held photograph of
+mountains is nearly always tilted slightly down — that is how the foreground gets into the
+frame. Anyone reading these images should read the vertical offset as the missing pitch, not as
+a terrain error.
+
+Neither new viewpoint is an acceptance case. They have one position source each and no
+independent cross-check beyond the DEM, no summit has been identified by anyone who knows the
+ground, and building a case on that would repeat the circularity the Railroad Ridge case was
+carefully built to avoid. They are demonstrations, and this document is where they are recorded.
