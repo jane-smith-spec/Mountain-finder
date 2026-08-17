@@ -529,3 +529,79 @@ export function interpolateHorizonAltitudeDeg(
   const { before, after, weight } = bracketAtBearing(profile, bearingDeg);
   return before.altitudeDeg + weight * (after.altitudeDeg - before.altitudeDeg);
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * The near field: terrain the DEM cannot resolve
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/** One bearing whose horizon rests on ground too close to be resolvable. */
+export interface NearFieldHorizon {
+  readonly bearingDeg: number;
+  readonly distanceKm: number;
+  readonly altitudeDeg: number;
+  readonly elevationM: number;
+}
+
+export interface NearFieldReport {
+  /** The radius the caller declared unresolvable, metres. */
+  readonly radiusM: number;
+  readonly bearings: readonly NearFieldHorizon[];
+  /** Share of the profile's bearings affected, 0–1. */
+  readonly fraction01: number;
+  /** Highest altitude any of them claims — the height of the phantom wall. */
+  readonly maxAltitudeDeg: number;
+}
+
+/**
+ * Bearings whose horizon is set by terrain inside `radiusM`.
+ *
+ * ── WHY THIS IS WORTH A FUNCTION ───────────────────────────────────────────
+ * A DEM cannot say whether the ground twenty metres away is above or below
+ * your eye. Its posting is 30 m, it smooths a ridge crest toward the saddle on
+ * either side, and the observer's own position is uncertain by a comparable
+ * distance. So a horizon reported at 90 m is not a measurement of anything; it
+ * is the sampling grid talking.
+ *
+ * Left unreported it is invisible AND decisive. Measured at Railroad Ridge
+ * (docs/NEAR-FIELD.md): 154 of the 169 bearings in a 41° frame had their
+ * horizon at **90 m**, on a cell reading 3.1 m above the eye, producing a
+ * uniform ~1.9° wall. Castle Peak — plainly visible in the photograph, 11 km
+ * away — cleared it by 0.065°. Nothing in the output said the number it
+ * cleared was an artefact of the grid rather than a ridge.
+ *
+ * This reports; it does not filter. Whether to exclude the near field is
+ * `SweepConfig.minRangeM`, and it is a decision with consequences for every
+ * verdict, so it is left to the caller and never made silently here.
+ *
+ * @param radiusM below which terrain is treated as unresolvable. A caller with
+ *   no better information should use a few DEM postings — for SRTM1 that is
+ *   ~30 m each — and widen it by its own position uncertainty.
+ */
+export function nearFieldHorizons(
+  profile: HorizonProfile,
+  radiusM: number,
+): NearFieldReport {
+  const bearings: NearFieldHorizon[] = [];
+  if (!(radiusM > 0) || profile.length === 0) {
+    return { radiusM: Math.max(0, radiusM), bearings, fraction01: 0, maxAltitudeDeg: 0 };
+  }
+
+  let maxAltitudeDeg = Number.NEGATIVE_INFINITY;
+  for (const point of profile) {
+    if (point.distanceKm * 1000 >= radiusM) continue;
+    bearings.push({
+      bearingDeg: point.bearingDeg,
+      distanceKm: point.distanceKm,
+      altitudeDeg: point.altitudeDeg,
+      elevationM: point.elevationM,
+    });
+    if (point.altitudeDeg > maxAltitudeDeg) maxAltitudeDeg = point.altitudeDeg;
+  }
+
+  return {
+    radiusM,
+    bearings,
+    fraction01: bearings.length / profile.length,
+    maxAltitudeDeg: bearings.length === 0 ? 0 : maxAltitudeDeg,
+  };
+}

@@ -44,7 +44,7 @@ import { decode as decodeJpeg } from 'jpeg-js';
 
 import { isHeif } from '../src/exif/heif.js';
 
-import { interpolateHorizonAltitudeDeg } from '../src/core/horizon.js';
+import { interpolateHorizonAltitudeDeg, nearFieldHorizons } from '../src/core/horizon.js';
 import { cameraPoseFromFocalLength } from '../src/core/projection.js';
 import type { CameraPose } from '../src/core/types.js';
 import { extractPhotoExif } from '../src/exif/extract.js';
@@ -71,6 +71,8 @@ interface Options {
   readonly rollDeg: number | undefined;
   readonly rangeKm: number;
   readonly rangeStepM: number;
+  readonly minRangeM: number;
+  readonly nearFieldRadiusM: number;
   readonly bearingStepDeg: number;
   readonly queryRadiusKm: number;
   readonly writePng: boolean;
@@ -86,6 +88,8 @@ function parseArgs(argv: readonly string[]): Options {
   let rollDeg: number | undefined;
   let rangeKm = 30;
   let rangeStepM = 90;
+  let minRangeM = 0;
+  let nearFieldRadiusM = 150;
   let bearingStepDeg = 0.25;
   let queryRadiusKm = 30;
   let writePng = true;
@@ -113,6 +117,8 @@ function parseArgs(argv: readonly string[]): Options {
       case '--roll': rollDeg = number(index + 1, arg); index += 1; break;
       case '--range-km': rangeKm = number(index + 1, arg); index += 1; break;
       case '--range-step-m': rangeStepM = number(index + 1, arg); index += 1; break;
+      case '--min-range-m': minRangeM = number(index + 1, arg); index += 1; break;
+      case '--near-field-m': nearFieldRadiusM = number(index + 1, arg); index += 1; break;
       case '--bearing-step': bearingStepDeg = number(index + 1, arg); index += 1; break;
       case '--radius-km': queryRadiusKm = number(index + 1, arg); index += 1; break;
       case '--no-png': writePng = false; break;
@@ -124,7 +130,7 @@ function parseArgs(argv: readonly string[]): Options {
 
   return {
     photoPath, exifPath, peaksRegion, outPath, headingDeg, pitchDeg, rollDeg,
-    rangeKm, rangeStepM, bearingStepDeg, queryRadiusKm, writePng,
+    rangeKm, rangeStepM, minRangeM, nearFieldRadiusM, bearingStepDeg, queryRadiusKm, writePng,
   };
 }
 
@@ -148,6 +154,11 @@ function usage(): void {
   line('  --roll DEG         camera roll about the optical axis (default 0)');
   line('  --radius-km N      peak query radius (default 30)');
   line('  --range-km N  --range-step-m N  --bearing-step N   terrain sweep');
+  line('  --min-range-m N    do not sample terrain closer than this (default 0).');
+  line('                     A DEM cannot resolve the ground beside you; using it');
+  line('                     builds a wall in front of the camera. See the');
+  line('                     NEAR FIELD line in the report and docs/NEAR-FIELD.md.');
+  line('  --near-field-m N   radius the report calls unresolvable (default 150)');
   line('  --no-png           text report only');
   line();
   line('The pose comes from EXIF. There are no defaults for position, heading or');
@@ -360,12 +371,25 @@ async function main(): Promise<void> {
       sweep: {
         bearingStepDeg: options.bearingStepDeg,
         rangeStepM: options.rangeStepM,
+        minRangeM: options.minRangeM,
         maxRangeKm: options.rangeKm,
       },
       peakRadiusKm: options.queryRadiusKm,
     },
   });
 
+  const near = nearFieldHorizons(scene.horizon, options.nearFieldRadiusM);
+  if (near.bearings.length > 0) {
+    line();
+    line('  NEAR FIELD — READ THIS BEFORE TRUSTING THE HORIZON');
+    line(`  ${near.bearings.length} of ${scene.horizon.length} bearings ` +
+      `(${(near.fraction01 * 100).toFixed(0)}%) have their horizon within ` +
+      `${near.radiusM} m of the camera, reaching ${near.maxAltitudeDeg.toFixed(3)} deg.`);
+    line('  A DEM cannot resolve the ground that close: its posting is ~30 m, it');
+    line('  smooths a ridge crest, and the camera position is uncertain by a');
+    line('  comparable distance. Those bearings are the sampling grid talking, not');
+    line('  terrain. Re-run with --min-range-m to exclude them and compare.');
+  }
   line(`  observer ground ${scene.observer.groundElevationM.toFixed(1)} m, eye ` +
     `${(scene.observer.groundElevationM + scene.observer.eyeHeightM).toFixed(1)} m` +
     ` (${scene.observerResolution.groundElevationSource})`);

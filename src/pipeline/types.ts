@@ -46,6 +46,34 @@ export interface SweepConfig {
   readonly bearingStepDeg: number;
   /** Spacing of samples along each ray, metres of ground distance. */
   readonly rangeStepM: number;
+  /**
+   * Ground distance below which terrain is NOT sampled at all. Default 0.
+   *
+   * ── WHY THIS EXISTS ──────────────────────────────────────────────────────
+   * A DEM cannot resolve the ground immediately around the observer, and using
+   * it anyway produces a wall in front of the camera that hides everything.
+   * Measured at Railroad Ridge (docs/NEAR-FIELD.md): the camera's own cell
+   * reads 3168.3 m, and the cells 60–90 m south read 3173–3174 m — three to
+   * four metres ABOVE the eye. The pipeline duly reported the horizon for the
+   * whole centre of the frame as terrain 90 m away at ~1.9°, and Castle Peak,
+   * plainly visible in the photograph at 11 km, cleared that phantom by
+   * **0.065°**. A slightly different position, or a metre of eye height, and it
+   * would have been declared hidden.
+   *
+   * The cause is not a bug in the DEM: it is that a 30 m posting smooths a
+   * ridge crest, so a point ON the crest can sample below the cells beside it —
+   * and the observer's position is itself uncertain by a comparable distance.
+   * Within a few postings, "which is higher, me or that?" is a question the
+   * data cannot answer.
+   *
+   * ── WHY THE DEFAULT IS 0 ─────────────────────────────────────────────────
+   * Because a non-zero default would silently change every visibility verdict
+   * in the repository, and this is a correctness question that deserves to be
+   * decided per caller with the reasoning visible. What ships by default
+   * instead is the REPORT — `nearFieldHorizons` names the bearings whose
+   * horizon rests on unresolvable ground, so the artefact is never invisible.
+   */
+  readonly minRangeM: number;
   /** Longest ground distance sampled along a ray. */
   readonly maxRangeKm: number;
   /** First ray's bearing. Default 0. */

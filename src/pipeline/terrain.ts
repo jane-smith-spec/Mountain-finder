@@ -46,6 +46,10 @@ import type { SweepConfig, SweepReport } from './types.js';
 export const DEFAULT_SWEEP: SweepConfig = {
   bearingStepDeg: 1,
   rangeStepM: 90,
+  // 0 on purpose — see SweepConfig.minRangeM. The near-field artefact is
+  // REPORTED by default, not silently excluded, because excluding it changes
+  // visibility verdicts and that is a caller's decision to make in the open.
+  minRangeM: 0,
   maxRangeKm: 30,
   startBearingDeg: 0,
   spanDeg: 360,
@@ -59,6 +63,15 @@ export function resolveSweep(partial: Partial<SweepConfig> = {}): SweepConfig {
   }
   if (!(sweep.rangeStepM > 0)) {
     throw new RangeError(`rangeStepM must be > 0, received ${sweep.rangeStepM}`);
+  }
+  if (!(sweep.minRangeM >= 0)) {
+    throw new RangeError(`minRangeM must be >= 0, received ${sweep.minRangeM}`);
+  }
+  if (sweep.minRangeM >= sweep.maxRangeKm * 1000) {
+    throw new RangeError(
+      `minRangeM (${sweep.minRangeM} m) is at or beyond maxRangeKm ` +
+        `(${sweep.maxRangeKm} km), so every ray would be empty`,
+    );
   }
   if (!(sweep.maxRangeKm > 0)) {
     throw new RangeError(`maxRangeKm must be > 0, received ${sweep.maxRangeKm}`);
@@ -96,7 +109,16 @@ export function sweepRangesM(sweep: SweepConfig): readonly number[] {
   const maxRangeM = sweep.maxRangeKm * 1000;
   const stepCount = Math.floor(maxRangeM / sweep.rangeStepM);
   const ranges: number[] = [];
-  for (let step = 1; step <= stepCount; step += 1) ranges.push(step * sweep.rangeStepM);
+  // The grid itself is unchanged by `minRangeM`: steps stay on multiples of
+  // `rangeStepM` and the near ones are simply not visited. Shifting the grid
+  // to start at `minRangeM` would make two runs with different near limits
+  // sample different ground at every range, which would make them
+  // incomparable for no gain.
+  for (let step = 1; step <= stepCount; step += 1) {
+    const distanceM = step * sweep.rangeStepM;
+    if (distanceM < sweep.minRangeM) continue;
+    ranges.push(distanceM);
+  }
   return ranges;
 }
 
