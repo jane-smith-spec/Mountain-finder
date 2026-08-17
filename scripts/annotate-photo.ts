@@ -52,6 +52,7 @@ import type { PhotoExif } from '../src/exif/types.js';
 import { annotateScene } from '../src/pipeline/annotate.js';
 import type { AnnotatedScene, PeakSource } from '../src/pipeline/types.js';
 import { loadPeakCellIndex } from '../src/providers/peak-directory.js';
+import { suggestPoseTrim } from '../src/pipeline/cv-alignment.js';
 import { DirectoryTileStore } from '../src/providers/tile-directory.js';
 import { TileElevationProvider } from '../src/providers/tile-elevation.js';
 import { buildOverlaySvgFromLayout, layoutOverlay } from '../src/render/index.js';
@@ -75,6 +76,7 @@ interface Options {
   readonly nearFieldRadiusM: number;
   readonly bearingStepDeg: number;
   readonly queryRadiusKm: number;
+  readonly autoTrim: boolean;
   readonly writePng: boolean;
 }
 
@@ -92,6 +94,7 @@ function parseArgs(argv: readonly string[]): Options {
   let nearFieldRadiusM = 150;
   let bearingStepDeg = 0.25;
   let queryRadiusKm = 30;
+  let autoTrim = false;
   let writePng = true;
 
   const value = (index: number, flag: string): string => {
@@ -121,6 +124,7 @@ function parseArgs(argv: readonly string[]): Options {
       case '--near-field-m': nearFieldRadiusM = number(index + 1, arg); index += 1; break;
       case '--bearing-step': bearingStepDeg = number(index + 1, arg); index += 1; break;
       case '--radius-km': queryRadiusKm = number(index + 1, arg); index += 1; break;
+      case '--auto-trim': autoTrim = true; break;
       case '--no-png': writePng = false; break;
       default:
         if (arg.startsWith('--')) throw new Error(`Unknown flag ${arg}`);
@@ -130,7 +134,8 @@ function parseArgs(argv: readonly string[]): Options {
 
   return {
     photoPath, exifPath, peaksRegion, outPath, headingDeg, pitchDeg, rollDeg,
-    rangeKm, rangeStepM, minRangeM, nearFieldRadiusM, bearingStepDeg, queryRadiusKm, writePng,
+    rangeKm, rangeStepM, minRangeM, nearFieldRadiusM, bearingStepDeg, queryRadiusKm, autoTrim,
+    writePng,
   };
 }
 
@@ -374,27 +379,62 @@ async function main(): Promise<void> {
   line('TERRAIN');
   line(`  ${FULL_TILE_DIR}, swept ${options.rangeKm} km at ${options.bearingStepDeg} deg / ${options.rangeStepM} m`);
 
-  const scene = await annotateScene({
-    // 1.6 m: a standing photographer. Stated, not defaulted silently —
-    // `annotateScene` requires it and there is nothing in EXIF that knows it.
-    observer: { lat, lon, eyeHeightM: 1.6 },
-    camera,
-    elevation,
-    peaks,
-    config: {
-      sweep: {
-        bearingStepDeg: options.bearingStepDeg,
-        rangeStepM: options.rangeStepM,
-        minRangeM: options.minRangeM,
-        maxRangeKm: options.rangeKm,
+  const buildScene = (pose: typeof camera): ReturnType<typeof annotateScene> =>
+    annotateScene({
+      // 1.6 m: a standing photographer. Stated, not defaulted silently —
+      // `annotateScene` requires it and there is nothing in EXIF that knows it.
+      observer: { lat, lon, eyeHeightM: 1.6 },
+      camera: pose,
+      elevation,
+      peaks,
+      config: {
+        sweep: {
+          bearingStepDeg: options.bearingStepDeg,
+          rangeStepM: options.rangeStepM,
+          minRangeM: options.minRangeM,
+          maxRangeKm: options.rangeKm,
+        },
+        peakRadiusKm: options.queryRadiusKm,
+        // P1.6: verdicts measured against an occluder inside this radius carry
+        // the DEM's local disagreement as an uncertainty band, and a peak whose
+        // verdict flips inside it is reported `marginal` rather than decided.
+        nearFieldRadiusM: options.nearFieldRadiusM,
       },
-      peakRadiusKm: options.queryRadiusKm,
-      // P1.6: verdicts measured against an occluder inside this radius carry
-      // the DEM's local disagreement as an uncertainty band, and a peak whose
-      // verdict flips inside it is reported `marginal` rather than decided.
-      nearFieldRadiusM: options.nearFieldRadiusM,
-    },
-  });
+    });
+
+  let scene = await buildScene(camera);
+
+  if (options.autoTrim) {
+    line();
+    line('AUTO-TRIM (P7.4 / CV-10)');
+    if (scene.alignmentHorizon === undefined) {
+      line('  unavailable: run with --near-field-m > 0 so the pipeline builds the');
+      line('  near-field-free profile the aligner is allowed to match against.');
+    } else {
+      const suggestion = suggestPoseTrim({
+        image: { width: decoded.width, height: decoded.height, data: decoded.data },
+        scene: { camera, horizon: scene.alignmentHorizon },
+      });
+      if (suggestion.status === 'declined') {
+        line(`  declined (${suggestion.reason}): ${suggestion.detail}`);
+        line('  The pose below is the EXIF pose, un-trimmed.');
+      } else {
+        const { alignment } = suggestion;
+        line(`  skyline match suggests heading ${suggestion.headingTrimDeg >= 0 ? '+' : ''}` +
+          `${suggestion.headingTrimDeg.toFixed(3)} deg, pitch ` +
+          `${suggestion.pitchTrimDeg >= 0 ? '+' : ''}${suggestion.pitchTrimDeg.toFixed(3)} deg ` +
+          `(searched within the ±${suggestion.compassBudgetDeg} deg compass budget)`);
+        line(`  ${alignment.status}${alignment.concerns.length === 0 ? '' : ` — concerns: ${alignment.concerns.join(', ')}`}`);
+        line(`  score ${alignment.diagnostics.score.toFixed(3)}, margin ` +
+          `${alignment.diagnostics.margin.toFixed(3)}, residual ` +
+          `${alignment.diagnostics.residualRmsDeg.toFixed(3)} deg over ` +
+          `${(alignment.diagnostics.usedFraction01 * 100).toFixed(0)}% of columns`);
+        line('  Re-running the scene at the corrected pose. The trims are APPLIED and');
+        line('  visible here — nothing is corrected silently.');
+        scene = await buildScene(alignment.correctedCamera);
+      }
+    }
+  }
 
   const near = nearFieldHorizons(scene.horizon, options.nearFieldRadiusM);
   if (near.bearings.length > 0) {

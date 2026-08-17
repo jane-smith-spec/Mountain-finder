@@ -20,9 +20,9 @@ product after v2.0 shipped.
 | 4b — D8 obscured summits | ✅ **done** | Split by *what* hides the summit; crest fix [W2-1](docs/FINDINGS.md) |
 | 5 — Web app | ✅ **done** | Real overlay in Chromium; Matterhorn within 12 px of hand-derived pixels |
 | 6 — Ground truth | ✅ **done** | 153 acceptance assertions, 0 todo. Open case-file notes: [X-4](docs/FINDINGS.md) |
-| 9 — Peak coverage | ✅ **done** | 8 528 Overture summits in 4 regions; P9.4's open question answered — elevations exist |
+| 9 — Peak coverage | ✅ **done** | 9 237 Overture summits in 5 regions (read by the app since Q8); P9.4's open question answered — elevations exist |
 | 10 — Deployment | ✅ **done** | `npm run test:deploy`, 5 assertions, every request same-origin |
-| **7 — CV alignment (v2.1)** | 🔨 **in progress** | P7.1–P7.3 built and proved on synthetic and real-SRTM profiles. **P7.4 not done.** Against a real photograph with a solved pose the aligner recovers heading to **0.207°** and pitch to only **1.97°** — [CV-5, CV-6](docs/FINDINGS.md). A photograph is now annotated end to end via `npm run annotate` |
+| **7 — CV alignment (v2.1)** | 🔨 **in progress** | P7.1–P7.4 built and proved; **P7.4 wired into the app 2026-08-17** (auto-align proposal + Apply, refusals shown). Under the CV-10 policies the aligner recovers heading to **0.21°** — better than the phone's compass — and pitch to **0.82°** on the real frame with a solved pose. P7.5 remains: the sky/snow cue for wide frames ([CV-2, CV-8, CV-10](docs/FINDINGS.md)) |
 | **8 — Live view (v3)** | ⛔ **not started** | No code exists. Deferred by decision D5, after v2.1 |
 
 Open work is tracked in [TODO.md](TODO.md); every confirmed finding is indexed in
