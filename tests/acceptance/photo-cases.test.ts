@@ -103,8 +103,14 @@ function observerElevationM(photoCase: PhotoCase): Promise<number> {
   const started = (async (): Promise<number> => {
     const terrain = await loadCaseTerrain(photoCase.terrainWindowCaseId);
     const [reading] = await terrain.elevation.fetchElevations([origin(photoCase)]);
-    if (reading === undefined) {
-      throw new Error(`${photoCase.id}: the committed window has no data at the observer`);
+    // `elevationM` is nullable: a void, or a coordinate outside the cut, reads
+    // as "no data" rather than as a number. Either would make every elevation
+    // assertion below meaningless, so it fails loudly here instead.
+    if (reading === undefined || reading.elevationM === null) {
+      throw new Error(
+        `${photoCase.id}: the committed window has no elevation at the observer ` +
+          `(${photoCase.observer.lat}, ${photoCase.observer.lon})`,
+      );
     }
     return reading.elevationM;
   })();
