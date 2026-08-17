@@ -13,7 +13,6 @@ write-ups are in the three `REVIEW-FINDINGS*.md` files and are not repeated here
 
 | # | Item | What it needs |
 |---|---|---|
-| **Q9** | Re-measure the DEPLOY.md size table | "What it costs" predates the four committed regions and the attribution footer. It has **no row for `/peaks/`** at all (3.2 MB staged — california 1.26, cascades 1.02, zermatt 0.67, fort-william 0.26 MB), and nothing states what one *session* costs once the app fetches cells rather than bundling them — which is the number a deployer budgets with. The bundle figure was 302 KB and is now 318.40 kB / 104.34 kB gzipped; the windows-only demo row moved 1.77 → 1.78 MB. Those two were measured; the `/peaks/` row only means something after Q8 |
 | **P7.5** | The extractor on real photographs | **Re-framed by CV-10: the extractor is exonerated at this depth.** The diagnostic overlay shows the extracted curve riding the true crest; the ~40-column snow-band lock is not the pitch limiter (masking it changes pitch by 0.28° and makes the heading IMPOSTOR stronger), and the pitch target of the old check is met by the profile policy (near-field out → −3.45…−3.73 vs −3.52 solved). What remains here is CV-2/CV-8 unchanged: the 24 mm and 14 mm frames still lose the sky entirely to snowfield/tundra, and need a texture or gradient cue before wide frames align at all. The snow-band lock is a cosmetic defect of the 48 mm extraction, worth fixing with the same cue, no longer load-bearing ([docs/CV-REAL-PHOTO-FINDING.md](docs/CV-REAL-PHOTO-FINDING.md) § CV-10) |
 | **P7.7** | Pitch is unrecorded and always wrong at zero | EXIF carries no pitch, `--pitch` defaults to 0, and in all four annotated photographs the drawn horizon sits wrong because of it — Railroad Ridge −3.52°, and the Bogus Basin 480 mm frame needed a hand-supplied +4.3° before any marker landed on-image at all. **The recovery path now ships**: the app's auto-align panel and `npm run annotate -- --auto-trim` both recover pitch to within 0.82° on the one frame with solved truth (CV-10). On iOS this term largely solves itself — the phone knows its pitch at capture time — worth remembering before over-investing in photo-only recovery |
 | **P7.6** | ~~The two wide frames refuse~~ — **tested, refuted, folded into P7.5** | The hypothesis was near-field foreground the sweep never sampled. Measured, the error is largest at frame CENTRE and smallest at the edges, and the extractor puts its boundary at `rowNorm` **0.999** — the bottom row of the picture. It is tracking foreground tundra, not sky. No near-field term is needed: this is CV-2 again, a sky/land cue that a snowfield or sunlit tundra edge can also satisfy. One fix, two symptoms — see [docs/REAL-PHOTO-POSE.md](docs/REAL-PHOTO-POSE.md) |
@@ -32,6 +31,17 @@ write-ups are in the three `REVIEW-FINDINGS*.md` files and are not repeated here
 ---
 
 ## Done
+
+### Q9 — the DEPLOY.md cost table, re-measured post-Q8, 2026-08-17
+
+*(The row above should have left Open in the commit that updated the table — caught one
+commit late, recorded rather than hidden.)* The table now carries: 16 tiles + windows =
+417.57 MB / 189.24 MB on the wire; a `/peaks/` row (3.48 MB, 63 cells + 5 indexes, with the
+per-region split); the per-session statement a deployer budgets with — one terrain grid
+(16.35 MB gzipped alpine worst case) plus at most the largest region's cells (1.26 MB,
+usually a few hundred KB, other regions pruned by their bundled indexes before any request);
+bundle 340.21 kB / 110.63 kB gzipped. The `--no-peaks` demo paragraph was corrected: since
+Q8 that trim is an error by design, enforced by `verifyPeaksAreServed`.
 
 ### P7.4 — CV integration, wired end to end, 2026-08-17
 
