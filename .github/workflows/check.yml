@@ -1,0 +1,45 @@
+# GitHub cannot RUN the mobile app — there is no phone attached to a CI runner
+# and no QR code to scan. What it can do is prove the thing still builds, which
+# is exactly the check that was missing when X-8 shipped: an app that
+# typechecked, linted and passed 1 218 tests while being impossible to bundle.
+name: check
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  core:
+    name: core (typecheck, lint, unit tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # `npm run check` is typecheck + lint + the full offline unit suite. Its
+      # lint step is `eslint .` from the root, which already covers mobile/ —
+      # so the mobile job below deliberately does not lint again.
+      - run: npm run check
+
+  mobile:
+    name: mobile (typecheck + real Metro/Hermes build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      # Only the mobile install. Verified from a clean clone: the Expo app
+      # imports /src as TypeScript source and needs no root node_modules.
+      - run: npm ci
+        working-directory: mobile
+      - run: npx tsc --noEmit -p tsconfig.json
+        working-directory: mobile
+      - run: npx expo export --platform ios --output-dir ../out/mobile-bundle
+        working-directory: mobile

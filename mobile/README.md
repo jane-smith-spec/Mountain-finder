@@ -21,24 +21,60 @@ horizon comes first. The peaks come after the holds pass.
 
 ## Running it — no Mac, no Xcode, no Apple Developer account
 
-1. Install **Expo Go** from the App Store (or Play Store) on your phone.
-2. On any computer — macOS, Windows or Linux — with Node 20+:
+You need **Expo Go** on the phone (App Store / Play Store) and a machine to run
+the dev server. Nothing else: every native module this app uses —
+`expo-sensors`, `expo-location`, `expo-camera`, `react-native-svg` — is bundled
+into Expo Go, so there is no native build step. A Mac or an
+[EAS](https://docs.expo.dev/build/introduction/) build is only needed later,
+for a standalone binary, TestFlight, or the App Store.
 
-   ```sh
-   cd mobile
-   npm install
-   npx expo start
-   ```
+**Only the `mobile/` install is needed.** Verified from a clean clone with no
+root `node_modules` present at all: 750 modules bundled. The Expo app imports
+`/src` as TypeScript source, so the root's own dependencies (Playwright,
+Chromium, the parquet reader) are irrelevant here.
 
-3. Scan the QR code with the Camera app (iOS) or from inside Expo Go (Android).
-   The phone and the computer need to be on the same network; add `--tunnel`
-   if they are not.
+### On your own computer
 
-Every native module this app uses — `expo-sensors`, `expo-location`,
-`expo-camera`, `react-native-svg` — is bundled into Expo Go, so there is no
-native build step. A Mac or an [EAS](https://docs.expo.dev/build/introduction/)
-build is only needed later, for a standalone binary, TestFlight, or the App
-Store.
+Any OS, Node 20+:
+
+```sh
+git clone -b claude/topographic-peak-identifier-EV4ZN \
+  https://github.com/jane-smith-spec/Mountain-finder.git
+cd Mountain-finder/mobile
+npm install
+npx expo start
+```
+
+Scan the QR with the Camera app (iOS) or from inside Expo Go (Android). Phone
+and computer must be on the same network — otherwise use `--tunnel` below.
+
+### In the browser, via GitHub Codespaces
+
+`.devcontainer/devcontainer.json` sets this up: open the repo on GitHub →
+**Code ▸ Codespaces ▸ Create codespace on this branch**. Node and the `mobile/`
+dependencies install themselves. Then, in the Codespace terminal:
+
+```sh
+cd mobile && npx expo start --tunnel
+```
+
+`--tunnel` is what makes this work: the dev server is in a datacentre and your
+phone is not on its network, so Expo routes through a public tunnel URL that
+the phone can reach from anywhere. Expo will offer to install `@expo/ngrok` the
+first time — say yes. (It is deliberately not a dependency here, so that the
+plain `npm install` above stays as small and as verified as it is.)
+
+Local-network mode without `--tunnel` will not work from a Codespace.
+
+### What GitHub Actions can and cannot do
+
+**It cannot serve the app to your phone.** Actions is headless CI — no QR code
+to scan, no device attached. Codespaces is the browser-based option; Actions is
+not.
+
+**It does now prove the app still builds.** `.github/workflows/check.yml` runs
+the core suite and a real Metro + Hermes bundle on every push — the exact check
+whose absence let X-8 ship.
 
 ## Screen 1 — Calibrate
 

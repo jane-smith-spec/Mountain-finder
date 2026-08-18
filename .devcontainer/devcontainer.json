@@ -1,0 +1,26 @@
+{
+  "name": "Mountain Finder — mobile shell",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:22",
+
+  // Only the mobile app's dependencies. The repository root is NOT installed
+  // here on purpose: the Expo app imports /src as TypeScript SOURCE, and a
+  // clean clone plus this one install was verified to build the whole thing
+  // (750 modules) with no root node_modules present at all. Installing the
+  // root as well would pull in Playwright, Chromium and the parquet reader
+  // for no benefit to someone who came here to test on a phone.
+  "postCreateCommand": "cd mobile && npm install",
+
+  // 8081 is Metro. It is forwarded for convenience, but note the README: the
+  // reliable way to reach a cloud dev server from a phone is `--tunnel`,
+  // which does not depend on this port being publicly visible.
+  "forwardPorts": [8081],
+  "portsAttributes": {
+    "8081": { "label": "Expo / Metro", "onAutoForward": "notify" }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint"]
+    }
+  }
+}
