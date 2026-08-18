@@ -23,14 +23,21 @@ local peak database, and nothing talks to an API at runtime.
   foreground tundra is **fixed** by a sky-roughness cue ([CV-2](docs/FINDINGS.md)) — wide frames
   now refuse rather than answer wrongly. **What is open is recall, not correctness**: hazy
   distant crests report unreadable, so the 24 mm and 14 mm frames decline.
-- **v3 (live view): the pure layers exist and are proven; the mobile shell does not.**
+- **v3 (live view): the pure layers are proven, and the shell now exists — unrun.**
   `src/live/sensors.ts` derives pose from gravity and compass traces with the EXIF path's
-  discipline (magnetic is never silently true; five named refusals), and `src/live/loop.ts`
-  re-projects one computed scene per sensor tick — proven marker-for-marker, pixel-for-pixel
-  equal to re-running the still pipeline, and refusing when the camera turns past the swept
-  terrain. The Expo shell (P8.1) is deliberately **not** scaffolded here: its self-check is the
-  core suite under the mobile toolchain, which this environment cannot run, and nothing ships
-  whose check has not passed.
+  discipline (magnetic is never silently true; five named refusals), `src/live/device-samples.ts`
+  converts Expo's payloads into those traces (X-7 — no `gravity` field exists, units are m/s²,
+  the sign is CoreMotion's and *not* the W3C spec's, and the compass `accuracy` is a 0–3 bucket
+  rather than degrees; all four verified against the native Swift and Kotlin, not the docs), and
+  `src/live/loop.ts` re-projects one computed scene per sensor tick — proven marker-for-marker,
+  pixel-for-pixel equal to re-running the still pipeline, and refusing when the camera turns past
+  the swept terrain. **[`mobile/`](mobile/README.md) is the Expo shell**, running under Expo Go so
+  it needs no Mac, no Xcode and no Apple Developer account. It carries the instrument that closes
+  P8.2's bar rather than the AR view: four holds whose gravity vector is known from geometry,
+  which either confirm the frame conventions against hardware or name the exact signed axis map
+  that is wrong. `npm run typecheck:mobile` compiles it against the real SDK together with the 39
+  shared files it imports **unchanged** — but nobody has run it, so it is marked `[~]`, not
+  ticked. Peaks wait on that verdict, and on how a phone carries DEM offline (D7).
 - **The honest gaps, recorded rather than worked around.** Live API egress is 403 at the proxy,
   so `fixtures/api/**` was never recorded from OpenTopoData or Overpass (P2.4's self-check is
   unmet and marked `[~]`, not ticked). The sensor module's frame conventions are proven as

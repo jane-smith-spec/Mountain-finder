@@ -28,6 +28,13 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    // Metro reads its config through Node's CommonJS loader before any bundler
+    // is involved, so this one file cannot be ESM. Scoped to the file rather
+    // than exempting `mobile/**`, which is ordinary linted TypeScript.
+    files: ['mobile/metro.config.js'],
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
+  },
+  {
     languageOptions: {
       globals: { ...globals.browser, ...globals.node },
     },

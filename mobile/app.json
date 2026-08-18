@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Mountain Finder",
+    "slug": "mountain-finder",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "dev.mountainfinder.calibrate",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "The compass heading is read from Core Location, and true north needs a location fix — without it the app can only report magnetic north and will say so.",
+        "NSMotionUsageDescription": "Device motion supplies the gravity vector the app derives camera pitch and roll from.",
+        "NSCameraUsageDescription": "The camera preview is the background the artificial horizon is drawn over, so a wrong pitch or roll sign is visible against the real horizon."
+      }
+    },
+    "android": {
+      "package": "dev.mountainfinder.calibrate",
+      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "CAMERA"]
+    }
+  }
+}
