@@ -38,9 +38,13 @@ local peak database, and nothing talks to an API at runtime.
   that is wrong. Its Horizon screen draws the computed horizon over the camera and **lets you
   drag it into place** — D9's interaction, writing the same visible trim the web app's sliders
   write, and drawing on a *labelled* magnetic bearing rather than refusing when true north is
-  unavailable. `npm run typecheck:mobile` compiles it against the real SDK together with the 39
-  shared files it imports **unchanged** — but nobody has run it, so it is marked `[~]`, not
-  ticked. Peaks wait on that verdict, and on how a phone carries DEM offline (D7).
+  unavailable. `npm run check:mobile` typechecks it against the real SDK together with the 39
+  shared files it imports **unchanged**, lints it, and **actually builds it** — Metro plus
+  Hermes, 750 modules, exported clean. That last step is not ceremony: the first version
+  typechecked, linted, passed every test and **could not be built**, because a barrel import
+  dragged `exifr`'s dynamic `import()` into a bundle Hermes rejects ([X-8](docs/FINDINGS.md)).
+  Nobody has *run* it, though, so it stays `[~]`, not ticked. Peaks wait on the hardware
+  verdict, and on how a phone carries DEM offline (D7).
 - **The honest gaps, recorded rather than worked around.** Live API egress is 403 at the proxy,
   so `fixtures/api/**` was never recorded from OpenTopoData or Overpass (P2.4's self-check is
   unmet and marked `[~]`, not ticked). The sensor module's frame conventions are proven as

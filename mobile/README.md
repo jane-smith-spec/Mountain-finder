@@ -116,9 +116,18 @@ is: draw it, say plainly what it is, let you push it into place.
 Run from the repository root:
 
 ```sh
+npm run check:mobile       # all three of the below, in order
 npm run typecheck:mobile   # tsc over the app AND the shared modules it imports
 npx eslint mobile          # lint
+npm run bundle:mobile      # a REAL Metro + Hermes build — the one that matters
 ```
+
+`bundle:mobile` exists because the first version of this app **typechecked,
+linted, passed 1 218 unit tests, and could not be built** (X-8). `src/app/trim.ts`
+imported two pure helpers from the `../exif` barrel, which drags in `exifr`,
+which ships a dynamic `import()` that Hermes rejects outright. Metro resolved
+all 756 modules; the failure came afterwards, in bytecode compilation. An app
+that cannot start is invisible to every check that does not start it.
 
 `typecheck:mobile` compiles this app against the real Expo SDK 57 /
 React Native 0.86 / React 19 type definitions, and it pulls `src/core`,
@@ -126,10 +135,11 @@ React Native 0.86 / React 19 type definitions, and it pulls `src/core`,
 typechecked under the mobile toolchain, imported across the repository root
 **unchanged**, which is P8.1's "no fork, no shim" bar.
 
-What is **not** checked: nobody has run this app. Its self-check is a person
-holding a phone. Per the prime directive it therefore ships marked `[~]`, not
-ticked — the same honest treatment `P2.4` carries for the fixtures that could
-not be recorded through a blocked proxy.
+What is **not** checked: nobody has *run* this app. It builds — Metro resolves
+it and Hermes compiles it — but a build proves it will start, not that the
+overlay lands in the right place. That last step is a person holding a phone,
+so it ships marked `[~]`, not ticked — the same honest treatment `P2.4` carries
+for the fixtures that could not be recorded through a blocked proxy.
 
 ## Layout
 

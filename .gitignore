@@ -21,3 +21,6 @@ data/overture/
 
 # Agent scratch space — never committed
 scratch/
+
+# Expo dev-server + build caches
+mobile/.expo/

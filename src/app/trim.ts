@@ -24,7 +24,14 @@
  */
 
 import type { CameraPose } from '../core/types';
-import { normaliseBearingDeg, vFovDegFromHFov } from '../exif';
+// Imported from the specific modules, NOT from '../exif'. The barrel re-exports
+// `./extract`, which imports `exifr` at module scope, and exifr ships a dynamic
+// `import(/* webpackIgnore: true */ …)` that Hermes cannot compile — so pulling
+// the barrel in here made the whole React Native bundle fail to build, for two
+// functions that are pure angle arithmetic. Caught by `npx expo export`, not by
+// any test; see mobile/README.md.
+import { normaliseBearingDeg } from '../exif/bearing';
+import { vFovDegFromHFov } from '../exif/fov';
 
 /** Slider offsets, in degrees, all zero when untouched. */
 export interface TrimState {

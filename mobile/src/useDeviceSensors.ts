@@ -125,11 +125,15 @@ export function useDeviceSensors(declinationDeg?: number): DeviceSensors {
         }
         const permission = await DeviceMotion.requestPermissionsAsync();
         if (cancelled) return;
-        if (!permission.granted) {
-          setMotionPermission('denied');
-          return;
-        }
-        setMotionPermission('granted');
+        setMotionPermission(permission.granted ? 'granted' : 'denied');
+        // Subscribe EITHER WAY, deliberately. On both platforms the motion
+        // permission gates activity/pedometer data, not the accelerometer and
+        // gyroscope this app reads — a phone with "Motion & Fitness" switched
+        // off still reports gravity perfectly well. Treating `denied` as fatal
+        // would leave the calibration screen permanently blank on a device
+        // whose sensors were working the whole time, which is the worst
+        // possible failure for the one screen that exists to test hardware.
+        // If nothing arrives, the trace stays empty and the UI says so.
         DeviceMotion.setUpdateInterval(MOTION_INTERVAL_MS);
         subscription = DeviceMotion.addListener((motion) => {
           const nowMs = Date.now();

@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "typecheck:mobile": "tsc --noEmit -p mobile/tsconfig.json",
+    "bundle:mobile": "cd mobile && npx expo export --platform ios --output-dir ../out/mobile-bundle",
+    "check:mobile": "npm run typecheck:mobile && eslint mobile && npm run bundle:mobile",
     "lint": "eslint .",
     "test": "vitest run",
     "check": "npm run typecheck && npm run lint && npm run test",
