@@ -120,7 +120,17 @@ export const kerryParkSeattleCase: GroundTruthCase = {
         'Consistently, no source describing the Kerry Park view mentions Baker, ' +
         'while every north-facing Seattle viewpoint does. This is the case that ' +
         'catches a pipeline which only tests peaks against the far horizon and ' +
-        'never samples terrain in the first few hundred metres.',
+        'never samples terrain in the first few hundred metres. ' +
+        'OBSERVER-HEIGHT SENSITIVITY (finding X-4): this gate is NOT insensitive ' +
+        'to the ground height inside this file\'s own stated uncertainty. The ' +
+        'suite takes the observer ground from the DEM (103.8 m), where Baker ' +
+        'comes out hidden by a comfortable −1.67 deg; at the cited working ' +
+        'figure of 113 ± 15 m the margin flips to +0.31 deg VISIBLE at the top ' +
+        'of the band. The published-claim evidence (no north view exists from ' +
+        'the south slope) is what actually carries the verdict, and the DEM ' +
+        'reading — a measured value on a smooth urban hillside, the terrain ' +
+        'SRTM is best at — is the defensible height to judge from. If either ' +
+        'ever changes, re-derive rather than lean on the margin.',
     },
   ],
 

@@ -360,9 +360,13 @@ export interface AnnotatedScene {
    * prompt to fetch the missing tiles — has them, with the reason attached in
    * `warnings` and the raw counts in `sweep`.
    *
-   * Empty for a complete sweep, and empty for a SECTOR sweep whose every ray
-   * came back: bearings the sweep never asked about are not lost data. See
-   * `hasTerrainAtBearing` in src/core/horizon.ts.
+   *   SECTOR   (R-1, 2026-08-17) the peak's bearing lies outside a bounded
+   *            sweep's span entirely. The sector's edge is not a hole — see
+   *            `hasTerrainAtBearing` — but a peak beyond it must not be judged
+   *            against a horizon interpolated across the whole un-swept arc,
+   *            so it too gets no verdict.
+   *
+   * Empty for a complete sweep whose every ray came back.
    */
   readonly unmeasured: readonly PeakSighting[];
   /**

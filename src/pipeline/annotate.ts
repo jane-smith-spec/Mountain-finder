@@ -298,6 +298,17 @@ export async function annotateScene(request: AnnotateSceneRequest): Promise<Anno
   const sightings: PeakSighting[] = [];
   const unmeasuredBearing: PeakSighting[] = [];
   const unmeasuredRange: PeakSighting[] = [];
+  const unmeasuredSector: PeakSighting[] = [];
+  // R-1: a bounded sweep holds no evidence about bearings it never asked
+  // about. `hasTerrainAtBearing` correctly treats those bearings as "not lost
+  // data" — a sector's edge is not a hole — but a PEAK there must not then be
+  // judged against a horizon interpolated across the entire un-swept
+  // complement (the bracket wraps from the sector's last ray to its first,
+  // bridging up to 350° of never-sampled ground). Such peaks get no verdict.
+  const sectorStartDeg = ((config.sweep.startBearingDeg % 360) + 360) % 360;
+  const withinSweptSector = (bearingDeg: number): boolean =>
+    config.sweep.spanDeg >= 360 ||
+    (((bearingDeg - sectorStartDeg) % 360) + 360) % 360 <= config.sweep.spanDeg;
   for (const peak of found) {
     const sighting = sightPeak(observer, peak, config.sightline);
     if (sighting.distanceKm < config.minPeakDistanceKm) {
@@ -305,6 +316,10 @@ export async function annotateScene(request: AnnotateSceneRequest): Promise<Anno
         `Dropped "${peak.name}" at ${(sighting.distanceKm * 1000).toFixed(0)} m — closer than the ` +
           `${config.minPeakDistanceKm * 1000} m minimum, i.e. the observer is standing on it.`,
       );
+      continue;
+    }
+    if (!withinSweptSector(sighting.bearingDeg)) {
+      unmeasuredSector.push(sighting);
       continue;
     }
     // No terrain at this bearing means no evidence either way: the horizon
@@ -336,9 +351,18 @@ export async function annotateScene(request: AnnotateSceneRequest): Promise<Anno
     }
     sightings.push(sighting);
   }
-  const unmeasured = [...unmeasuredBearing, ...unmeasuredRange];
+  const unmeasured = [...unmeasuredBearing, ...unmeasuredRange, ...unmeasuredSector];
   sightings.sort((a, b) => a.distanceKm - b.distanceKm);
   unmeasured.sort((a, b) => a.distanceKm - b.distanceKm);
+  if (unmeasuredSector.length > 0) {
+    warnings.push(
+      `No visible/hidden verdict for ${unmeasuredSector.length} peak(s) outside the swept ` +
+        `${config.sweep.spanDeg}° sector starting at ${sectorStartDeg}° ` +
+        `(${describePeakNames(unmeasuredSector)}). ` +
+        'Bearings the sweep never asked about hold no terrain evidence, and judging a peak ' +
+        'there would mean interpolating the horizon across the whole un-swept arc (R-1).',
+    );
+  }
   if (unmeasuredBearing.length > 0) {
     warnings.push(
       `No visible/hidden verdict for ${unmeasuredBearing.length} peak(s) on bearings the sweep ` +

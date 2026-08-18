@@ -16,8 +16,7 @@ write-ups are in the three `REVIEW-FINDINGS*.md` files and are not repeated here
 | **P7.5** | The extractor on real photographs — **precision solved, recall open** | The sky-roughness cue (CV-2, 2026-08-17) ended the confidently-wrong era: no frame now reports a boundary whose "sky" contains terrain — the 24 mm foreground lock is gone, the 14 mm frame refuses outright, the 48 mm snow-band columns snapped to the crest, and with the comb the 48 mm suggestion reached heading err −0.109° / pitch err +0.690°. What remains is RECALL: hazy distant crests report unreadable (24 mm coverage 38 %, 14 mm 0 %), so wide frames decline for want of columns rather than align. That needs a cue for soft crest steps under haze — a different problem from the one just solved, and one where "unreadable" is at least never "wrong" ([docs/CV-REAL-PHOTO-FINDING.md](docs/CV-REAL-PHOTO-FINDING.md)) |
 | **P7.7** | Pitch is unrecorded and always wrong at zero | EXIF carries no pitch, `--pitch` defaults to 0, and in all four annotated photographs the drawn horizon sits wrong because of it — Railroad Ridge −3.52°, and the Bogus Basin 480 mm frame needed a hand-supplied +4.3° before any marker landed on-image at all. **The recovery path now ships**: the app's auto-align panel and `npm run annotate -- --auto-trim` both recover pitch to within 0.82° on the one frame with solved truth (CV-10). On iOS this term largely solves itself — the phone knows its pitch at capture time — worth remembering before over-investing in photo-only recovery |
 | **P7.6** | ~~The two wide frames refuse~~ — **tested, refuted, folded into P7.5** | The hypothesis was near-field foreground the sweep never sampled. Measured, the error is largest at frame CENTRE and smallest at the edges, and the extractor puts its boundary at `rowNorm` **0.999** — the bottom row of the picture. It is tracking foreground tundra, not sky. No near-field term is needed: this is CV-2 again, a sky/land cue that a snowfield or sunlit tundra edge can also satisfy. One fix, two symptoms — see [docs/REAL-PHOTO-POSE.md](docs/REAL-PHOTO-POSE.md) |
-| **X-4** | Kerry Park: the Mount Baker gate is not observer-height-insensitive | The verdict flips inside the case file's own stated uncertainty band — DEM 103.8 m → hidden (−1.67°), cited 113 ± 15 m → visible (+0.31°). The suite takes the ground height from the DEM and reports the comparison; the case file still wants the note |
-| **R-1…R-3** | Residuals the reviews left open by decision | Peaks outside a bounded sweep still judged against the bridged complement; `src/cv/rays.ts:profileCoverage` duplicates the coverage notion with a largest-gap heuristic; `'nearest-valid'` is discontinuous at a grid line (a policy decision, not a bug). **R-4 fixed 2026-08-17**: `scripts/terrain-server.ts` windows now label through `datasetLabelForStepDeg`, the same function the manifest parser and provider use. Detail in [docs/FINDINGS.md](docs/FINDINGS.md#residuals-left-open-by-the-reviews) |
+| **R-2, R-3** | Residuals the reviews left open by decision | `src/cv/rays.ts:profileCoverage` duplicates the coverage notion with a largest-gap heuristic; `'nearest-valid'` is discontinuous at a grid line (a policy decision, not a bug). **R-1 fixed 2026-08-17**: a peak whose bearing lies outside a bounded sweep's span now gets NO verdict (`unmeasured`, with a warning) instead of one interpolated across the entire un-swept arc; full-circle sweeps are untouched, and the app's overlay note now names the sector case. **R-4 fixed 2026-08-17**: `scripts/terrain-server.ts` windows label through `datasetLabelForStepDeg`. Detail in [docs/FINDINGS.md](docs/FINDINGS.md#residuals-left-open-by-the-reviews) |
 | **Phase 8** | Live view (v3) | Not started, by decision D5 — after v2.1. Products and self-checks are in [PLAN.md](PLAN.md) |
 
 ## Blocked on the environment, not on code
@@ -31,6 +30,15 @@ write-ups are in the three `REVIEW-FINDINGS*.md` files and are not repeated here
 ---
 
 ## Done
+
+### X-4 — the Kerry Park height-sensitivity note, written into the case file, 2026-08-17
+
+The Mount Baker must-NOT-see gate now carries, in its own rationale, the measured fact that
+the geometric verdict flips inside the file's stated ground-height uncertainty (DEM 103.8 m
+→ hidden by −1.67°; cited 113 ± 15 m → visible by +0.31° at the band's top), that the
+published-claim evidence is what actually carries the verdict, and that the DEM reading — a
+smooth urban hillside, the terrain SRTM is best at — is the defensible height to judge from.
+178 acceptance assertions unchanged.
 
 ### Q9 — the DEPLOY.md cost table, re-measured post-Q8, 2026-08-17
 

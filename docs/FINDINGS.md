@@ -81,7 +81,7 @@ Deliberately not fixed at the time, and named by the finding that exposed them.
 
 | id | from | residual |
 |---|---|---|
-| **R-1** | W1-6 | A peak **outside** a bounded sweep still gets a verdict interpolated across the un-swept complement — a different fabrication with a different answer. Sweep it, refuse it, or rely on it being off-frame |
+| **R-1** | W1-6 | **Fixed 2026-08-17 — refused.** A peak whose bearing lies outside a bounded sweep's span gets no verdict: it goes to `AnnotatedScene.unmeasured` with a warning naming the sector, because judging it would mean interpolating the horizon across the whole un-swept arc between the sector's edge rays. Full-circle sweeps unchanged; gated by the new sector tests in `src/pipeline/annotate.test.ts` |
 | **R-2** | W1-6 | `src/cv/rays.ts:profileCoverage` grew its own coverage notion — a largest-gap-vs-median heuristic over the profile alone, which cannot see a hole and a sector edge at the same time. The two notions should be reconciled onto the exact one |
 | **R-3** | W1-7 | `'nearest-valid'` is discontinuous at a grid line — 250 m **on** the line, 200 m a hair off it — because it returns a corner rather than re-normalising the valid weights. That is the documented policy and is flagged to the caller; changing it would mean inventing a value for the void, so it is a policy decision, not a bug fix |
 | **R-4** | W3-4 | `scripts/terrain-server.ts` still derives its own resolution label and should be pointed at `datasetLabelForStepDeg`, so the manifest and the provider cannot disagree again |

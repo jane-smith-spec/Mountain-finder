@@ -1058,3 +1058,48 @@ describe('annotateScene — the alignment horizon (CV-10)', () => {
     expect(scene.alignmentHorizon).toBeUndefined();
   });
 });
+
+describe('annotateScene — peaks outside a bounded sweep (R-1)', () => {
+  // A 90° sector centred due east: [45°, 135°]. Both east peaks are inside;
+  // a peak due NORTH is 45° outside it, and before R-1 it was judged against
+  // a horizon interpolated across the 270° the sweep never sampled.
+  const northPeak: Peak = {
+    id: 'test/north',
+    name: 'North Peak',
+    lat: 5000 / METRES_PER_DEG,
+    lon: 0,
+    elevationM: 2000,
+    elevationSource: 'unknown',
+  };
+
+  function sectorRequest(): AnnotateSceneRequest {
+    return request({
+      peaks: new StaticPeakSource([...peaks, northPeak]),
+      config: {
+        sweep: { bearingStepDeg: 1, rangeStepM: 250, maxRangeKm: 30, startBearingDeg: 45, spanDeg: 90 },
+        peakRadiusKm: 50,
+        clock: () => FIXED_CLOCK,
+      },
+    });
+  }
+
+  it('refuses a verdict on a peak the sector never looked toward', async () => {
+    const scene = await annotateScene(sectorRequest());
+    // The east peaks keep their verdicts: the sector covers them.
+    expect(byId(scene.peaks, 'test/high').visible).toBe(true);
+    expect(byId(scene.peaks, 'test/hidden').visible).toBe(false);
+    // The north peak gets NO verdict — not a fabricated one off the wrapped
+    // interpolation between the sector's two edge rays.
+    expect(scene.peaks.some((peak) => peak.id === 'test/north')).toBe(false);
+    expect(scene.unmeasured.some((peak) => peak.id === 'test/north')).toBe(true);
+    expect(scene.warnings.some((warning) => warning.includes('outside the swept'))).toBe(true);
+  });
+
+  it('leaves a full-circle sweep exactly as it was', async () => {
+    const scene = await annotateScene(
+      request({ peaks: new StaticPeakSource([...peaks, northPeak]) }),
+    );
+    expect(scene.peaks.some((peak) => peak.id === 'test/north')).toBe(true);
+    expect(scene.unmeasured.some((peak) => peak.id === 'test/north')).toBe(false);
+  });
+});

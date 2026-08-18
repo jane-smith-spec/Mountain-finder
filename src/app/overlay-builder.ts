@@ -244,12 +244,15 @@ function buildNotes(
   }
   if (scene.unmeasured.length > 0) {
     // Not drawn and not claimed either way. Saying so is the point: these are
-    // the long-range summits the app used to label off a fraction of their
-    // sightline, and a user who sees the name can widen the terrain rather than
-    // wonder why a mountain they can see is missing.
+    // the summits the app used to judge off terrain nobody measured — beyond
+    // the swept range, or (R-1) outside the swept sector entirely, which for a
+    // photograph mostly means behind the camera. A user who sees a name here
+    // can widen the terrain rather than wonder why a mountain is missing.
     notes.push(
-      `${scene.unmeasured.length} summit${scene.unmeasured.length === 1 ? '' : 's'} stand ` +
-        `farther out than the ${scene.config.sweep.maxRangeKm} km terrain sweep measured, so ` +
+      `${scene.unmeasured.length} summit${scene.unmeasured.length === 1 ? '' : 's'} ` +
+        `${scene.unmeasured.length === 1 ? 'was' : 'were'} not judged — beyond the ` +
+        `${scene.config.sweep.maxRangeKm} km swept range, or outside the swept sector ` +
+        `(mostly behind the camera) — so ` +
         `${scene.unmeasured.length === 1 ? 'it is' : 'they are'} neither labelled nor ruled out: ` +
         `${nameList(scene.unmeasured.map((peak) => peak.name))}.`,
     );
