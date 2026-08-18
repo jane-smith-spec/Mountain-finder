@@ -167,7 +167,7 @@ is a file an agent can assert against.
 | Product | Description | Self-check |
 |---|---|---|
 | P8.1 Core reuse | `/src/core` imported by the Expo app **unchanged** — no fork, no shim | The core's own suite runs green under the mobile toolchain; a diff of `/src/core` against the web app's copy is empty |
-| P8.2 Sensor fusion | Camera pose from compass + accelerometer + GPS, feeding the same `CameraPose` the still pipeline takes | Unit tests over recorded sensor traces (replayed, not live) → expected pose; magnetic is never treated as true, the same rule the EXIF path enforces |
+| P8.2 Sensor fusion | Camera pose from compass + accelerometer + GPS, feeding the same `CameraPose` the still pipeline takes. **Engine built 2026-08-17** — `src/live/sensors.ts`, pure: gravity → pitch/roll (closed form, conventions stated and tested at the axis holds), circular heading smoothing with exponential age weights, measured spreads, and the full refusal set (`no-samples`/`stale`/`needs-declination`/`not-gravity`/`gimbal-degenerate`). Magnetic is never silently true, same as EXIF | Unit tests over recorded sensor traces (replayed, not live) → expected pose. **Partially met**: 16 tests over hand-derived geometry pass (`npx vitest run src/live`); the bar stays open until a REAL device records a trace, because a frame-convention sign error would pass every synthetic test and flip on hardware — said in the module header |
 | P8.3 Live overlay loop | Continuous projection of an already-computed horizon profile as the pose changes | Unit: N poses through the projection produce the labels the still pipeline produces for the same poses. Anything needing a phone in the loop is **not** a self-check and is not counted as one |
 
 ## Agent orchestration
