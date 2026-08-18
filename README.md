@@ -7,23 +7,37 @@ local peak database, and nothing talks to an API at runtime.
 ## Status, honestly
 
 - **v2.0 ships and works.** The whole chain runs end to end: drop a photo into the web app and,
-  where terrain is available, it renders a real overlay and exports it. `npm run demo --
-  gornergrat` writes an annotated image from real SRTM data. It is proven on four ground-truth
-  viewpoints and a packaged static deployment. Last recorded gate run (2026-08-16, TODO.md Q6):
-  `check` 50 files / 1 025 tests, `test:acceptance` 153, Playwright 21, `test:deploy` 5.
-- **v2.1 (CV alignment) is in progress and measured, not finished.** The aligner recovers an
-  injected offset to 0.013° against real SRTM terrain. The skyline *extractor* has now met real
-  photographs for the first time and the result is mixed and quantified: 98.8 % coverage on a
-  favourable photo, 1.4 % on a snowy hazy one, and — the finding that matters —
-  [it stitches a foreground ridge to the distant horizon](docs/FINDINGS.md), which is why the
-  first real end-to-end run refused rather than guessing. Being fixed.
-- **v3 (live view) has not started.** No code, by decision — it is a projection-loop upgrade on
-  a proven pipeline, not a separate product.
-- **Two environment blockers are real and recorded, not worked around.** Live API egress is
-  403 at the proxy, so `fixtures/api/**` was never recorded from OpenTopoData or Overpass
-  (P2.4's self-check is unmet and is marked `[~]`, not ticked). And EXIF does not survive the
-  upload path, so the two real photographs arrived with dimensions and `Orientation` only — no
-  GPS, no direction, no focal length.
+  where terrain is available, it renders a real overlay and exports it. It is proven on four
+  ground-truth viewpoints and a packaged static deployment, and since Q8 the app reads the
+  **9 237-summit Overture dataset** over `/peaks/` rather than 15 bundled summits. Last gate run
+  (2026-08-17): `check` **1 168 tests**, `test:acceptance` **178**, Playwright **22**,
+  `test:deploy` **5**.
+- **v2.1 (CV alignment) works on real photographs, with its limits measured.** Auto-align is
+  wired into the app and into `npm run annotate -- --auto-trim`: it proposes trims for the
+  *visible* sliders and never corrects anything behind them. On the one photograph with an
+  independently solved pose it recovers **heading to 0.11°** — better than the phone's own
+  compass (0.6°) — and pitch to 0.69° against an unrecorded truth of −3.52°, moving a summit
+  flag from 332 px off its apex to 66 px. Two findings shaped it, both kept: a wide heading
+  search returns a **confident impostor** 10.4° off ([CV-10](docs/FINDINGS.md)), so the search
+  is clamped to a compass budget; and the extractor's old habit of locking onto snowfields and
+  foreground tundra is **fixed** by a sky-roughness cue ([CV-2](docs/FINDINGS.md)) — wide frames
+  now refuse rather than answer wrongly. **What is open is recall, not correctness**: hazy
+  distant crests report unreadable, so the 24 mm and 14 mm frames decline.
+- **v3 (live view): the pure layers exist and are proven; the mobile shell does not.**
+  `src/live/sensors.ts` derives pose from gravity and compass traces with the EXIF path's
+  discipline (magnetic is never silently true; five named refusals), and `src/live/loop.ts`
+  re-projects one computed scene per sensor tick — proven marker-for-marker, pixel-for-pixel
+  equal to re-running the still pipeline, and refusing when the camera turns past the swept
+  terrain. The Expo shell (P8.1) is deliberately **not** scaffolded here: its self-check is the
+  core suite under the mobile toolchain, which this environment cannot run, and nothing ships
+  whose check has not passed.
+- **The honest gaps, recorded rather than worked around.** Live API egress is 403 at the proxy,
+  so `fixtures/api/**` was never recorded from OpenTopoData or Overpass (P2.4's self-check is
+  unmet and marked `[~]`, not ticked). The sensor module's frame conventions are proven as
+  *mathematics* but not against physical hardware — a sign error would pass every synthetic
+  test — so P8.2's recorded-trace bar stays open. And the photographs' EXIF problem turned out
+  not to be a blocker at all: the upload path stripped the GPS IFD, the **camera originals** had
+  everything, and asking for them was the whole fix.
 
 The v1 Expo/React Native attempt is retired to
 [`archive/v1-expo/`](archive/v1-expo/ARCHIVE-NOTE.md), read-only.
@@ -32,12 +46,14 @@ The v1 Expo/React Native attempt is retired to
 
 | Document | Purpose |
 |---|---|
-| [MISSION.md](MISSION.md) | What we're building, the prime directive, the decision record (D1–D8), what real SRTM data taught us |
+| [MISSION.md](MISSION.md) | What we're building, the prime directive, the decision record (D1–D10), what real SRTM data taught us |
 | [PLAN.md](PLAN.md) | Every product paired with the executable check that proves it, and each phase's status |
 | [TODO.md](TODO.md) | Live checklist: what's done, what's open, what's blocked |
 | [docs/FINDINGS.md](docs/FINDINGS.md) | **Index of every confirmed finding**, with stable ids, severity and whether it's fixed |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | What a deployment serves, what it costs on the wire, missing-terrain behaviour, licensing |
-| [docs/CV-REAL-PHOTO-FINDING.md](docs/CV-REAL-PHOTO-FINDING.md) | First contact between the skyline extractor and real photographs |
+| [docs/CV-REAL-PHOTO-FINDING.md](docs/CV-REAL-PHOTO-FINDING.md) | The skyline extractor against real photographs: first contact, the confident impostor (CV-10), the sky-roughness cue |
+| [docs/NEAR-FIELD.md](docs/NEAR-FIELD.md) | Why a summit can read "may be hidden": terrain a DEM cannot resolve, and the `marginal` verdict (D10) |
+| [docs/REAL-PHOTO-POSE.md](docs/REAL-PHOTO-POSE.md) | Solving a photograph's true pose from the picture itself — the yardstick every CV number is measured against |
 | [docs/IDAHO-PHOTO-CASES.md](docs/IDAHO-PHOTO-CASES.md) | The two supplied photographs and what is established about each |
 | [REVIEW-FINDINGS.md](REVIEW-FINDINGS.md) · [-2](REVIEW-FINDINGS-2.md) · [-3](REVIEW-FINDINGS-3.md) | The three adversarial review gates, in full — indexed by docs/FINDINGS.md |
 | [CLAUDE.md](CLAUDE.md) | Working rules for agent sessions |
