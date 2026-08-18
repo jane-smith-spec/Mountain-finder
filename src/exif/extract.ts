@@ -18,6 +18,7 @@
 // under plain Node ESM.
 import exifr from 'exifr';
 
+import { normaliseBearingDeg } from './bearing';
 import { fovDegFromFocalLength35mm } from './fov';
 import { findHeifExif, isHeif } from './heif';
 import type { DirectionRef, PhotoExif } from './types';
@@ -112,11 +113,9 @@ function asDirectionRef(value: unknown): DirectionRef | undefined {
   return undefined;
 }
 
-/** Wrap any bearing into [0, 360). */
-export function normaliseBearingDeg(bearingDeg: number): number {
-  const wrapped = bearingDeg % 360;
-  return wrapped < 0 ? wrapped + 360 : wrapped;
-}
+// Moved to ./bearing.ts so consumers that want the angle arithmetic without a
+// JPEG parser can have it; re-exported here so every existing import stands.
+export { bearingDeltaDeg, normaliseBearingDeg } from './bearing';
 
 /**
  * GPSAltitude is an unsigned rational; GPSAltitudeRef carries the sign

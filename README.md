@@ -35,7 +35,10 @@ local peak database, and nothing talks to an API at runtime.
   it needs no Mac, no Xcode and no Apple Developer account. It carries the instrument that closes
   P8.2's bar rather than the AR view: four holds whose gravity vector is known from geometry,
   which either confirm the frame conventions against hardware or name the exact signed axis map
-  that is wrong. `npm run typecheck:mobile` compiles it against the real SDK together with the 39
+  that is wrong. Its Horizon screen draws the computed horizon over the camera and **lets you
+  drag it into place** — D9's interaction, writing the same visible trim the web app's sliders
+  write, and drawing on a *labelled* magnetic bearing rather than refusing when true north is
+  unavailable. `npm run typecheck:mobile` compiles it against the real SDK together with the 39
   shared files it imports **unchanged** — but nobody has run it, so it is marked `[~]`, not
   ticked. Peaks wait on that verdict, and on how a phone carries DEM offline (D7).
 - **The honest gaps, recorded rather than worked around.** Live API egress is 403 at the proxy,

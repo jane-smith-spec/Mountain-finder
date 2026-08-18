@@ -1,25 +1,45 @@
 /**
- * The camera with a computed horizon drawn over it.
+ * The camera with a computed horizon drawn over it — and draggable.
  *
- * This is a convention check you can read at a glance, and it is why it exists
- * before any peak labelling: the line is produced by the SAME `projectToImage`
- * the still pipeline uses, fed by the SAME `poseWithSensors` the live loop
- * will use. If pitch or roll carries the wrong sign, the drawn line pulls away
- * from the real horizon behind it — tilt the phone left and the line tilts
- * right. No test in this repository can catch that. A window can.
+ * Two things this screen is for.
+ *
+ * **A convention check you can read at a glance.** The line comes from the
+ * SAME `projectToImage` the still pipeline uses, fed by the SAME
+ * `poseWithSensors` the live loop uses. If pitch or roll carries the wrong
+ * sign, the drawn line pulls away from the real horizon behind it — tilt the
+ * phone left and the line tilts right. No test in this repository can catch
+ * that. A window can.
+ *
+ * **D9's interaction, on a phone.** The first version of this screen refused
+ * to draw anything without a true-north heading. That was the magnetic rule
+ * applied past its purpose: the rule forbids treating magnetic as true
+ * *silently*, and refusing to draw denies the user the one gesture that
+ * actually fixes a bad heading — hardest, perversely, when the error is
+ * biggest. So a magnetic bearing is now drawn, labelled `magnetic` by
+ * `heading-policy.ts`, and the overlay can be pushed into place with a finger
+ * exactly as the web app's sliders push it. The drag writes the same visible
+ * `TrimState` the sliders write; nothing is corrected behind the user's back.
  *
  * What is deliberately NOT here: peaks. Labelling summits needs terrain, and
- * terrain needs a decision about how a phone gets square degrees of DEM
+ * terrain needs a decision about how a phone carries square degrees of DEM
  * offline (D7). Building an AR overlay on top of an unverified sign convention
  * is the ordering mistake this project keeps declining to make — so the
  * horizon comes first, and the peaks come after the holds pass.
  */
 
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { Fragment, useState } from 'react';
-import { Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
+import { Fragment, useMemo, useRef, useState } from 'react';
+import {
+  PanResponder,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type LayoutChangeEvent,
+} from 'react-native';
 import Svg, { Circle, Line, Polyline, Text as SvgText } from 'react-native-svg';
 
+import { NO_TRIM, applyTrim, isUntrimmed, type TrimState } from '../../src/app/trim';
 import {
   cameraAxes,
   cameraPoseFromFocalLength,
@@ -27,6 +47,8 @@ import {
   projectToImage,
 } from '../../src/core/projection';
 import type { CameraPose } from '../../src/core/types';
+import { trimFromDrag } from '../../src/live/drag-trim';
+import { resolveHeadingForDrawing } from '../../src/live/heading-policy';
 import { poseWithSensors, type SensorAnswer } from '../../src/live/sensors';
 import { colors, styles } from './theme';
 import type { DeviceSensors } from './useDeviceSensors';
@@ -39,16 +61,16 @@ import type { DeviceSensors } from './useDeviceSensors';
  * change which way the line tilts, which is what this screen is really for.
  */
 const LENS_PRESETS: readonly { label: string; focalLength35mm: number }[] = [
-  { label: 'Ultra-wide · 13 mm', focalLength35mm: 13 },
-  { label: 'Main · 26 mm', focalLength35mm: 26 },
-  { label: 'Tele · 77 mm', focalLength35mm: 77 },
+  { label: '13 mm', focalLength35mm: 13 },
+  { label: '26 mm', focalLength35mm: 26 },
+  { label: '77 mm', focalLength35mm: 77 },
 ];
 
 /** Bearings marked along the horizon, degrees. */
 const TICK_STEP_DEG = 15;
 
 function cardinal(bearingDeg: number): string {
-  const normalised = ((bearingDeg % 360) + 360) % 360;
+  const normalised = ((Math.round(bearingDeg) % 360) + 360) % 360;
   const names: Record<number, string> = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' };
   return names[normalised] ?? `${normalised}`;
 }
@@ -102,40 +124,84 @@ function tickPoints(pose: CameraPose, widthPx: number, heightPx: number): Screen
   return points;
 }
 
-function answerText(answer: SensorAnswer, unit = '°'): string {
+function answerText(answer: SensorAnswer): string {
   if (!answer.ok) return answer.refusal;
   const spread = answer.field.spreadDeg;
-  return (
-    `${answer.field.valueDeg.toFixed(2)}${unit}` +
-    (spread === undefined ? '' : ` ±${spread.toFixed(2)}`)
-  );
+  return `${answer.field.valueDeg.toFixed(1)}°` + (spread === undefined ? '' : ` ±${spread.toFixed(1)}`);
 }
 
 export function HorizonScreen({ sensors }: { sensors: DeviceSensors }) {
   const [permission, requestPermission] = useCameraPermissions();
   const [lensIndex, setLensIndex] = useState(1);
   const [size, setSize] = useState({ width: 0, height: 0 });
+  const [trim, setTrim] = useState<TrimState>(NO_TRIM);
 
-  const lens = LENS_PRESETS[lensIndex] ?? LENS_PRESETS[1];
+  // The gesture reads the frame and lens through refs so the PanResponder can
+  // be built once. Rebuilding it per render loses the in-flight gesture.
+  const trimAtGestureStart = useRef<TrimState>(NO_TRIM);
+  const trimRef = useRef<TrimState>(NO_TRIM);
+  const frameRef = useRef({ widthPx: 0, heightPx: 0 });
+  const fovRef = useRef({ hFovDeg: 60, vFovDeg: 90 });
+  trimRef.current = trim;
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_event, gesture) =>
+          Math.abs(gesture.dx) > 2 || Math.abs(gesture.dy) > 2,
+        onPanResponderGrant: () => {
+          trimAtGestureStart.current = trimRef.current;
+        },
+        onPanResponderMove: (_event, gesture) => {
+          // `gesture.dx/dy` are cumulative from the gesture's start, so the
+          // base is the trim as it was then — not the previous frame's, which
+          // would integrate the same movement over and over.
+          setTrim(
+            trimFromDrag(
+              trimAtGestureStart.current,
+              { dx: gesture.dx, dy: gesture.dy },
+              frameRef.current,
+              fovRef.current,
+            ),
+          );
+        },
+      }),
+    [],
+  );
+
   const onLayout = (event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;
     setSize({ width, height });
+    frameRef.current = { widthPx: width, heightPx: height };
   };
 
+  const lens = LENS_PRESETS[lensIndex] ?? LENS_PRESETS[1];
   const ready = size.width > 0 && size.height > 0 && lens !== undefined;
-  const base: CameraPose | undefined = ready
-    ? cameraPoseFromFocalLength({
-        headingDeg: 0,
-        focalLength35mm: lens.focalLength35mm,
-        imageWidthPx: size.width,
-        imageHeightPx: size.height,
-      })
-    : undefined;
-  const applied = base ? poseWithSensors(base, sensors.pose) : undefined;
-  // Every angle the sensors refused keeps the base pose's value, so a partial
-  // answer still draws — but the readout below names what was assumed.
-  const pose = applied?.pose;
-  const canDraw = pose !== undefined && applied !== undefined && applied.applied.includes('heading');
+
+  // The heading is resolved through the policy module, which prefers true
+  // north, converts with a declination when one exists, and only then falls
+  // back to a labelled magnetic bearing.
+  const headingDecision = resolveHeadingForDrawing(
+    sensors.headingSamples,
+    sensors.atMs,
+    sensors.declinationDeg === undefined ? {} : { declinationDeg: sensors.declinationDeg },
+  );
+
+  let pose: CameraPose | undefined;
+  if (ready && lens && headingDecision.ok) {
+    const base = cameraPoseFromFocalLength({
+      headingDeg: headingDecision.heading.headingDeg,
+      focalLength35mm: lens.focalLength35mm,
+      imageWidthPx: size.width,
+      imageHeightPx: size.height,
+    });
+    fovRef.current = { hFovDeg: base.hFovDeg, vFovDeg: base.vFovDeg };
+    // Only pitch and roll come from `poseWithSensors` here — the heading is
+    // already the policy's answer, and letting the raw fusion overwrite it
+    // would put an unlabelled bearing back on screen.
+    const oriented = poseWithSensors(base, { ...sensors.pose, heading: { ok: false, refusal: 'no-samples' } });
+    pose = applyTrim(oriented.pose, trim);
+  }
 
   if (!permission) {
     return (
@@ -159,20 +225,22 @@ export function HorizonScreen({ sensors }: { sensors: DeviceSensors }) {
     );
   }
 
-  const horizon = pose && ready ? horizonPoints(pose, size.width, size.height) : [];
-  const ticks = pose && ready ? tickPoints(pose, size.width, size.height) : [];
+  const horizon = pose ? horizonPoints(pose, size.width, size.height) : [];
+  const ticks = pose ? tickPoints(pose, size.width, size.height) : [];
+  const magnetic = headingDecision.ok && headingDecision.heading.basis === 'magnetic';
 
   return (
     <View style={styles.screen}>
-      <View style={{ flex: 1 }} onLayout={onLayout}>
+      <View style={{ flex: 1 }} onLayout={onLayout} {...panResponder.panHandlers}>
         <CameraView style={StyleSheet.absoluteFill} facing="back" />
-        {canDraw && horizon.length > 1 ? (
-          <Svg style={StyleSheet.absoluteFill}>
+        {horizon.length > 1 ? (
+          <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
             <Polyline
               points={horizon.map((p) => `${p.x},${p.y}`).join(' ')}
               fill="none"
-              stroke={colors.accent}
+              stroke={magnetic ? colors.warn : colors.accent}
               strokeWidth={2}
+              strokeDasharray={magnetic ? '10,6' : undefined}
             />
             {ticks.map((tick) => (
               <Fragment key={tick.bearingDeg}>
@@ -181,7 +249,7 @@ export function HorizonScreen({ sensors }: { sensors: DeviceSensors }) {
                   y1={tick.y - 10}
                   x2={tick.x}
                   y2={tick.y + 10}
-                  stroke={colors.accent}
+                  stroke={magnetic ? colors.warn : colors.accent}
                   strokeWidth={2}
                 />
                 <SvgText x={tick.x} y={tick.y - 16} fill={colors.text} fontSize={12} textAnchor="middle">
@@ -196,18 +264,40 @@ export function HorizonScreen({ sensors }: { sensors: DeviceSensors }) {
 
       <View style={[styles.panel, { margin: 12 }]}>
         <View style={styles.row}>
-          <Text style={styles.mono}>heading {answerText(sensors.pose.heading)}</Text>
+          <Text style={styles.mono}>
+            {headingDecision.ok
+              ? `${headingDecision.heading.basis === 'true' ? 'true' : 'MAG'} ${headingDecision.heading.headingDeg.toFixed(1)}°`
+              : `heading: ${headingDecision.refusal}`}
+          </Text>
           <Text style={styles.mono}>pitch {answerText(sensors.pose.pitch)}</Text>
           <Text style={styles.mono}>roll {answerText(sensors.pose.roll)}</Text>
         </View>
-        {!canDraw ? (
-          <Text style={{ color: colors.warn, fontSize: 12 }}>
-            No line drawn: a true heading is required, and the compass has not supplied one.
-            {sensors.locationPermission !== 'granted'
-              ? ' Location permission is not granted, so Core Location reports true north as unavailable rather than guessing it.'
-              : ''}
+
+        {headingDecision.ok && headingDecision.heading.caveat ? (
+          <Text style={{ color: colors.warn, fontSize: 12, lineHeight: 17 }}>
+            {headingDecision.heading.caveat}
           </Text>
         ) : null}
+        {!headingDecision.ok ? (
+          <Text style={{ color: colors.warn, fontSize: 12, lineHeight: 17 }}>
+            No line drawn — {headingDecision.detail}.
+          </Text>
+        ) : null}
+
+        <View style={styles.row}>
+          <Text style={styles.p}>
+            {isUntrimmed(trim)
+              ? 'Drag the overlay to line it up with what you can see.'
+              : `nudged ${trim.headingDeg >= 0 ? '+' : ''}${trim.headingDeg.toFixed(1)}° across, ` +
+                `${trim.pitchDeg >= 0 ? '+' : ''}${trim.pitchDeg.toFixed(1)}° up`}
+          </Text>
+          {!isUntrimmed(trim) ? (
+            <Pressable style={styles.buttonGhost} onPress={() => setTrim(NO_TRIM)}>
+              <Text style={[styles.buttonGhostText, { fontSize: 11 }]}>Reset</Text>
+            </Pressable>
+          ) : null}
+        </View>
+
         <View style={styles.row}>
           {LENS_PRESETS.map((preset, index) => (
             <Pressable
@@ -219,11 +309,6 @@ export function HorizonScreen({ sensors }: { sensors: DeviceSensors }) {
             </Pressable>
           ))}
         </View>
-        <Text style={styles.p}>
-          The lens is an assumption, not a measurement — it scales how far the line spreads across
-          the frame, but not which way it tilts. Tilt the phone: the line must stay on the real
-          horizon.
-        </Text>
       </View>
     </View>
   );

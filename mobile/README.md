@@ -86,10 +86,30 @@ hardware which camera is active. It scales how far the line spreads across the
 frame; it does not change which way the line tilts, which is what the screen is
 for.
 
-If the compass has not produced a **true** heading, no line is drawn and the
-screen says why. Without a location fix, Core Location reports `trueHeading` as
-`−1`, and treating magnetic north as true is worth 10–20° in the mountains —
-the same refusal `src/exif/resolve.ts` enforces on photographs.
+**Drag the overlay to line it up.** This is D9's interaction, the one the web
+app gives you as sliders: push the horizon with a finger until it sits on the
+real one. The gesture writes the same visible `TrimState` the sliders write and
+stops at the same limits (±30° across, ±20° up), and the panel reports how far
+you nudged it. Nothing is ever corrected behind your back.
+
+The drag geometry inverts the projection properly rather than assuming degrees
+are linear in pixels — a portrait frame's vertical field is around 108°, where
+the naive `fov ÷ pixels` scale lags your finger by 46%. See
+`src/live/drag-trim.ts`.
+
+### True north, magnetic north, and why the line still draws
+
+If the compass has a **true** heading, the line is solid blue. If it only has a
+**magnetic** one — Core Location reports `trueHeading` as `−1` without a
+location fix — the line is drawn **amber and dashed**, labelled `MAG`, with the
+error named on screen.
+
+An earlier version refused to draw at all in that case. That was the magnetic
+rule applied past its purpose. The rule forbids treating magnetic as true
+*silently*; refusing to draw denies you the one gesture that actually fixes the
+heading, and denies it hardest when the error is largest. Declination is
+bounded, systematic and well inside the ±30° drag range, so the honest answer
+is: draw it, say plainly what it is, let you push it into place.
 
 ## What is checked here, and what is not
 
@@ -119,9 +139,19 @@ index.js                   registerRootComponent
 metro.config.js            reaches outside this folder to import /src unchanged
 src/useDeviceSensors.ts    the ONLY file that touches a device API
 src/CalibrateScreen.tsx    collects taps; all judgement is in /src/live/calibration.ts
-src/HorizonScreen.tsx      camera + the real projection code
+src/HorizonScreen.tsx      camera + the real projection code + the drag gesture
 src/theme.ts               colours and styles
 ```
+
+The geometry and policy behind both screens are pure modules in the shared
+tree, tested here rather than on a phone:
+
+| Module | What it decides |
+|---|---|
+| `src/live/calibration.ts` | whether the holds confirm the frame convention, and which axis map is wrong if not |
+| `src/live/device-samples.ts` | Expo's payloads → the documented sample types (X-7) |
+| `src/live/heading-policy.ts` | whether a heading may be drawn, and whether it may be called true |
+| `src/live/drag-trim.ts` | how far a finger moves the overlay |
 
 `useDeviceSensors.ts` is the whole impure surface. Everything it produces goes
 straight into the pure modules: if a pitch is wrong, the bug is in a module

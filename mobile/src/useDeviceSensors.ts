@@ -55,6 +55,16 @@ export interface SensorSnapshot {
   readonly headingCount: number;
   /** True when the newest gravity vector had user acceleration mixed in. */
   readonly moving: boolean;
+  /**
+   * The heading trace and the instant this snapshot was taken.
+   *
+   * Exposed because `resolveHeadingForDrawing` has to re-run the smoothing to
+   * decide between a true and a magnetic answer, and it must do so against the
+   * SAME instant `pose` was fused at. Handing out `Date.now()` at the call site
+   * instead would drift the two apart by a render.
+   */
+  readonly headingSamples: readonly HeadingSample[];
+  readonly atMs: number;
 }
 
 export interface DeviceSensors extends SensorSnapshot {
@@ -98,6 +108,8 @@ export function useDeviceSensors(declinationDeg?: number): DeviceSensors {
     gravityCount: 0,
     headingCount: 0,
     moving: false,
+    headingSamples: [],
+    atMs: 0,
   });
 
   // ── Device motion ────────────────────────────────────────────────────────
@@ -185,6 +197,8 @@ export function useDeviceSensors(declinationDeg?: number): DeviceSensors {
         gravityCount: gravityTrace.current.length,
         headingCount: headingTrace.current.length,
         moving: latestGravity.current?.contaminated ?? false,
+        headingSamples: headingTrace.current,
+        atMs: nowMs,
       });
     }, PUBLISH_INTERVAL_MS);
     return () => clearInterval(timer);
