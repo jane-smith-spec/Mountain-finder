@@ -66,6 +66,48 @@ plain `npm install` above stays as small and as verified as it is.)
 
 Local-network mode without `--tunnel` will not work from a Codespace.
 
+### "Project is incompatible with this version of Expo Go"
+
+Expo Go supports **one SDK at a time** — whichever the App Store build was cut
+for. This project is pinned to the newest (SDK 57), which is wrong for any
+phone whose Expo Go is older, and a phone stuck on an older iOS cannot install
+a newer Expo Go however many times you check for updates.
+
+**First, delete Expo Go and reinstall it.** The App Store will happily show
+"Open" on a stale build when an update exists, and a reinstall is 30 seconds.
+
+If it still refuses, the error names the SDK it wants — *"the installed version
+of Expo Go is for SDK 54"*. Match the project to it:
+
+```sh
+cd mobile
+npm install expo@~54.0.0     # substitute the number Expo Go reported
+npx expo install --fix       # realigns every expo-* package to that SDK
+```
+
+`expo install --fix` needs network access to Expo's API, which any normal
+machine or Codespace has. If it is unavailable, pin by hand from this table —
+these are the versions Expo itself bundles for each SDK, read from
+`expo/bundledNativeModules.json`:
+
+| | SDK 54 | SDK 55 | SDK 56 | SDK 57 |
+|---|---|---|---|---|
+| `expo` | ~54.0.37 | ~55.0.29 | ~56.0.20 | ~57.0.14 |
+| `expo-sensors` | ~15.0.8 | ~55.0.18 | ~56.0.6 | ~57.0.2 |
+| `expo-location` | ~19.0.8 | ~55.1.13 | ~56.0.24 | ~57.0.11 |
+| `expo-camera` | ~17.0.10 | ~55.0.22 | ~56.0.8 | ~57.0.3 |
+| `expo-status-bar` | ~3.0.9 | ~55.0.6 | ~56.0.4 | ~57.0.1 |
+| `react-native` | 0.81.5 | 0.83.10 | 0.85.3 | 0.86.2 |
+| `react` / `@types/react` | ^19.1.0 | ^19.1.0 | ^19.2.3 | ^19.2.3 |
+| `react-native-svg` | 15.12.1 | 15.15.3 | 15.15.4 | 15.15.4 |
+| `react-native-safe-area-context` | ~5.6.0 | ~5.6.2 | ~5.7.0 | ~5.7.0 |
+
+**No source change is needed for any of these.** Verified by actually doing it:
+the app was downgraded to SDK 54 — the largest jump in the table — and bundled
+clean at 743 modules with not one line of application code touched. Everything
+this shell uses (`CameraView`, `DeviceMotion`, `watchHeadingAsync`,
+`PanResponder`, `react-native-svg`) has been stable across all four.
+
 ### What GitHub Actions can and cannot do
 
 **It cannot serve the app to your phone.** Actions is headless CI — no QR code

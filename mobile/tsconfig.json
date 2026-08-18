@@ -12,5 +12,13 @@
     "jsx": "react-jsx"
   },
   "include": ["**/*.ts", "**/*.tsx", "../src/live/**/*.ts", "../src/core/**/*.ts"],
-  "exclude": ["node_modules"]
+  // Test files are excluded, and not for tidiness. They import `vitest` and
+  // `fixtures/`, which live in the ROOT install — so including them made this
+  // typecheck silently depend on `npm install` having been run at the
+  // repository root as well. That is false everywhere it matters: a fresh
+  // clone, a Codespace, and the CI job all install only `mobile/`, and the
+  // app bundles perfectly well without the root (verified: 750 modules, no
+  // root node_modules present). The tests are typechecked by the root's own
+  // `npm run typecheck`, which is where they belong.
+  "exclude": ["node_modules", "../src/**/*.test.ts"]
 }
