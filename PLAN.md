@@ -23,7 +23,7 @@ product after v2.0 shipped.
 | 9 — Peak coverage | ✅ **done** | 9 237 Overture summits in 5 regions (read by the app since Q8); P9.4's open question answered — elevations exist |
 | 10 — Deployment | ✅ **done** | `npm run test:deploy`, 5 assertions, every request same-origin |
 | **7 — CV alignment (v2.1)** | 🔨 **in progress** | P7.1–P7.4 built and proved; **P7.4 wired into the app 2026-08-17** (auto-align proposal + Apply, refusals shown). Under the CV-10 policies the aligner recovers heading to **0.21°** — better than the phone's compass — and pitch to **0.82°** on the real frame with a solved pose. P7.5 remains: the sky/snow cue for wide frames ([CV-2, CV-8, CV-10](docs/FINDINGS.md)) |
-| **8 — Live view (v3)** | ⛔ **not started** | No code exists. Deferred by decision D5, after v2.1 |
+| **8 — Live view (v3)** | 🔨 **engine started** | P8.2's pure engine exists (`src/live/sensors.ts`, 16 tests, 2026-08-17): gravity → pitch/roll, circular heading smoothing, declination discipline, five named refusals. The Expo shell (P8.1) is deliberately not scaffolded in an environment where its self-check cannot run; a device-recorded trace completes P8.2's own bar |
 
 Open work is tracked in [TODO.md](TODO.md); every confirmed finding is indexed in
 [docs/FINDINGS.md](docs/FINDINGS.md).
