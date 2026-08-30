@@ -24,3 +24,8 @@ scratch/
 
 # Expo dev-server + build caches
 mobile/.expo/
+
+# Expo prebuild output. `npx expo run:ios` generates these native projects from
+# app.json; they are build artefacts, not sources, and regenerate on demand.
+mobile/ios/
+mobile/android/
